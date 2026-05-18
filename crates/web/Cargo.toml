@@ -26,3 +26,14 @@ cookie = { workspace = true }
 blake3 = { workspace = true }
 hex = "0.4"
 dashmap = "6"
+
+[dev-dependencies]
+stomatopod-store = { path = "../store" }
+tokio = { workspace = true }
+tower = { version = "0.4", features = ["util"] }
+tempfile = { workspace = true }
+http-body-util = { workspace = true }
+argon2 = { workspace = true }
+serde_json = { workspace = true }
+bytes = { workspace = true }
+dashmap = "6"

@@ -120,3 +120,88 @@ fn is_private(ip: &IpAddr) -> bool {
         IpAddr::V6(v6) => v6.is_loopback(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderMap;
+    use std::net::SocketAddr;
+
+    #[test]
+    fn anonymize_ipv4_zeros_last_octet() {
+        assert_eq!(anonymize_ip("192.168.1.42"), "192.168.1.0");
+        assert_eq!(anonymize_ip("10.0.0.255"), "10.0.0.0");
+        assert_eq!(anonymize_ip("8.8.8.8"), "8.8.8.0");
+    }
+
+    #[test]
+    fn anonymize_ipv6_zeros_last_80_bits() {
+        let result = anonymize_ip("2001:db8:1234:5678:9abc:def0:1234:5678");
+        let addr: std::net::Ipv6Addr = result.parse().unwrap();
+        let segs = addr.segments();
+        // First 3 groups (48 bits) preserved, rest zeroed
+        assert_eq!(segs[0], 0x2001);
+        assert_eq!(segs[1], 0x0db8);
+        assert_eq!(segs[2], 0x1234);
+        assert_eq!(segs[3], 0);
+        assert_eq!(segs[7], 0);
+    }
+
+    #[test]
+    fn anonymize_invalid_ip_returns_original() {
+        assert_eq!(anonymize_ip("not-an-ip"), "not-an-ip");
+        assert_eq!(anonymize_ip(""), "");
+    }
+
+    #[test]
+    fn extract_ip_prefers_cloudflare_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert("CF-Connecting-IP", "1.2.3.4".parse().unwrap());
+        headers.insert("X-Real-IP", "5.6.7.8".parse().unwrap());
+        let peer = SocketAddr::from(([127, 0, 0, 1], 1234));
+        assert_eq!(extract_ip(&headers, peer), "1.2.3.4");
+    }
+
+    #[test]
+    fn extract_ip_falls_back_to_x_real_ip() {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Real-IP", "5.6.7.8".parse().unwrap());
+        let peer = SocketAddr::from(([127, 0, 0, 1], 1234));
+        assert_eq!(extract_ip(&headers, peer), "5.6.7.8");
+    }
+
+    #[test]
+    fn extract_ip_uses_first_public_xff_addr() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "X-Forwarded-For",
+            "10.0.0.1, 172.16.0.1, 203.0.113.42".parse().unwrap(),
+        );
+        let peer = SocketAddr::from(([127, 0, 0, 1], 1234));
+        // 10.0.0.1 and 172.16.0.1 are private, 203.0.113.42 is public
+        assert_eq!(extract_ip(&headers, peer), "203.0.113.42");
+    }
+
+    #[test]
+    fn extract_ip_falls_back_to_peer_addr() {
+        let headers = HeaderMap::new();
+        let peer = SocketAddr::from(([203, 0, 113, 1], 1234));
+        assert_eq!(extract_ip(&headers, peer), "203.0.113.1");
+    }
+
+    #[test]
+    fn geo_lookup_without_db_returns_empty() {
+        let geo = GeoLookup::new(None);
+        let info = geo.lookup("8.8.8.8");
+        assert!(info.country_code.is_none());
+        assert!(info.region.is_none());
+        assert!(info.city.is_none());
+    }
+
+    #[test]
+    fn geo_lookup_with_invalid_ip_returns_empty() {
+        let geo = GeoLookup::new(None);
+        let info = geo.lookup("not-an-ip");
+        assert!(info.country_code.is_none());
+    }
+}

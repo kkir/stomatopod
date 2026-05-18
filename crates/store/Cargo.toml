@@ -49,3 +49,7 @@ crc32fast = { workspace = true, optional = true }
 
 # ClickHouse backend
 reqwest = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = { workspace = true }
