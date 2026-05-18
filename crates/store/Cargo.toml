@@ -1,0 +1,51 @@
+[package]
+name = "stomatopod-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["embedded"]
+embedded = [
+    "dep:datafusion",
+    "dep:arrow",
+    "dep:parquet",
+    "dep:rusqlite",
+    "dep:crossbeam",
+    "dep:bincode",
+    "dep:zstd",
+    "dep:crc32fast",
+]
+postgres = []
+clickhouse = ["dep:reqwest"]
+
+[dependencies]
+stomatopod-core = { path = "../core" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+bytes = { workspace = true }
+blake3 = { workspace = true }
+ulid = { workspace = true }
+
+# Embedded backend
+datafusion = { workspace = true, optional = true }
+arrow = { workspace = true, optional = true }
+parquet = { workspace = true, optional = true }
+rusqlite = { workspace = true, optional = true }
+crossbeam = { workspace = true, optional = true }
+bincode = { workspace = true, optional = true }
+zstd = { workspace = true, optional = true }
+crc32fast = { workspace = true, optional = true }
+
+# Postgres backend (sqlx added when implementing)
+# sqlx = { workspace = true, optional = true }
+
+# ClickHouse backend
+reqwest = { workspace = true, optional = true }

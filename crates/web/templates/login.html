@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login — Stomatopod</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0f1117; color: #e2e8f0; font-family: system-ui, sans-serif; display: flex; min-height: 100vh; align-items: center; justify-content: center; }
+    .card { background: #1a1d27; border: 1px solid #2a2d3e; border-radius: 10px; padding: 2rem; width: 360px; }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 1.5rem; }
+    label { display: block; font-size: 12px; color: #8892a4; margin-bottom: 4px; }
+    input { width: 100%; background: #0f1117; border: 1px solid #2a2d3e; color: #e2e8f0; border-radius: 6px; padding: 8px 12px; font-size: 14px; margin-bottom: 1rem; }
+    button { width: 100%; background: #6366f1; color: #fff; border: none; border-radius: 6px; padding: 10px; font-size: 14px; cursor: pointer; }
+    .error { color: #ef4444; font-size: 13px; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Sign in</h1>
+    {% if error %}
+    <p class="error">{{ error }}</p>
+    {% endif %}
+    <form method="post" action="/login">
+      <label>Email</label>
+      <input type="email" name="email" required autofocus>
+      <label>Password</label>
+      <input type="password" name="password" required>
+      <button type="submit">Sign in</button>
+    </form>
+  </div>
+</body>
+</html>

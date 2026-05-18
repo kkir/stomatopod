@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}{{ site.name }} — Stomatopod{% endblock %}
+{% block content %}
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem">
+  <div>
+    <h1 style="font-size:18px;font-weight:700">{{ site.name }}</h1>
+    <a href="{{ site.domain }}" style="color:#8892a4;font-size:12px">{{ site.domain }}</a>
+  </div>
+  <div class="range-tabs">
+    <a href="?range=7d" class="{% if range == '7d' %}active{% endif %}">7d</a>
+    <a href="?range=30d" class="{% if range == '30d' or not range %}active{% endif %}">30d</a>
+    <a href="?range=90d" class="{% if range == '90d' %}active{% endif %}">90d</a>
+    <a href="?range=12m" class="{% if range == '12m' %}active{% endif %}">12m</a>
+  </div>
+</div>
+
+<div class="tabs" style="margin-bottom:1.5rem">
+  <a href="/sites/{{ site.id }}?range={{ range }}" class="active">Overview</a>
+  <a href="/sites/{{ site.id }}/events?range={{ range }}">Events</a>
+  <a href="/sites/{{ site.id }}/funnels?range={{ range }}">Funnels</a>
+</div>
+
+<!-- Stats summary -->
+<div class="stat-grid card" style="margin-bottom:1rem">
+  <div class="stat">
+    <div class="label">Pageviews</div>
+    <div class="value">{{ total_pageviews }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Sessions</div>
+    <div class="value">{{ total_sessions }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Bounce Rate</div>
+    <div class="value">{{ bounce_rate }}</div>
+  </div>
+</div>
+
+<!-- SVG Line Chart (server-rendered) -->
+{% if buckets %}
+<div class="card" style="margin-bottom:1rem">
+  <div style="margin-bottom:.75rem;font-size:13px;color:#8892a4">Pageviews over time</div>
+  {% set max_pv = buckets | map(attribute="pageviews") | max | default(1) %}
+  <svg viewBox="0 0 800 120" preserveAspectRatio="none" style="width:100%;height:120px">
+    {% set n = buckets | length %}
+    {% if n > 1 %}
+      {% set pts = [] %}
+      {% for b in buckets %}
+        {% set x = (loop.index0 / (n - 1)) * 800 %}
+        {% set y = 120 - (b.pageviews / max_pv) * 110 %}
+        {% set _ = pts.append(x ~ "," ~ y) %}
+      {% endfor %}
+      <polyline
+        points="{{ pts | join(' ') }}"
+        fill="none"
+        stroke="#6366f1"
+        stroke-width="2"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+      />
+    {% endif %}
+  </svg>
+</div>
+{% endif %}
+
+<!-- Top tables grid -->
+<div class="grid-2" style="gap:1rem">
+  <div class="card">
+    <div class="section-header"><h2>Top Pages</h2></div>
+    <table>
+      <thead><tr><th>Page</th><th>Views</th><th>%</th></tr></thead>
+      <tbody>
+        {% for row in top_pages %}
+        <tr>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ row.value }}</td>
+          <td>{{ row.pageviews }}</td>
+          <td>
+            <div class="bar-cell">
+              <div class="bar" style="width:{{ [row.pct, 100] | min }}%"></div>
+              {{ "%.1f" | format(row.pct) }}%
+            </div>
+          </td>
+        </tr>
+        {% else %}<tr><td colspan="3" style="color:#8892a4">No data</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="section-header"><h2>Top Referrers</h2></div>
+    <table>
+      <thead><tr><th>Source</th><th>Visitors</th><th>%</th></tr></thead>
+      <tbody>
+        {% for row in top_referrers %}
+        <tr>
+          <td>{{ row.value }}</td>
+          <td>{{ row.sessions }}</td>
+          <td>
+            <div class="bar-cell">
+              <div class="bar" style="width:{{ [row.pct, 100] | min }}%"></div>
+              {{ "%.1f" | format(row.pct) }}%
+            </div>
+          </td>
+        </tr>
+        {% else %}<tr><td colspan="3" style="color:#8892a4">No data</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="section-header"><h2>Countries</h2></div>
+    <table>
+      <thead><tr><th>Country</th><th>Visitors</th><th>%</th></tr></thead>
+      <tbody>
+        {% for row in top_countries %}
+        <tr>
+          <td>{{ row.value }}</td>
+          <td>{{ row.sessions }}</td>
+          <td>
+            <div class="bar-cell">
+              <div class="bar" style="width:{{ [row.pct, 100] | min }}%"></div>
+              {{ "%.1f" | format(row.pct) }}%
+            </div>
+          </td>
+        </tr>
+        {% else %}<tr><td colspan="3" style="color:#8892a4">No data</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="section-header"><h2>Browsers &amp; Devices</h2></div>
+    <table>
+      <thead><tr><th>Browser</th><th>Visitors</th><th>%</th></tr></thead>
+      <tbody>
+        {% for row in top_browsers %}
+        <tr>
+          <td>{{ row.value }}</td>
+          <td>{{ row.sessions }}</td>
+          <td>
+            <div class="bar-cell">
+              <div class="bar" style="width:{{ [row.pct, 100] | min }}%"></div>
+              {{ "%.1f" | format(row.pct) }}%
+            </div>
+          </td>
+        </tr>
+        {% else %}<tr><td colspan="3" style="color:#8892a4">No data</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
