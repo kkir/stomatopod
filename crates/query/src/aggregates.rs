@@ -1,3 +1,5 @@
+use std::cmp::Reverse;
+
 use stomatopod_core::query::pageviews::{TopList, TopRow};
 
 /// Compute percentage share for each row and sort by pageviews descending.
@@ -8,6 +10,6 @@ pub fn compute_percentages(mut rows: Vec<TopRow>) -> TopList {
             row.pct = (row.pageviews as f64 / total as f64) * 100.0;
         }
     }
-    rows.sort_unstable_by(|a, b| b.pageviews.cmp(&a.pageviews));
+    rows.sort_unstable_by_key(|r| Reverse(r.pageviews));
     TopList { rows }
 }
