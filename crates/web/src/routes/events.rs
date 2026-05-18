@@ -1,6 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
-    response::IntoResponse,
+    http::StatusCode,
+    response::{IntoResponse, Response},
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -25,16 +26,20 @@ pub async fn events_list(
     State(state): State<Arc<AppState>>,
     Path(site_id_str): Path<String>,
     Query(params): Query<EventsQuery>,
-) -> impl IntoResponse {
+) -> Response {
     let site_id = match Ulid::from_string(&site_id_str) {
         Ok(id) => id,
-        Err(_) => return axum::response::Html("<p>Invalid site ID</p>".into()),
+        Err(_) => {
+            return (StatusCode::BAD_REQUEST, axum::response::Html("<p>Invalid site ID</p>".to_string()))
+                .into_response()
+        }
     };
 
     let days: i64 = match params.range.as_str() {
         "7d" => 7,
         "30d" => 30,
         "90d" => 90,
+        "12m" => 365,
         _ => 30,
     };
 
@@ -47,7 +52,13 @@ pub async fn events_list(
     };
 
     let result = state.backend.query_custom_events(&q).await.unwrap_or_default();
-    let site = state.meta.get_site(site_id).await.ok().flatten();
+    let site = match state.meta.get_site(site_id).await.ok().flatten() {
+        Some(s) => s,
+        None => {
+            return (StatusCode::NOT_FOUND, axum::response::Html("<p>Site not found</p>".to_string()))
+                .into_response()
+        }
+    };
 
     let tmpl = state.templates.get_template("events.html").unwrap();
     axum::response::Html(
@@ -58,4 +69,5 @@ pub async fn events_list(
         })
         .unwrap_or_else(|e| format!("<p>Template error: {e}</p>")),
     )
+    .into_response()
 }

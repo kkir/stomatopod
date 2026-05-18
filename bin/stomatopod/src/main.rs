@@ -143,6 +143,13 @@ fn load_config(path: &str) -> Result<Config> {
 
 fn build_templates() -> Result<JinjaEnv<'static>> {
     let mut env = JinjaEnv::new();
+    env.set_auto_escape_callback(|name| {
+        if name.ends_with(".html") {
+            minijinja::AutoEscape::Html
+        } else {
+            minijinja::AutoEscape::None
+        }
+    });
 
     // Embed templates at compile time
     env.add_template("base.html", include_str!("../../../crates/web/templates/base.html"))?;

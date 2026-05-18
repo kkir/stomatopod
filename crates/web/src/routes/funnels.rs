@@ -40,7 +40,10 @@ pub async fn funnels_page(
     };
 
     let funnels = state.meta.list_funnels(site_id).await.unwrap_or_default();
-    let site = state.meta.get_site(site_id).await.ok().flatten();
+    let site = match state.meta.get_site(site_id).await.ok().flatten() {
+        Some(s) => s,
+        None => return axum::response::Html("<p>Site not found</p>".into()),
+    };
 
     let tmpl = state.templates.get_template("funnels.html").unwrap();
     axum::response::Html(
@@ -88,7 +91,10 @@ pub async fn funnel_detail(
     };
 
     let result = state.backend.query_funnel(&q).await.unwrap_or_default();
-    let site = state.meta.get_site(site_id).await.ok().flatten();
+    let site = match state.meta.get_site(site_id).await.ok().flatten() {
+        Some(s) => s,
+        None => return axum::response::Html("<p>Site not found</p>".into()),
+    };
 
     let tmpl = state.templates.get_template("funnels.html").unwrap();
     axum::response::Html(

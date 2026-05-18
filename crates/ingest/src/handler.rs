@@ -200,28 +200,33 @@ fn extract_utm(url: &str) -> UtmParams {
 }
 
 fn urlencoding_decode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
     let bytes = s.as_bytes();
+    let mut decoded: Vec<u8> = Vec::with_capacity(s.len());
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Ok(hi), Ok(lo)) = (
-                std::str::from_utf8(&bytes[i + 1..i + 2]),
-                std::str::from_utf8(&bytes[i + 2..i + 3]),
-            ) {
-                if let Ok(byte) = u8::from_str_radix(&format!("{hi}{lo}"), 16) {
-                    out.push(byte as char);
-                    i += 3;
-                    continue;
-                }
+            let hex = &bytes[i + 1..i + 3];
+            if let (Some(hi), Some(lo)) = (from_hex(hex[0]), from_hex(hex[1])) {
+                decoded.push((hi << 4) | lo);
+                i += 3;
+                continue;
             }
         } else if bytes[i] == b'+' {
-            out.push(' ');
+            decoded.push(b' ');
             i += 1;
             continue;
         }
-        out.push(bytes[i] as char);
+        decoded.push(bytes[i]);
         i += 1;
     }
-    out
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+fn from_hex(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }

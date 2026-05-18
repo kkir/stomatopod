@@ -105,13 +105,13 @@ impl EmbeddedReader {
         let sql = format!(
             r#"
             SELECT
-                date_trunc('{granularity_fn}', to_timestamp_micros(timestamp)) AS bucket,
+                date_trunc('{granularity_fn}', timestamp) AS bucket,
                 COUNT(*) FILTER (WHERE kind = 'pageview') AS pageviews,
                 COUNT(DISTINCT session_id) AS sessions
             FROM {table}
             WHERE site_id = '{site_id}'
-              AND timestamp >= {start}
-              AND timestamp <= {end}
+              AND timestamp >= to_timestamp_micros({start})
+              AND timestamp <= to_timestamp_micros({end})
             GROUP BY 1
             ORDER BY 1
             "#
@@ -222,8 +222,8 @@ impl EmbeddedReader {
                 COUNT(DISTINCT session_id) AS sessions
             FROM {table}
             WHERE site_id = '{site_id_str}'
-              AND timestamp >= {start}
-              AND timestamp <= {end}
+              AND timestamp >= to_timestamp_micros({start})
+              AND timestamp <= to_timestamp_micros({end})
               AND kind = 'pageview'
             GROUP BY 1
             ORDER BY pageviews DESC
@@ -284,7 +284,7 @@ impl EmbeddedReader {
         let name_filter = q
             .event_name
             .as_deref()
-            .map(|n| format!("AND name = '{n}'"))
+            .map(|n| format!("AND name = '{}'", n.replace('\'', "''")))
             .unwrap_or_default();
 
         let sql = format!(
@@ -295,8 +295,8 @@ impl EmbeddedReader {
                 COUNT(DISTINCT session_id) AS sessions
             FROM {table}
             WHERE site_id = '{site_id_str}'
-              AND timestamp >= {start}
-              AND timestamp <= {end}
+              AND timestamp >= to_timestamp_micros({start})
+              AND timestamp <= to_timestamp_micros({end})
               AND kind = 'custom'
               {name_filter}
             GROUP BY 1
@@ -337,8 +337,8 @@ impl EmbeddedReader {
                 SELECT COUNT(DISTINCT session_id) AS sessions
                 FROM {table}
                 WHERE site_id = '{site_id_str}'
-                  AND timestamp >= {start}
-                  AND timestamp <= {end}
+                  AND timestamp >= to_timestamp_micros({start})
+                  AND timestamp <= to_timestamp_micros({end})
                   AND name = '{}'
                 "#,
                 step.event_name.replace('\'', "''")

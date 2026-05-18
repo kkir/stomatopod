@@ -75,6 +75,7 @@ impl MetaStore for PostgresBackend {
     async fn create_site(&self, _site: &Site) -> Result<(), StoreError> { todo!() }
     async fn get_site(&self, _id: Ulid) -> Result<Option<Site>, StoreError> { todo!() }
     async fn get_site_by_key(&self, _public_key: &str) -> Result<Option<Site>, StoreError> { todo!() }
+    async fn get_site_by_domain(&self, _domain: &str) -> Result<Option<Site>, StoreError> { todo!() }
     async fn list_sites(&self, _org_id: Ulid) -> Result<Vec<Site>, StoreError> { todo!() }
     async fn delete_site(&self, _id: Ulid) -> Result<(), StoreError> { todo!() }
     async fn create_org(&self, _org: &Organization) -> Result<(), StoreError> { todo!() }

@@ -38,7 +38,18 @@ pub async fn login_submit(
         }
     };
 
-    let hash = PasswordHash::new(&user.password_hash).unwrap();
+    let hash = match PasswordHash::new(&user.password_hash) {
+        Ok(h) => h,
+        Err(_) => {
+            // Malformed hash in DB — treat as credential failure
+            let tmpl = state.templates.get_template("login.html").unwrap();
+            return axum::response::Html(
+                tmpl.render(minijinja::context! { error => "Invalid credentials" })
+                    .unwrap(),
+            )
+            .into_response();
+        }
+    };
     if Argon2::default()
         .verify_password(form.password.as_bytes(), &hash)
         .is_err()
@@ -51,11 +62,15 @@ pub async fn login_submit(
         .into_response();
     }
 
-    // Set session cookie
+    // Set signed session cookie — value is "{user_id}.{hmac}" so it can't be forged
+    let session_value = crate::middleware::auth::sign_session(
+        &state.config.auth.secret_key,
+        &user.id.to_string(),
+    );
     let cookie = format!(
         "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
         crate::middleware::auth::SESSION_COOKIE,
-        user.id,
+        session_value,
         state.config.auth.session_ttl_s,
     );
 

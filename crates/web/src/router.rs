@@ -8,7 +8,10 @@ use axum::{
 use tower_http::{compression::CompressionLayer, trace::TraceLayer};
 
 use crate::{
-    middleware::{auth::require_auth, cors::ingest_cors},
+    middleware::{
+        auth::{require_api_auth, require_auth},
+        cors::ingest_cors,
+    },
     routes::{analytics, api, auth, dashboard, events, funnels, partials, sites},
     state::AppState,
 };
@@ -29,7 +32,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/sites/:site/events", get(analytics::events))
         .route("/api/v1/sites/:site/funnels", get(analytics::list_funnels))
         .route("/api/v1/sites/:site/funnels/:funnel_id", get(analytics::funnel_result))
-        .layer(middleware::from_fn_with_state(state.clone(), require_auth));
+        .layer(middleware::from_fn_with_state(state.clone(), require_api_auth));
 
     // Auth routes (no auth required)
     let auth_routes = Router::new()

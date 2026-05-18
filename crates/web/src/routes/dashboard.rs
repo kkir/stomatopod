@@ -1,6 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
-    response::IntoResponse,
+    http::StatusCode,
+    response::{IntoResponse, Redirect, Response},
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -21,7 +22,7 @@ fn default_range() -> String {
     "30d".into()
 }
 
-pub async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn index(State(state): State<Arc<AppState>>) -> Response {
     let sites = match state.meta.list_orgs().await {
         Ok(orgs) if !orgs.is_empty() => {
             state.meta.list_sites(orgs[0].id).await.unwrap_or_default()
@@ -33,24 +34,24 @@ pub async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         let tmpl = state.templates.get_template("index.html").unwrap();
         return axum::response::Html(
             tmpl.render(minijinja::context! { sites => [] as [i32;0] }).unwrap(),
-        );
+        )
+        .into_response();
     }
 
-    // Redirect to first site
-    axum::response::Html(format!(
-        r#"<meta http-equiv="refresh" content="0; url=/sites/{}">"#,
-        sites[0].id
-    ))
+    Redirect::to(&format!("/sites/{}", sites[0].id)).into_response()
 }
 
 pub async fn site_overview(
     State(state): State<Arc<AppState>>,
     Path(site_id_str): Path<String>,
     Query(params): Query<DashboardQuery>,
-) -> impl IntoResponse {
+) -> Response {
     let site_id = match Ulid::from_string(&site_id_str) {
         Ok(id) => id,
-        Err(_) => return axum::response::Html("<p>Invalid site ID</p>".into()),
+        Err(_) => {
+            return (StatusCode::BAD_REQUEST, axum::response::Html("<p>Invalid site ID</p>".to_string()))
+                .into_response()
+        }
     };
 
     let range = parse_range(&params.range);
@@ -64,11 +65,17 @@ pub async fn site_overview(
     let report = match fetch_dashboard(&state.backend, &query, 20).await {
         Ok(r) => r,
         Err(e) => {
-            return axum::response::Html(format!("<p>Query error: {e}</p>"));
+            return axum::response::Html(format!("<p>Query error: {e}</p>")).into_response()
         }
     };
 
-    let site = state.meta.get_site(site_id).await.ok().flatten();
+    let site = match state.meta.get_site(site_id).await.ok().flatten() {
+        Some(s) => s,
+        None => {
+            return (StatusCode::NOT_FOUND, axum::response::Html("<p>Site not found</p>".to_string()))
+                .into_response()
+        }
+    };
 
     let tmpl = state.templates.get_template("site.html").unwrap();
     let html = tmpl
@@ -87,7 +94,7 @@ pub async fn site_overview(
         })
         .unwrap_or_else(|e| format!("<p>Template error: {e}</p>"));
 
-    axum::response::Html(html)
+    axum::response::Html(html).into_response()
 }
 
 fn parse_range(range: &str) -> TimeRange {

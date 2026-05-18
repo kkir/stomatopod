@@ -23,7 +23,7 @@
       t: Date.now(),
     });
     if (navigator.sendBeacon) {
-      navigator.sendBeacon(endpoint, payload);
+      navigator.sendBeacon(endpoint, new Blob([payload], { type: 'application/json' }));
     } else {
       fetch(endpoint, { method: 'POST', body: payload, keepalive: true, headers: { 'Content-Type': 'application/json' } });
     }
