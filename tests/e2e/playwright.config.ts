@@ -8,12 +8,16 @@ const workspaceRoot = path.resolve(__dirname, "../..");
 const E2E_PORT = process.env.E2E_PORT ?? "18080";
 const BASE_URL = `http://localhost:${E2E_PORT}`;
 
-// Credentials injected into the server process for first-boot bootstrap.
-const SERVER_ENV = {
-  STOMATOPOD_AUTH__SECRET_KEY: "playwright-e2e-secret-key",
+// Credentials for the test server. In CI these come from the step environment;
+// the values here are fallbacks for local development.
+const SERVER_ENV: Record<string, string> = {
+  STOMATOPOD_AUTH__SECRET_KEY:
+    process.env.STOMATOPOD_AUTH__SECRET_KEY ?? "playwright-e2e-secret-key",
   STOMATOPOD_LISTEN__PORT: E2E_PORT,
-  STOMATOPOD_ADMIN_EMAIL: "admin@e2e.test",
-  STOMATOPOD_ADMIN_PASSWORD: "playwright-test-pw",
+  STOMATOPOD_ADMIN_EMAIL:
+    process.env.STOMATOPOD_ADMIN_EMAIL ?? "admin@e2e.test",
+  STOMATOPOD_ADMIN_PASSWORD:
+    process.env.STOMATOPOD_ADMIN_PASSWORD ?? "playwright-test-pw",
 };
 
 export default defineConfig({
