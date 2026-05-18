@@ -1,0 +1,12 @@
+# Configuration used by the Playwright E2E test server.
+# This file is intentionally committed — it contains only test credentials.
+
+[auth]
+secret_key = "playwright-e2e-secret-key"
+
+[listen]
+port = 18080
+
+[storage]
+backend = "embedded"
+data_dir = "./data/e2e"

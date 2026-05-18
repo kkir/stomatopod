@@ -8,12 +8,12 @@ const workspaceRoot = path.resolve(__dirname, "../..");
 const E2E_PORT = process.env.E2E_PORT ?? "18080";
 const BASE_URL = `http://localhost:${E2E_PORT}`;
 
-// Credentials for the test server. In CI these come from the step environment;
-// the values here are fallbacks for local development.
+// Config file (relative to workspaceRoot) that the test server reads.
+const E2E_CONFIG = "tests/e2e/stomatopod.toml";
+
+// Bootstrap env vars — not in the TOML so they stay out of source control
+// for real deployments; the values here are for the throwaway test instance.
 const SERVER_ENV: Record<string, string> = {
-  STOMATOPOD_AUTH__SECRET_KEY:
-    process.env.STOMATOPOD_AUTH__SECRET_KEY ?? "playwright-e2e-secret-key",
-  STOMATOPOD_LISTEN__PORT: E2E_PORT,
   STOMATOPOD_ADMIN_EMAIL:
     process.env.STOMATOPOD_ADMIN_EMAIL ?? "admin@e2e.test",
   STOMATOPOD_ADMIN_PASSWORD:
@@ -41,8 +41,8 @@ export default defineConfig({
   webServer: {
     // Use a pre-built binary (STOMATOPOD_BIN) in CI; fall back to cargo run locally.
     command: process.env.STOMATOPOD_BIN
-      ? `${process.env.STOMATOPOD_BIN} serve`
-      : "cargo run --bin stomatopod -- serve",
+      ? `${process.env.STOMATOPOD_BIN} --config ${E2E_CONFIG} serve`
+      : `cargo run --bin stomatopod -- --config ${E2E_CONFIG} serve`,
     url: `${BASE_URL}/login`,
     reuseExistingServer: !process.env.CI,
     // Allow up to 2 minutes for cargo to compile on a cold cache.

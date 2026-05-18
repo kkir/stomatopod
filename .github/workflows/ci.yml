@@ -139,8 +139,6 @@ jobs:
         env:
           CI: "true"
           STOMATOPOD_BIN: ${{ github.workspace }}/target/debug/stomatopod
-          STOMATOPOD_AUTH__SECRET_KEY: playwright-e2e-secret-key
-          STOMATOPOD_LISTEN__PORT: "18080"
           STOMATOPOD_ADMIN_EMAIL: admin@e2e.test
           STOMATOPOD_ADMIN_PASSWORD: playwright-test-pw
 
