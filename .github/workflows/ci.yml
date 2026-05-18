@@ -122,9 +122,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "npm"
+          cache-dependency-path: tests/e2e/package-lock.json
 
-      - name: Install Playwright
-        run: npm install -g @playwright/test
+      - name: Install Playwright and dependencies
+        run: npm ci
+        working-directory: tests/e2e
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
