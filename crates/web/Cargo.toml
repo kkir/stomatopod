@@ -1,0 +1,28 @@
+[package]
+name = "stomatopod-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+stomatopod-core = { path = "../core" }
+stomatopod-ingest = { path = "../ingest" }
+stomatopod-query = { path = "../query" }
+tokio = { workspace = true }
+axum = { workspace = true }
+axum-extra = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+minijinja = { workspace = true }
+ulid = { workspace = true }
+argon2 = { workspace = true }
+cookie = { workspace = true }
+blake3 = { workspace = true }
+hex = "0.4"
+dashmap = "6"

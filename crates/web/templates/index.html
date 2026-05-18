@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Sites — Stomatopod{% endblock %}
+{% block content %}
+<div class="section-header" style="margin-bottom:1.5rem">
+  <h1 style="font-size:20px;font-weight:700">Your Sites</h1>
+  <button class="btn btn-primary" onclick="document.getElementById('add-site').style.display='block'">+ Add Site</button>
+</div>
+
+<div id="add-site" style="display:none;margin-bottom:1.5rem">
+  <div class="card">
+    <h2 style="margin-bottom:1rem">Add a new site</h2>
+    <form method="post" action="/sites" style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end">
+      <div>
+        <label style="display:block;font-size:12px;color:#8892a4;margin-bottom:4px">Domain</label>
+        <input name="domain" placeholder="example.com" required>
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:#8892a4;margin-bottom:4px">Name</label>
+        <input name="name" placeholder="My Site" required>
+      </div>
+      <button type="submit" class="btn btn-primary">Create</button>
+    </form>
+  </div>
+</div>
+
+{% if sites %}
+<div style="display:grid;gap:.75rem">
+  {% for site in sites %}
+  <a href="/sites/{{ site.id }}" style="display:block;text-decoration:none">
+    <div class="card" style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-weight:600">{{ site.name }}</div>
+        <div style="color:#8892a4;font-size:12px">{{ site.domain }}</div>
+      </div>
+      <span style="color:#8892a4;font-size:12px">→</span>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card" style="text-align:center;padding:3rem">
+  <p style="color:#8892a4;margin-bottom:1rem">No sites yet. Add your first site to get started.</p>
+</div>
+{% endif %}
+{% endblock %}

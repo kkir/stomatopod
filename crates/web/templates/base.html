@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Stomatopod Analytics{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js" defer></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+      --text: #e2e8f0; --muted: #8892a4; --accent: #6366f1;
+      --green: #22c55e; --red: #ef4444;
+    }
+    body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 1.5rem; display: flex; align-items: center; gap: 1.5rem; height: 48px; }
+    nav .logo { font-weight: 700; font-size: 16px; color: var(--text); }
+    nav .spacer { flex: 1; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; }
+    .stat { }
+    .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+    .stat .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { color: var(--muted); font-weight: 500; text-align: left; padding: 6px 8px; font-size: 12px; text-transform: uppercase; }
+    td { padding: 8px 8px; border-top: 1px solid var(--border); }
+    .bar-cell { display: flex; align-items: center; gap: 8px; }
+    .bar { height: 4px; background: var(--accent); border-radius: 2px; min-width: 2px; }
+    .range-tabs { display: flex; gap: 4px; }
+    .range-tabs a { padding: 4px 10px; border-radius: 4px; font-size: 12px; color: var(--muted); }
+    .range-tabs a.active { background: var(--accent); color: #fff; }
+    .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+    h2 { font-size: 15px; font-weight: 600; }
+    .tabs { display: flex; gap: 2rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem; }
+    .tabs a { padding-bottom: 8px; color: var(--muted); font-size: 13px; }
+    .tabs a.active { color: var(--text); border-bottom: 2px solid var(--accent); }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    input, select { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 10px; font-size: 13px; }
+    .skeleton { height: 200px; background: var(--border); border-radius: 6px; animation: pulse 1.5s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity:.5 } 50% { opacity:1 } }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<nav>
+  <span class="logo">Stomatopod</span>
+  <div class="spacer"></div>
+  <a href="/">Sites</a>
+  <form action="/logout" method="post" style="display:inline">
+    <button type="submit" class="btn btn-ghost" style="height:32px">Logout</button>
+  </form>
+</nav>
+<div class="container">
+  {% block content %}{% endblock %}
+</div>
+</body>
+</html>

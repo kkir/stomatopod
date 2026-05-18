@@ -1,0 +1,6 @@
+/target
+/data
+*.mmdb
+stomatopod.toml
+.env
+*.log

@@ -1,0 +1,63 @@
+use std::sync::Arc;
+
+use axum::{
+    middleware,
+    routing::{get, post},
+    Router,
+};
+use tower_http::{compression::CompressionLayer, trace::TraceLayer};
+
+use crate::{
+    middleware::{auth::require_auth, cors::ingest_cors},
+    routes::{analytics, api, auth, dashboard, events, funnels, partials, sites},
+    state::AppState,
+};
+
+pub fn build_router(state: Arc<AppState>) -> Router {
+    // Public ingest routes (CORS-enabled)
+    let ingest_routes = Router::new()
+        .route("/api/v1/event", post(api::handle_ingest))
+        .route("/tracker.js", get(api::tracker_js))
+        .layer(ingest_cors());
+
+    // Analytics JSON API routes (bearer token or session auth)
+    let analytics_routes = Router::new()
+        .route("/api/v1/sites", get(analytics::list_sites))
+        .route("/api/v1/sites/:site/pageviews", get(analytics::pageviews))
+        .route("/api/v1/sites/:site/top-pages", get(analytics::top_pages))
+        .route("/api/v1/sites/:site/top-referrers", get(analytics::top_referrers))
+        .route("/api/v1/sites/:site/events", get(analytics::events))
+        .route("/api/v1/sites/:site/funnels", get(analytics::list_funnels))
+        .route("/api/v1/sites/:site/funnels/:funnel_id", get(analytics::funnel_result))
+        .layer(middleware::from_fn_with_state(state.clone(), require_auth));
+
+    // Auth routes (no auth required)
+    let auth_routes = Router::new()
+        .route("/login", get(auth::login_page).post(auth::login_submit))
+        .route("/logout", post(auth::logout));
+
+    // Protected dashboard routes
+    let dashboard_routes = Router::new()
+        .route("/", get(dashboard::index))
+        .route("/sites", get(sites::sites_list).post(sites::create_site))
+        .route("/sites/:site_id", get(dashboard::site_overview))
+        .route("/sites/:site_id/events", get(events::events_list))
+        .route("/sites/:site_id/funnels", get(funnels::funnels_page).post(funnels::create_funnel))
+        .route("/sites/:site_id/funnels/:funnel_id", get(funnels::funnel_detail))
+        // HTMX partial routes
+        .route("/sites/:site_id/partials/top-pages", get(partials::top_pages))
+        .route("/sites/:site_id/partials/top-referrers", get(partials::top_referrers))
+        .route("/sites/:site_id/partials/top-countries", get(partials::top_countries))
+        .route("/sites/:site_id/partials/top-browsers", get(partials::top_browsers))
+        .route("/sites/:site_id/partials/top-devices", get(partials::top_devices))
+        .layer(middleware::from_fn_with_state(state.clone(), require_auth));
+
+    Router::new()
+        .merge(ingest_routes)
+        .merge(analytics_routes)
+        .merge(auth_routes)
+        .merge(dashboard_routes)
+        .layer(CompressionLayer::new())
+        .layer(TraceLayer::new_for_http())
+        .with_state(state)
+}
