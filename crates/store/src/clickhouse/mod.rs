@@ -45,7 +45,7 @@ impl ClickhouseBackend {
             .body(query.to_string())
             .send()
             .await
-            .map_err(|e| StoreError::db(e))?;
+            .map_err(StoreError::db)?;
 
         if !response.status().is_success() {
             let text = response.text().await.unwrap_or_default();
@@ -66,10 +66,7 @@ impl StorageBackend for ClickhouseBackend {
             .iter()
             .map(|e| serde_json::to_string(e).unwrap_or_default())
             .collect();
-        let body = format!(
-            "INSERT INTO events FORMAT JSONEachRow\n{}",
-            rows.join("\n")
-        );
+        let body = format!("INSERT INTO events FORMAT JSONEachRow\n{}", rows.join("\n"));
         self.execute(&body).await?;
         Ok(())
     }
@@ -78,23 +75,48 @@ impl StorageBackend for ClickhouseBackend {
         todo!("clickhouse query_pageviews")
     }
 
-    async fn query_top_pages(&self, _site_id: Ulid, _range: &TimeRange, _limit: u32) -> Result<TopList, StoreError> {
+    async fn query_top_pages(
+        &self,
+        _site_id: Ulid,
+        _range: &TimeRange,
+        _limit: u32,
+    ) -> Result<TopList, StoreError> {
         todo!("clickhouse query_top_pages")
     }
 
-    async fn query_top_referrers(&self, _site_id: Ulid, _range: &TimeRange, _limit: u32) -> Result<TopList, StoreError> {
+    async fn query_top_referrers(
+        &self,
+        _site_id: Ulid,
+        _range: &TimeRange,
+        _limit: u32,
+    ) -> Result<TopList, StoreError> {
         todo!("clickhouse query_top_referrers")
     }
 
-    async fn query_top_countries(&self, _site_id: Ulid, _range: &TimeRange, _limit: u32) -> Result<TopList, StoreError> {
+    async fn query_top_countries(
+        &self,
+        _site_id: Ulid,
+        _range: &TimeRange,
+        _limit: u32,
+    ) -> Result<TopList, StoreError> {
         todo!("clickhouse query_top_countries")
     }
 
-    async fn query_top_browsers(&self, _site_id: Ulid, _range: &TimeRange, _limit: u32) -> Result<TopList, StoreError> {
+    async fn query_top_browsers(
+        &self,
+        _site_id: Ulid,
+        _range: &TimeRange,
+        _limit: u32,
+    ) -> Result<TopList, StoreError> {
         todo!("clickhouse query_top_browsers")
     }
 
-    async fn query_top_devices(&self, _site_id: Ulid, _range: &TimeRange, _limit: u32) -> Result<TopList, StoreError> {
+    async fn query_top_devices(
+        &self,
+        _site_id: Ulid,
+        _range: &TimeRange,
+        _limit: u32,
+    ) -> Result<TopList, StoreError> {
         todo!("clickhouse query_top_devices")
     }
 

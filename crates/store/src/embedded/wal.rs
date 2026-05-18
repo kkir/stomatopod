@@ -1,12 +1,12 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{BufWriter, Read, Seek, SeekFrom, Write},
+    io::{BufWriter, Read, Write},
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use parking_lot::Mutex;
 use stomatopod_core::domain::event::Event;
 use tracing::{info, warn};
@@ -18,6 +18,7 @@ const MAX_WAL_SIZE: u64 = 64 * 1024 * 1024; // 64MB
 
 pub struct Wal {
     dir: PathBuf,
+    #[allow(dead_code)]
     fsync_interval: Duration,
     inner: Mutex<WalInner>,
 }
@@ -83,9 +84,7 @@ impl Wal {
         let mut entries: Vec<PathBuf> = std::fs::read_dir(&self.dir)?
             .filter_map(|e| e.ok())
             .map(|e| e.path())
-            .filter(|p| {
-                p.extension().and_then(|s| s.to_str()) == Some("bin")
-            })
+            .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("bin"))
             .collect();
         entries.sort();
 
@@ -151,7 +150,10 @@ impl Wal {
     fn rotate_locked(&self, inner: &mut WalInner) -> Result<()> {
         inner.writer.flush()?;
         let new_path = self.dir.join(format!("wal-{}.bin", ulid::Ulid::new()));
-        let new_file = OpenOptions::new().create(true).append(true).open(&new_path)?;
+        let new_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&new_path)?;
         let mut new_writer = BufWriter::new(new_file);
         new_writer.write_all(MAGIC)?;
         new_writer.flush()?;

@@ -27,7 +27,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: query::QueryCommand,
         /// Server URL
-        #[arg(long, default_value = "http://localhost:8080", env = "STOMATOPOD_SERVER")]
+        #[arg(
+            long,
+            default_value = "http://localhost:8080",
+            env = "STOMATOPOD_SERVER"
+        )]
         server: String,
         /// Output human-readable table instead of JSON
         #[arg(long)]
@@ -38,7 +42,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: sites::SitesCommand,
         /// Server URL
-        #[arg(long, default_value = "http://localhost:8080", env = "STOMATOPOD_SERVER")]
+        #[arg(
+            long,
+            default_value = "http://localhost:8080",
+            env = "STOMATOPOD_SERVER"
+        )]
         server: String,
     },
 }

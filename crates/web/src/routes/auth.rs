@@ -1,7 +1,6 @@
 use axum::{
     extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Redirect, Response},
+    response::{IntoResponse, Response},
     Form,
 };
 use serde::Deserialize;
@@ -63,10 +62,8 @@ pub async fn login_submit(
     }
 
     // Set signed session cookie — value is "{user_id}.{hmac}" so it can't be forged
-    let session_value = crate::middleware::auth::sign_session(
-        &state.config.auth.secret_key,
-        &user.id.to_string(),
-    );
+    let session_value =
+        crate::middleware::auth::sign_session(&state.config.auth.secret_key, &user.id.to_string());
     let cookie = format!(
         "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
         crate::middleware::auth::SESSION_COOKIE,

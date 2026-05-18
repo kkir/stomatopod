@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct Config {
     pub mode: Mode,
@@ -10,19 +10,6 @@ pub struct Config {
     pub geo: GeoConfig,
     pub auth: AuthConfig,
     pub limits: LimitsConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            mode: Mode::default(),
-            listen: ListenConfig::default(),
-            storage: StorageConfig::default(),
-            geo: GeoConfig::default(),
-            auth: AuthConfig::default(),
-            limits: LimitsConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]

@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 use minijinja::Environment;
-use stomatopod_core::{config::Config, traits::{MetaStore, StorageBackend}};
+use stomatopod_core::{
+    config::Config,
+    traits::{MetaStore, StorageBackend},
+};
 use tokio::sync::mpsc;
 use ulid::Ulid;
 

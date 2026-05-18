@@ -30,7 +30,10 @@ pub async fn events_list(
     let site_id = match Ulid::from_string(&site_id_str) {
         Ok(id) => id,
         Err(_) => {
-            return (StatusCode::BAD_REQUEST, axum::response::Html("<p>Invalid site ID</p>".to_string()))
+            return (
+                StatusCode::BAD_REQUEST,
+                axum::response::Html("<p>Invalid site ID</p>".to_string()),
+            )
                 .into_response()
         }
     };
@@ -51,11 +54,18 @@ pub async fn events_list(
         limit: 50,
     };
 
-    let result = state.backend.query_custom_events(&q).await.unwrap_or_default();
+    let result = state
+        .backend
+        .query_custom_events(&q)
+        .await
+        .unwrap_or_default();
     let site = match state.meta.get_site(site_id).await.ok().flatten() {
         Some(s) => s,
         None => {
-            return (StatusCode::NOT_FOUND, axum::response::Html("<p>Site not found</p>".to_string()))
+            return (
+                StatusCode::NOT_FOUND,
+                axum::response::Html("<p>Site not found</p>".to_string()),
+            )
                 .into_response()
         }
     };

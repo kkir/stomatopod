@@ -14,8 +14,7 @@ pub async fn run_batcher(
     flush_interval_ms: u64,
 ) {
     let mut buf: Vec<Event> = Vec::with_capacity(batch_size);
-    let mut interval =
-        tokio::time::interval(Duration::from_millis(flush_interval_ms));
+    let mut interval = tokio::time::interval(Duration::from_millis(flush_interval_ms));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
@@ -42,7 +41,7 @@ pub async fn run_batcher(
 }
 
 async fn flush(buf: &mut Vec<Event>, backend: &Arc<dyn StorageBackend>) {
-    let batch = std::mem::replace(buf, Vec::new());
+    let batch = std::mem::take(buf);
     if let Err(e) = backend.ingest_events(batch).await {
         error!("Batch flush error: {e}");
     }

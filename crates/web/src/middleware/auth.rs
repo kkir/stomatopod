@@ -88,4 +88,3 @@ pub async fn require_api_auth(
 
     next.run(req).await
 }
-

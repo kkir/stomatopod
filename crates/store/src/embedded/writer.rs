@@ -2,15 +2,15 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use arrow::{
     array::{
-        FixedSizeBinaryBuilder, StringDictionaryBuilder, StringBuilder,
-        TimestampMicrosecondBuilder, UInt16Builder, StringArray,
+        FixedSizeBinaryBuilder, StringBuilder, StringDictionaryBuilder,
+        TimestampMicrosecondBuilder, UInt16Builder,
     },
     datatypes::Int32Type,
     record_batch::RecordBatch,
 };
 use parquet::{
     arrow::ArrowWriter,
-    basic::{Compression, Encoding},
+    basic::Compression,
     file::properties::{WriterProperties, WriterVersion},
 };
 use tokio::sync::mpsc;
@@ -43,8 +43,7 @@ impl ParquetWriter {
         wal: Arc<Wal>,
         reader: Arc<EmbeddedReader>,
     ) {
-        let mut interval =
-            tokio::time::interval(Duration::from_secs(self.flush_interval_s));
+        let mut interval = tokio::time::interval(Duration::from_secs(self.flush_interval_s));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
@@ -88,7 +87,10 @@ impl ParquetWriter {
         }
 
         for ((site_id, date), partition_events) in by_partition {
-            if let Err(e) = self.write_partition(&site_id, &date, partition_events, reader).await {
+            if let Err(e) = self
+                .write_partition(&site_id, &date, partition_events, reader)
+                .await
+            {
                 error!("Parquet write error for {site_id}/{date}: {e}");
             }
         }
@@ -154,43 +156,28 @@ fn events_to_record_batch(
 
     let mut id_b = StringBuilder::with_capacity(n, n * 26);
     let mut site_id_b = StringBuilder::with_capacity(n, n * 26);
-    let mut name_b: StringDictionaryBuilder<Int32Type> =
-        StringDictionaryBuilder::new();
-    let mut kind_b: StringDictionaryBuilder<Int32Type> =
-        StringDictionaryBuilder::new();
-    let mut ts_b = TimestampMicrosecondBuilder::with_capacity(n)
-        .with_timezone("UTC");
-    let mut recv_b = TimestampMicrosecondBuilder::with_capacity(n)
-        .with_timezone("UTC");
+    let mut name_b: StringDictionaryBuilder<Int32Type> = StringDictionaryBuilder::new();
+    let mut kind_b: StringDictionaryBuilder<Int32Type> = StringDictionaryBuilder::new();
+    let mut ts_b = TimestampMicrosecondBuilder::with_capacity(n).with_timezone("UTC");
+    let mut recv_b = TimestampMicrosecondBuilder::with_capacity(n).with_timezone("UTC");
     let mut url_b = StringBuilder::with_capacity(n, n * 64);
     let mut referrer_b = StringBuilder::with_capacity(n, n * 32);
-    let mut utm_src_b: StringDictionaryBuilder<Int32Type> =
-        StringDictionaryBuilder::new();
-    let mut utm_med_b: StringDictionaryBuilder<Int32Type> =
-        StringDictionaryBuilder::new();
-    let mut utm_cmp_b: StringDictionaryBuilder<Int32Type> =
-        StringDictionaryBuilder::new();
+    let mut utm_src_b: StringDictionaryBuilder<Int32Type> = StringDictionaryBuilder::new();
+    let mut utm_med_b: StringDictionaryBuilder<Int32Type> = StringDictionaryBuilder::new();
+    let mut utm_cmp_b: StringDictionaryBuilder<Int32Type> = StringDictionaryBuilder::new();
     let mut utm_term_b = StringBuilder::with_capacity(n, n * 16);
     let mut utm_con_b = StringBuilder::with_capacity(n, n * 16);
-    let mut browser_b: StringDictionaryBuilder<Int32Type> =
-        StringDictionaryBuilder::new();
-    let mut browser_ver_b: StringDictionaryBuilder<Int32Type> =
-        StringDictionaryBuilder::new();
-    let mut os_b: StringDictionaryBuilder<Int32Type> =
-        StringDictionaryBuilder::new();
-    let mut os_ver_b: StringDictionaryBuilder<Int32Type> =
-        StringDictionaryBuilder::new();
-    let mut dev_b: StringDictionaryBuilder<Int32Type> =
-        StringDictionaryBuilder::new();
+    let mut browser_b: StringDictionaryBuilder<Int32Type> = StringDictionaryBuilder::new();
+    let mut browser_ver_b: StringDictionaryBuilder<Int32Type> = StringDictionaryBuilder::new();
+    let mut os_b: StringDictionaryBuilder<Int32Type> = StringDictionaryBuilder::new();
+    let mut os_ver_b: StringDictionaryBuilder<Int32Type> = StringDictionaryBuilder::new();
+    let mut dev_b: StringDictionaryBuilder<Int32Type> = StringDictionaryBuilder::new();
     let mut sw_b = UInt16Builder::with_capacity(n);
     let mut sh_b = UInt16Builder::with_capacity(n);
-    let mut lang_b: StringDictionaryBuilder<Int32Type> =
-        StringDictionaryBuilder::new();
+    let mut lang_b: StringDictionaryBuilder<Int32Type> = StringDictionaryBuilder::new();
     let mut ip_b = StringBuilder::with_capacity(n, n * 16);
-    let mut country_b: StringDictionaryBuilder<Int32Type> =
-        StringDictionaryBuilder::new();
-    let mut region_b: StringDictionaryBuilder<Int32Type> =
-        StringDictionaryBuilder::new();
+    let mut country_b: StringDictionaryBuilder<Int32Type> = StringDictionaryBuilder::new();
+    let mut region_b: StringDictionaryBuilder<Int32Type> = StringDictionaryBuilder::new();
     let mut city_b = StringBuilder::with_capacity(n, n * 16);
     let mut session_b = FixedSizeBinaryBuilder::with_capacity(n, 16);
     let mut props_b = StringBuilder::with_capacity(n, n * 8);
@@ -221,13 +208,8 @@ fn events_to_record_batch(
         country_b.append_option(e.country_code.as_deref());
         region_b.append_option(e.region.as_deref());
         city_b.append_option(e.city.as_deref());
-        session_b.append_value(&e.session_id)?;
-        props_b.append_option(
-            e.properties
-                .as_ref()
-                .map(|p| p.to_string())
-                .as_deref(),
-        );
+        session_b.append_value(e.session_id)?;
+        props_b.append_option(e.properties.as_ref().map(|p| p.to_string()).as_deref());
     }
 
     Ok(RecordBatch::try_new(

@@ -25,9 +25,7 @@ pub async fn run(cmd: &SitesCommand, client: &ApiClient) -> anyhow::Result<()> {
         SitesCommand::Create { domain, name } => {
             // POST is handled separately; show instructions for now
             println!("To create a site, POST to /api/v1/sites:");
-            println!(
-                r#"  {{"domain": "{domain}", "name": "{name}"}}"#,
-            );
+            println!(r#"  {{"domain": "{domain}", "name": "{name}"}}"#,);
         }
     }
     Ok(())

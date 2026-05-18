@@ -12,7 +12,11 @@ impl ApiClient {
     pub fn new(base_url: String) -> Self {
         let token = std::env::var("STOMATOPOD_TOKEN").ok().or_else(|| {
             let path = dirs_path();
-            std::fs::read_to_string(path).ok()?.trim().to_string().into()
+            std::fs::read_to_string(path)
+                .ok()?
+                .trim()
+                .to_string()
+                .into()
         });
         Self {
             base_url,

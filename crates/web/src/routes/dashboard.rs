@@ -24,16 +24,15 @@ fn default_range() -> String {
 
 pub async fn index(State(state): State<Arc<AppState>>) -> Response {
     let sites = match state.meta.list_orgs().await {
-        Ok(orgs) if !orgs.is_empty() => {
-            state.meta.list_sites(orgs[0].id).await.unwrap_or_default()
-        }
+        Ok(orgs) if !orgs.is_empty() => state.meta.list_sites(orgs[0].id).await.unwrap_or_default(),
         _ => vec![],
     };
 
     if sites.is_empty() {
         let tmpl = state.templates.get_template("index.html").unwrap();
         return axum::response::Html(
-            tmpl.render(minijinja::context! { sites => [] as [i32;0] }).unwrap(),
+            tmpl.render(minijinja::context! { sites => [] as [i32;0] })
+                .unwrap(),
         )
         .into_response();
     }
@@ -49,7 +48,10 @@ pub async fn site_overview(
     let site_id = match Ulid::from_string(&site_id_str) {
         Ok(id) => id,
         Err(_) => {
-            return (StatusCode::BAD_REQUEST, axum::response::Html("<p>Invalid site ID</p>".to_string()))
+            return (
+                StatusCode::BAD_REQUEST,
+                axum::response::Html("<p>Invalid site ID</p>".to_string()),
+            )
                 .into_response()
         }
     };
@@ -64,15 +66,16 @@ pub async fn site_overview(
 
     let report = match fetch_dashboard(&state.backend, &query, 20).await {
         Ok(r) => r,
-        Err(e) => {
-            return axum::response::Html(format!("<p>Query error: {e}</p>")).into_response()
-        }
+        Err(e) => return axum::response::Html(format!("<p>Query error: {e}</p>")).into_response(),
     };
 
     let site = match state.meta.get_site(site_id).await.ok().flatten() {
         Some(s) => s,
         None => {
-            return (StatusCode::NOT_FOUND, axum::response::Html("<p>Site not found</p>".to_string()))
+            return (
+                StatusCode::NOT_FOUND,
+                axum::response::Html("<p>Site not found</p>".to_string()),
+            )
                 .into_response()
         }
     };

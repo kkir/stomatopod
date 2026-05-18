@@ -1,5 +1,5 @@
-use tower_http::cors::{Any, CorsLayer};
 use axum::http::Method;
+use tower_http::cors::{Any, CorsLayer};
 
 /// Permissive CORS for the ingest endpoint — the tracking script sends
 /// beacons from any origin.

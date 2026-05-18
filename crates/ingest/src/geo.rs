@@ -37,10 +37,7 @@ impl GeoLookup {
 
         match reader.lookup::<geoip2::City>(addr) {
             Ok(city) => GeoInfo {
-                country_code: city
-                    .country
-                    .and_then(|c| c.iso_code)
-                    .map(|s| s.to_string()),
+                country_code: city.country.and_then(|c| c.iso_code).map(|s| s.to_string()),
                 region: city
                     .subdivisions
                     .as_deref()
@@ -97,10 +94,7 @@ pub fn extract_ip(headers: &axum::http::HeaderMap, peer_addr: std::net::SocketAd
     }
 
     // X-Forwarded-For — take the leftmost non-private IP
-    if let Some(xff) = headers
-        .get("X-Forwarded-For")
-        .and_then(|v| v.to_str().ok())
-    {
+    if let Some(xff) = headers.get("X-Forwarded-For").and_then(|v| v.to_str().ok()) {
         for part in xff.split(',') {
             let ip = part.trim();
             if let Ok(addr) = IpAddr::from_str(ip) {
@@ -118,7 +112,8 @@ fn is_private(ip: &IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
             let [a, b, ..] = v4.octets();
-            matches!((a, b),
+            matches!(
+                (a, b),
                 (10, _) | (172, 16..=31) | (192, 168) | (127, _) | (169, 254)
             )
         }

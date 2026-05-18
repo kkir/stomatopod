@@ -61,7 +61,11 @@ pub enum QueryCommand {
 
 pub async fn run(cmd: &QueryCommand, client: &ApiClient, human: bool) -> anyhow::Result<()> {
     let result: Value = match cmd {
-        QueryCommand::Pageviews { site, range, granularity } => {
+        QueryCommand::Pageviews {
+            site,
+            range,
+            granularity,
+        } => {
             client
                 .get(&format!(
                     "/api/v1/sites/{site}/pageviews?range={range}&granularity={granularity}"
@@ -82,7 +86,12 @@ pub async fn run(cmd: &QueryCommand, client: &ApiClient, human: bool) -> anyhow:
                 ))
                 .await?
         }
-        QueryCommand::Events { site, name, range, limit } => {
+        QueryCommand::Events {
+            site,
+            name,
+            range,
+            limit,
+        } => {
             let name_param = name
                 .as_deref()
                 .map(|n| format!("&name={n}"))
@@ -93,7 +102,11 @@ pub async fn run(cmd: &QueryCommand, client: &ApiClient, human: bool) -> anyhow:
                 ))
                 .await?
         }
-        QueryCommand::Funnel { site, funnel, range } => {
+        QueryCommand::Funnel {
+            site,
+            funnel,
+            range,
+        } => {
             client
                 .get(&format!(
                     "/api/v1/sites/{site}/funnels/{funnel}?range={range}"
@@ -117,7 +130,10 @@ pub async fn run(cmd: &QueryCommand, client: &ApiClient, human: bool) -> anyhow:
 fn print_human(value: &Value) {
     // Simple human table renderer for top-list results
     if let Some(rows) = value.get("rows").and_then(|r| r.as_array()) {
-        println!("{:<50} {:>10} {:>10} {:>6}", "Value", "Pageviews", "Sessions", "%");
+        println!(
+            "{:<50} {:>10} {:>10} {:>6}",
+            "Value", "Pageviews", "Sessions", "%"
+        );
         println!("{}", "-".repeat(80));
         for row in rows {
             println!(
@@ -140,6 +156,9 @@ fn print_human(value: &Value) {
             );
         }
     } else {
-        println!("{}", serde_json::to_string_pretty(value).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(value).unwrap_or_default()
+        );
     }
 }

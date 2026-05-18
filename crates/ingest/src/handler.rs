@@ -1,10 +1,6 @@
 use std::net::SocketAddr;
 
-use axum::{
-    extract::{ConnectInfo, State},
-    http::{HeaderMap, StatusCode},
-    Json,
-};
+use axum::http::{HeaderMap, StatusCode};
 use chrono::Utc;
 use dashmap::DashMap;
 use serde::Deserialize;
@@ -119,7 +115,7 @@ pub async fn handle_ingest_inner(
     // 8. Timestamp
     let timestamp = payload
         .t
-        .and_then(|ms| chrono::DateTime::from_timestamp_millis(ms))
+        .and_then(chrono::DateTime::from_timestamp_millis)
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_else(Utc::now);
 
@@ -186,7 +182,7 @@ fn extract_utm(url: &str) -> UtmParams {
     for pair in query.split('&') {
         let mut kv = pair.splitn(2, '=');
         let key = kv.next().unwrap_or("");
-        let val = kv.next().map(|v| urlencoding_decode(v));
+        let val = kv.next().map(urlencoding_decode);
         match key {
             "utm_source" => out.source = val,
             "utm_medium" => out.medium = val,

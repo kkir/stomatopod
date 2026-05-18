@@ -4,8 +4,6 @@ use anyhow::Result;
 use datafusion::{
     datasource::listing::{ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl},
     execution::context::SessionContext,
-    parquet::arrow::ArrowWriter,
-    prelude::*,
 };
 use parking_lot::RwLock;
 use std::collections::HashSet;
@@ -70,24 +68,20 @@ impl EmbeddedReader {
             return Ok(());
         }
 
-        let url = ListingTableUrl::parse(format!(
-            "file://{}",
-            site_dir.to_string_lossy()
-        ))?;
+        let url = ListingTableUrl::parse(format!("file://{}", site_dir.to_string_lossy()))?;
 
-        let file_format = Arc::new(datafusion::datasource::file_format::parquet::ParquetFormat::default());
+        let file_format =
+            Arc::new(datafusion::datasource::file_format::parquet::ParquetFormat::default());
         let listing_options = ListingOptions::new(file_format)
             .with_file_extension(".parquet")
             .with_collect_stat(true);
 
         let table_name = table_name(site_id);
-        let config = ListingTableConfig::new(url)
-            .with_listing_options(listing_options);
+        let config = ListingTableConfig::new(url).with_listing_options(listing_options);
         let config = config.infer_schema(&self.ctx.state()).await?;
         let table = ListingTable::try_new(config)?;
 
-        self.ctx
-            .register_table(&table_name, Arc::new(table))?;
+        self.ctx.register_table(&table_name, Arc::new(table))?;
         self.registered.write().insert(site_id.to_string());
         info!("Registered DataFusion table: {table_name}");
         Ok(())
@@ -95,7 +89,9 @@ impl EmbeddedReader {
 
     pub async fn query_pageviews(&self, q: &PageviewsQuery) -> Result<PageviewsResult, StoreError> {
         let site_id = q.site_id.to_string();
-        self.ensure_site_registered(&site_id).await.map_err(StoreError::db)?;
+        self.ensure_site_registered(&site_id)
+            .await
+            .map_err(StoreError::db)?;
 
         let table = table_name(&site_id);
         let granularity_fn = granularity_trunc(&q.granularity);
@@ -170,7 +166,8 @@ impl EmbeddedReader {
         range: &TimeRange,
         limit: u32,
     ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "referrer").await
+        self.query_top_field(site_id, range, limit, "referrer")
+            .await
     }
 
     pub async fn query_top_countries(
@@ -179,7 +176,8 @@ impl EmbeddedReader {
         range: &TimeRange,
         limit: u32,
     ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "country_code").await
+        self.query_top_field(site_id, range, limit, "country_code")
+            .await
     }
 
     pub async fn query_top_browsers(
@@ -197,7 +195,8 @@ impl EmbeddedReader {
         range: &TimeRange,
         limit: u32,
     ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "device_type").await
+        self.query_top_field(site_id, range, limit, "device_type")
+            .await
     }
 
     async fn query_top_field(
@@ -208,7 +207,9 @@ impl EmbeddedReader {
         field: &str,
     ) -> Result<TopList, StoreError> {
         let site_id_str = site_id.to_string();
-        self.ensure_site_registered(&site_id_str).await.map_err(StoreError::db)?;
+        self.ensure_site_registered(&site_id_str)
+            .await
+            .map_err(StoreError::db)?;
 
         let table = table_name(&site_id_str);
         let start = range.start.timestamp_micros();
@@ -275,7 +276,9 @@ impl EmbeddedReader {
 
     pub async fn query_custom_events(&self, q: &EventQuery) -> Result<TopList, StoreError> {
         let site_id_str = q.site_id.to_string();
-        self.ensure_site_registered(&site_id_str).await.map_err(StoreError::db)?;
+        self.ensure_site_registered(&site_id_str)
+            .await
+            .map_err(StoreError::db)?;
 
         let table = table_name(&site_id_str);
         let start = q.range.start.timestamp_micros();
@@ -317,7 +320,9 @@ impl EmbeddedReader {
         }
 
         let site_id_str = q.site_id.to_string();
-        self.ensure_site_registered(&site_id_str).await.map_err(StoreError::db)?;
+        self.ensure_site_registered(&site_id_str)
+            .await
+            .map_err(StoreError::db)?;
 
         let table = table_name(&site_id_str);
         let start = q.range.start.timestamp_micros();
@@ -366,7 +371,9 @@ impl EmbeddedReader {
             prev_sessions = Some(sessions);
         }
 
-        Ok(FunnelResult { steps: step_results })
+        Ok(FunnelResult {
+            steps: step_results,
+        })
     }
 
     fn batches_to_top_list(

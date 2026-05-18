@@ -120,7 +120,11 @@ pub async fn pageviews(
     Query(params): Query<PageviewsParams>,
 ) -> impl IntoResponse {
     let Some(site_id) = resolve_site_id(&state, &site).await else {
-        return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "site not found"}))).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "site not found"})),
+        )
+            .into_response();
     };
     let q = PageviewsQuery {
         site_id,
@@ -141,10 +145,18 @@ pub async fn top_pages(
     Query(params): Query<TopParams>,
 ) -> impl IntoResponse {
     let Some(site_id) = resolve_site_id(&state, &site).await else {
-        return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "site not found"}))).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "site not found"})),
+        )
+            .into_response();
     };
     let range = parse_range(&params.range);
-    match state.backend.query_top_pages(site_id, &range, params.limit).await {
+    match state
+        .backend
+        .query_top_pages(site_id, &range, params.limit)
+        .await
+    {
         Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -157,10 +169,18 @@ pub async fn top_referrers(
     Query(params): Query<TopParams>,
 ) -> impl IntoResponse {
     let Some(site_id) = resolve_site_id(&state, &site).await else {
-        return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "site not found"}))).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "site not found"})),
+        )
+            .into_response();
     };
     let range = parse_range(&params.range);
-    match state.backend.query_top_referrers(site_id, &range, params.limit).await {
+    match state
+        .backend
+        .query_top_referrers(site_id, &range, params.limit)
+        .await
+    {
         Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -173,7 +193,11 @@ pub async fn events(
     Query(params): Query<EventsParams>,
 ) -> impl IntoResponse {
     let Some(site_id) = resolve_site_id(&state, &site).await else {
-        return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "site not found"}))).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "site not found"})),
+        )
+            .into_response();
     };
     let q = EventQuery {
         site_id,
@@ -194,7 +218,11 @@ pub async fn list_funnels(
     Path(site): Path<String>,
 ) -> impl IntoResponse {
     let Some(site_id) = resolve_site_id(&state, &site).await else {
-        return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "site not found"}))).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "site not found"})),
+        )
+            .into_response();
     };
     match state.meta.list_funnels(site_id).await {
         Ok(funnels) => Json(serde_json::json!({ "funnels": funnels })).into_response(),
@@ -209,20 +237,42 @@ pub async fn funnel_result(
     Query(params): Query<RangeParams>,
 ) -> impl IntoResponse {
     let Some(site_id) = resolve_site_id(&state, &site).await else {
-        return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "site not found"}))).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "site not found"})),
+        )
+            .into_response();
     };
     let funnel_ulid = match Ulid::from_string(&funnel_id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "invalid funnel id"}))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid funnel id"})),
+            )
+                .into_response()
+        }
     };
     let funnel_def = match state.meta.get_funnel(funnel_ulid).await {
         Ok(Some(f)) => f,
-        Ok(None) => return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "funnel not found"}))).into_response(),
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "funnel not found"})),
+            )
+                .into_response()
+        }
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
     let steps: Vec<FunnelStep> = match serde_json::from_str(&funnel_def.definition) {
         Ok(s) => s,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "invalid funnel definition"}))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "invalid funnel definition"})),
+            )
+                .into_response()
+        }
     };
     let q = FunnelQuery {
         site_id,

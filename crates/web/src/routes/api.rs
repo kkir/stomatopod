@@ -32,7 +32,10 @@ pub async fn tracker_js(State(_state): State<Arc<AppState>>) -> impl IntoRespons
     static TRACKER: &str = include_str!("../../../../assets/tracker.js");
     Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/javascript; charset=utf-8")
+        .header(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )
         .header(header::CACHE_CONTROL, "public, max-age=86400, immutable")
         .body(TRACKER.to_string())
         .unwrap()

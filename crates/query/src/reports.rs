@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use stomatopod_core::{
     error::StoreError,
-    query::pageviews::{PageviewsQuery, PageviewsResult, TimeRange, TopList},
+    query::pageviews::{PageviewsQuery, PageviewsResult, TopList},
     traits::StorageBackend,
 };
-use ulid::Ulid;
 
 /// Fetches all dashboard data for a site in parallel.
 pub struct DashboardReport {

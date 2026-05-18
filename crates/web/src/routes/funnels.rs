@@ -138,8 +138,9 @@ pub async fn create_funnel(
     };
 
     match state.meta.create_funnel(&funnel).await {
-        Ok(_) => Redirect::to(&format!("/sites/{site_id_str}/funnels/{}", funnel.id))
-            .into_response(),
+        Ok(_) => {
+            Redirect::to(&format!("/sites/{site_id_str}/funnels/{}", funnel.id)).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

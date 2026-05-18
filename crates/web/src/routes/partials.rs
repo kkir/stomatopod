@@ -30,7 +30,11 @@ fn parse_days(range: &str) -> i64 {
     }
 }
 
-fn render_rows(state: &AppState, template: &str, rows: &serde_json::Value) -> axum::response::Html<String> {
+fn render_rows(
+    state: &AppState,
+    template: &str,
+    rows: &serde_json::Value,
+) -> axum::response::Html<String> {
     let tmpl = state.templates.get_template(template).unwrap();
     axum::response::Html(
         tmpl.render(minijinja::context! { rows => rows })
@@ -48,7 +52,11 @@ pub async fn top_pages(
         Err(_) => return axum::response::Html("<p>Invalid site ID</p>".into()),
     };
     let range = TimeRange::last_n_days(parse_days(&params.range));
-    let result = state.backend.query_top_pages(site_id, &range, 20).await.unwrap_or_default();
+    let result = state
+        .backend
+        .query_top_pages(site_id, &range, 20)
+        .await
+        .unwrap_or_default();
     let rows = serde_json::to_value(&result.rows).unwrap();
     render_rows(&state, "partials/top_pages.html", &rows)
 }
@@ -63,7 +71,11 @@ pub async fn top_referrers(
         Err(_) => return axum::response::Html("<p>Invalid site ID</p>".into()),
     };
     let range = TimeRange::last_n_days(parse_days(&params.range));
-    let result = state.backend.query_top_referrers(site_id, &range, 20).await.unwrap_or_default();
+    let result = state
+        .backend
+        .query_top_referrers(site_id, &range, 20)
+        .await
+        .unwrap_or_default();
     let rows = serde_json::to_value(&result.rows).unwrap();
     render_rows(&state, "partials/top_referrers.html", &rows)
 }
@@ -78,7 +90,11 @@ pub async fn top_countries(
         Err(_) => return axum::response::Html("<p>Invalid site ID</p>".into()),
     };
     let range = TimeRange::last_n_days(parse_days(&params.range));
-    let result = state.backend.query_top_countries(site_id, &range, 20).await.unwrap_or_default();
+    let result = state
+        .backend
+        .query_top_countries(site_id, &range, 20)
+        .await
+        .unwrap_or_default();
     let rows = serde_json::to_value(&result.rows).unwrap();
     render_rows(&state, "partials/top_countries.html", &rows)
 }
@@ -93,7 +109,11 @@ pub async fn top_browsers(
         Err(_) => return axum::response::Html("<p>Invalid site ID</p>".into()),
     };
     let range = TimeRange::last_n_days(parse_days(&params.range));
-    let result = state.backend.query_top_browsers(site_id, &range, 20).await.unwrap_or_default();
+    let result = state
+        .backend
+        .query_top_browsers(site_id, &range, 20)
+        .await
+        .unwrap_or_default();
     let rows = serde_json::to_value(&result.rows).unwrap();
     render_rows(&state, "partials/top_browsers.html", &rows)
 }
@@ -108,7 +128,11 @@ pub async fn top_devices(
         Err(_) => return axum::response::Html("<p>Invalid site ID</p>".into()),
     };
     let range = TimeRange::last_n_days(parse_days(&params.range));
-    let result = state.backend.query_top_devices(site_id, &range, 20).await.unwrap_or_default();
+    let result = state
+        .backend
+        .query_top_devices(site_id, &range, 20)
+        .await
+        .unwrap_or_default();
     let rows = serde_json::to_value(&result.rows).unwrap();
     render_rows(&state, "partials/top_devices.html", &rows)
 }

@@ -249,7 +249,8 @@ impl MetaStore for SqliteMeta {
                      FROM sites WHERE org_id = ?1 ORDER BY created_at ASC",
                 )
                 .map_err(StoreError::db)?;
-            let rows = stmt.query_map(params![org_id.to_string()], row_to_site)
+            let rows = stmt
+                .query_map(params![org_id.to_string()], row_to_site)
                 .map_err(StoreError::db)?;
             rows.collect::<Result<Vec<_>, _>>().map_err(StoreError::db)
         })
@@ -302,7 +303,9 @@ impl MetaStore for SqliteMeta {
     async fn list_orgs(&self) -> Result<Vec<Organization>, StoreError> {
         db!(self.conn, |conn: &Connection| {
             let mut stmt = conn
-                .prepare("SELECT id, name, slug, plan, created_at FROM orgs ORDER BY created_at ASC")
+                .prepare(
+                    "SELECT id, name, slug, plan, created_at FROM orgs ORDER BY created_at ASC",
+                )
                 .map_err(StoreError::db)?;
             let rows = stmt.query_map([], row_to_org).map_err(StoreError::db)?;
             rows.collect::<Result<Vec<_>, _>>().map_err(StoreError::db)
@@ -386,7 +389,8 @@ impl MetaStore for SqliteMeta {
                      FROM funnels WHERE site_id = ?1 ORDER BY created_at ASC",
                 )
                 .map_err(StoreError::db)?;
-            let rows = stmt.query_map(params![site_id.to_string()], row_to_funnel)
+            let rows = stmt
+                .query_map(params![site_id.to_string()], row_to_funnel)
                 .map_err(StoreError::db)?;
             rows.collect::<Result<Vec<_>, _>>().map_err(StoreError::db)
         })

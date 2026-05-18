@@ -70,11 +70,13 @@ fn generate_api_key() -> String {
     use blake3::Hasher;
     let mut h = Hasher::new();
     h.update(&Ulid::new().to_bytes());
-    h.update(&std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos()
-        .to_le_bytes());
+    h.update(
+        &std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .to_le_bytes(),
+    );
     let hash = h.finalize();
     // 32 hex chars = 128 bits of entropy
     hex::encode(&hash.as_bytes()[..16])

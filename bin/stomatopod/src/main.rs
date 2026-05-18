@@ -122,13 +122,15 @@ async fn serve(cfg: Config) -> Result<()> {
 
     let router = build_router(state);
 
-    let addr: SocketAddr = format!("{}:{}", cfg.listen.host, cfg.listen.port)
-        .parse()?;
+    let addr: SocketAddr = format!("{}:{}", cfg.listen.host, cfg.listen.port).parse()?;
     let listener = TcpListener::bind(addr).await?;
     info!("Stomatopod listening on http://{addr}");
 
-    axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>())
-        .await?;
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
@@ -152,24 +154,57 @@ fn build_templates() -> Result<JinjaEnv<'static>> {
     });
 
     // Embed templates at compile time
-    env.add_template("base.html", include_str!("../../../crates/web/templates/base.html"))?;
-    env.add_template("login.html", include_str!("../../../crates/web/templates/login.html"))?;
-    env.add_template("index.html", include_str!("../../../crates/web/templates/index.html"))?;
-    env.add_template("site.html", include_str!("../../../crates/web/templates/site.html"))?;
-    env.add_template("events.html", include_str!("../../../crates/web/templates/events.html"))?;
-    env.add_template("funnels.html", include_str!("../../../crates/web/templates/funnels.html"))?;
-    env.add_template("partials/top_pages.html", include_str!("../../../crates/web/templates/partials/top_pages.html"))?;
-    env.add_template("partials/top_referrers.html", include_str!("../../../crates/web/templates/partials/top_referrers.html"))?;
-    env.add_template("partials/top_countries.html", include_str!("../../../crates/web/templates/partials/top_countries.html"))?;
-    env.add_template("partials/top_browsers.html", include_str!("../../../crates/web/templates/partials/top_browsers.html"))?;
-    env.add_template("partials/top_devices.html", include_str!("../../../crates/web/templates/partials/top_devices.html"))?;
+    env.add_template(
+        "base.html",
+        include_str!("../../../crates/web/templates/base.html"),
+    )?;
+    env.add_template(
+        "login.html",
+        include_str!("../../../crates/web/templates/login.html"),
+    )?;
+    env.add_template(
+        "index.html",
+        include_str!("../../../crates/web/templates/index.html"),
+    )?;
+    env.add_template(
+        "site.html",
+        include_str!("../../../crates/web/templates/site.html"),
+    )?;
+    env.add_template(
+        "events.html",
+        include_str!("../../../crates/web/templates/events.html"),
+    )?;
+    env.add_template(
+        "funnels.html",
+        include_str!("../../../crates/web/templates/funnels.html"),
+    )?;
+    env.add_template(
+        "partials/top_pages.html",
+        include_str!("../../../crates/web/templates/partials/top_pages.html"),
+    )?;
+    env.add_template(
+        "partials/top_referrers.html",
+        include_str!("../../../crates/web/templates/partials/top_referrers.html"),
+    )?;
+    env.add_template(
+        "partials/top_countries.html",
+        include_str!("../../../crates/web/templates/partials/top_countries.html"),
+    )?;
+    env.add_template(
+        "partials/top_browsers.html",
+        include_str!("../../../crates/web/templates/partials/top_browsers.html"),
+    )?;
+    env.add_template(
+        "partials/top_devices.html",
+        include_str!("../../../crates/web/templates/partials/top_devices.html"),
+    )?;
 
     Ok(env)
 }
 
 async fn bootstrap_self_hosted(
     meta: &Arc<dyn stomatopod_core::traits::MetaStore>,
-    cfg: &Config,
+    _cfg: &Config,
 ) -> Result<()> {
     use chrono::Utc;
     use stomatopod_core::domain::org::{Organization, Plan, User, UserRole};
@@ -191,7 +226,8 @@ async fn bootstrap_self_hosted(
     meta.create_org(&org).await?;
 
     // Create admin user if STOMATOPOD_ADMIN_EMAIL/PASSWORD are set
-    let email = std::env::var("STOMATOPOD_ADMIN_EMAIL").unwrap_or_else(|_| "admin@localhost".into());
+    let email =
+        std::env::var("STOMATOPOD_ADMIN_EMAIL").unwrap_or_else(|_| "admin@localhost".into());
     let password = std::env::var("STOMATOPOD_ADMIN_PASSWORD").unwrap_or_else(|_| "changeme".into());
 
     let hash = hash_password(&password)?;

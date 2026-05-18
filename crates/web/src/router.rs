@@ -28,11 +28,20 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/sites", get(analytics::list_sites))
         .route("/api/v1/sites/:site/pageviews", get(analytics::pageviews))
         .route("/api/v1/sites/:site/top-pages", get(analytics::top_pages))
-        .route("/api/v1/sites/:site/top-referrers", get(analytics::top_referrers))
+        .route(
+            "/api/v1/sites/:site/top-referrers",
+            get(analytics::top_referrers),
+        )
         .route("/api/v1/sites/:site/events", get(analytics::events))
         .route("/api/v1/sites/:site/funnels", get(analytics::list_funnels))
-        .route("/api/v1/sites/:site/funnels/:funnel_id", get(analytics::funnel_result))
-        .layer(middleware::from_fn_with_state(state.clone(), require_api_auth));
+        .route(
+            "/api/v1/sites/:site/funnels/:funnel_id",
+            get(analytics::funnel_result),
+        )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_api_auth,
+        ));
 
     // Auth routes (no auth required)
     let auth_routes = Router::new()
@@ -45,14 +54,35 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/sites", get(sites::sites_list).post(sites::create_site))
         .route("/sites/:site_id", get(dashboard::site_overview))
         .route("/sites/:site_id/events", get(events::events_list))
-        .route("/sites/:site_id/funnels", get(funnels::funnels_page).post(funnels::create_funnel))
-        .route("/sites/:site_id/funnels/:funnel_id", get(funnels::funnel_detail))
+        .route(
+            "/sites/:site_id/funnels",
+            get(funnels::funnels_page).post(funnels::create_funnel),
+        )
+        .route(
+            "/sites/:site_id/funnels/:funnel_id",
+            get(funnels::funnel_detail),
+        )
         // HTMX partial routes
-        .route("/sites/:site_id/partials/top-pages", get(partials::top_pages))
-        .route("/sites/:site_id/partials/top-referrers", get(partials::top_referrers))
-        .route("/sites/:site_id/partials/top-countries", get(partials::top_countries))
-        .route("/sites/:site_id/partials/top-browsers", get(partials::top_browsers))
-        .route("/sites/:site_id/partials/top-devices", get(partials::top_devices))
+        .route(
+            "/sites/:site_id/partials/top-pages",
+            get(partials::top_pages),
+        )
+        .route(
+            "/sites/:site_id/partials/top-referrers",
+            get(partials::top_referrers),
+        )
+        .route(
+            "/sites/:site_id/partials/top-countries",
+            get(partials::top_countries),
+        )
+        .route(
+            "/sites/:site_id/partials/top-browsers",
+            get(partials::top_browsers),
+        )
+        .route(
+            "/sites/:site_id/partials/top-devices",
+            get(partials::top_devices),
+        )
         .layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()

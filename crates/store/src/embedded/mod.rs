@@ -5,7 +5,7 @@ pub mod reader;
 pub mod wal;
 pub mod writer;
 
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;
@@ -25,11 +25,7 @@ use stomatopod_core::{
 };
 
 use self::{
-    buffer::EventBuffer,
-    meta::SqliteMeta,
-    reader::EmbeddedReader,
-    wal::Wal,
-    writer::ParquetWriter,
+    buffer::EventBuffer, meta::SqliteMeta, reader::EmbeddedReader, wal::Wal, writer::ParquetWriter,
 };
 
 pub struct EmbeddedBackend {
@@ -146,7 +142,10 @@ impl MetaStore for EmbeddedBackend {
         self.meta.create_site(site).await
     }
 
-    async fn get_site(&self, id: Ulid) -> Result<Option<stomatopod_core::domain::site::Site>, StoreError> {
+    async fn get_site(
+        &self,
+        id: Ulid,
+    ) -> Result<Option<stomatopod_core::domain::site::Site>, StoreError> {
         self.meta.get_site(id).await
     }
 
@@ -189,7 +188,9 @@ impl MetaStore for EmbeddedBackend {
         self.meta.get_org(id).await
     }
 
-    async fn list_orgs(&self) -> Result<Vec<stomatopod_core::domain::org::Organization>, StoreError> {
+    async fn list_orgs(
+        &self,
+    ) -> Result<Vec<stomatopod_core::domain::org::Organization>, StoreError> {
         self.meta.list_orgs().await
     }
 

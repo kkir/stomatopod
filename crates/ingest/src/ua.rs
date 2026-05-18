@@ -42,11 +42,29 @@ pub fn parse(ua: &str) -> UaInfo {
 
 fn is_bot(ua: &str) -> bool {
     const BOT_MARKERS: &[&str] = &[
-        "bot", "crawler", "spider", "scraper", "headless",
-        "googlebot", "bingbot", "slurp", "duckduckbot", "baidu",
-        "yandexbot", "facebot", "ia_archiver", "pingdom", "uptimerobot",
-        "datadog", "newrelic", "curl/", "python-requests", "go-http-client",
-        "java/", "wget/", "libwww",
+        "bot",
+        "crawler",
+        "spider",
+        "scraper",
+        "headless",
+        "googlebot",
+        "bingbot",
+        "slurp",
+        "duckduckbot",
+        "baidu",
+        "yandexbot",
+        "facebot",
+        "ia_archiver",
+        "pingdom",
+        "uptimerobot",
+        "datadog",
+        "newrelic",
+        "curl/",
+        "python-requests",
+        "go-http-client",
+        "java/",
+        "wget/",
+        "libwww",
     ];
     let lower = ua.to_ascii_lowercase();
     BOT_MARKERS.iter().any(|&m| lower.contains(m))
@@ -133,7 +151,7 @@ fn extract_version(ua: &str, start: usize) -> String {
     let end = slice
         .find(|c: char| !c.is_ascii_digit() && c != '.')
         .unwrap_or(slice.len());
-    slice[..end].splitn(2, '.').next().unwrap_or("").to_string()
+    slice[..end].split('.').next().unwrap_or("").to_string()
 }
 
 fn extract_after(ua: &str, prefix: &str, term1: char, term2: char) -> String {
@@ -141,9 +159,7 @@ fn extract_after(ua: &str, prefix: &str, term1: char, term2: char) -> String {
         .map(|pos| {
             let start = pos + prefix.len();
             let slice = &ua[start..];
-            let end = slice
-                .find([term1, term2])
-                .unwrap_or(slice.len().min(16));
+            let end = slice.find([term1, term2]).unwrap_or(slice.len().min(16));
             slice[..end].trim().to_string()
         })
         .unwrap_or_default()
