@@ -137,7 +137,11 @@ async fn get_site_by_key() {
     let site = make_site(org.id);
     meta.create_site(&site).await.unwrap();
 
-    let found = meta.get_site_by_key(&site.public_key).await.unwrap().unwrap();
+    let found = meta
+        .get_site_by_key(&site.public_key)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(found.id, site.id);
 
     let missing = meta.get_site_by_key("no-such-key").await.unwrap();
@@ -161,10 +165,7 @@ async fn get_site_by_domain() {
         .unwrap();
     assert_eq!(found.id, site.id);
 
-    let missing = meta
-        .get_site_by_domain("no-such-domain.com")
-        .await
-        .unwrap();
+    let missing = meta.get_site_by_domain("no-such-domain.com").await.unwrap();
     assert!(missing.is_none());
 }
 

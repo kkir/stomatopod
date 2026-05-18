@@ -125,13 +125,14 @@ async fn setup() -> TestCtx {
 }
 
 /// Build a fresh test app from the shared state. Each call returns an owned service.
-fn make_app(state: Arc<AppState>) -> impl tower::Service<
+fn make_app(
+    state: Arc<AppState>,
+) -> impl tower::Service<
     Request<Body>,
     Response = axum::response::Response,
     Error = std::convert::Infallible,
 > {
-    build_router(state)
-        .layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 1234))))
+    build_router(state).layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 1234))))
 }
 
 async fn body_bytes(resp: axum::response::Response) -> bytes::Bytes {
@@ -214,7 +215,10 @@ async fn tracker_js_body_contains_function() {
     let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
     let bytes = body_bytes(resp).await;
     let body = std::str::from_utf8(&bytes).unwrap();
-    assert!(body.contains("function"), "tracker should contain JS functions");
+    assert!(
+        body.contains("function"),
+        "tracker should contain JS functions"
+    );
     assert!(
         body.contains("pageview"),
         "tracker should send pageview events"
@@ -571,10 +575,7 @@ async fn logout_clears_cookie_and_redirects_to_login() {
 #[tokio::test]
 async fn unauthenticated_dashboard_redirects_to_login() {
     let ctx = setup().await;
-    let req = Request::builder()
-        .uri("/")
-        .body(Body::empty())
-        .unwrap();
+    let req = Request::builder().uri("/").body(Body::empty()).unwrap();
 
     let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);
