@@ -12,7 +12,7 @@ use crate::{
         auth::{require_api_auth, require_auth},
         cors::ingest_cors,
     },
-    routes::{analytics, api, auth, dashboard, events, funnels, partials, sites, spans},
+    routes::{analytics, api, auth, dashboard, events, funnels, partials, sentinel, sites, spans},
     state::AppState,
 };
 
@@ -91,13 +91,32 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         .layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
-    Router::new()
+    // Sentinel SSE control stream — bearer-auth'd inline. MUST be
+    // attached OUTSIDE the CompressionLayer; gzip would buffer SSE
+    // chunks indefinitely and break keep-alive.
+    let sentinel_stream =
+        Router::new().route("/api/v1/sentinel/stream", get(sentinel::stream_handler));
+
+    // Operator control endpoint — session/bearer auth via require_api_auth.
+    let sentinel_control = Router::new()
+        .route("/api/v1/sentinel/control", post(sentinel::control_handler))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_api_auth,
+        ));
+
+    let compressed = Router::new()
         .merge(ingest_routes)
         .merge(span_ingest_routes)
         .merge(analytics_routes)
+        .merge(sentinel_control)
         .merge(auth_routes)
         .merge(dashboard_routes)
-        .layer(CompressionLayer::new())
+        .layer(CompressionLayer::new());
+
+    Router::new()
+        .merge(compressed)
+        .merge(sentinel_stream)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

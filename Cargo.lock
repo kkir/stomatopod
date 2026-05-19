@@ -3546,9 +3546,11 @@ dependencies = [
  "chrono",
  "cookie",
  "dashmap",
+ "futures-util",
  "hex",
  "http-body-util",
  "minijinja",
+ "reqwest",
  "serde",
  "serde_json",
  "stomatopod-core",
@@ -3557,6 +3559,7 @@ dependencies = [
  "stomatopod-store",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "tower 0.4.13",
  "tower-http 0.5.2",
  "tracing",
@@ -3824,6 +3827,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

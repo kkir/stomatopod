@@ -5,5 +5,6 @@ pub mod dashboard;
 pub mod events;
 pub mod funnels;
 pub mod partials;
+pub mod sentinel;
 pub mod sites;
 pub mod spans;

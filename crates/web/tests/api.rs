@@ -119,6 +119,8 @@ async fn setup() -> TestCtx {
         sentinel_token_cache: Arc::new(DashMap::new()),
         redact_keys: Arc::new(vec!["api_key".into(), "authorization".into()]),
         geo: Arc::new(GeoLookup::new(None)),
+        control_channels: DashMap::new(),
+        control_seq: std::sync::atomic::AtomicU64::new(0),
     });
 
     TestCtx {
@@ -312,6 +314,68 @@ async fn ingest_bot_user_agent_returns_no_content() {
 
     let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+}
+
+// ---- Sentinel control / SSE ----
+
+#[tokio::test]
+async fn sentinel_stream_unauthenticated_returns_401() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/api/v1/sentinel/stream")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn sentinel_control_publishes_to_broadcast_channel() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    // Pre-subscribe so the control POST has a receiver.
+    let mut rx = ctx.state.control_channel(site.id).subscribe();
+
+    let user_id = Ulid::new().to_string();
+    let token = sign_session(&ctx.secret, &user_id);
+
+    let body = serde_json::json!({
+        "site_id": site.id,
+        "agent_id": "agent-1",
+        "command": "kill",
+        "reason": "manual stop"
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/sentinel/control")
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let env = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv())
+        .await
+        .expect("timed out")
+        .expect("recv");
+    assert_eq!(env.agent_id, "agent-1");
+    match env.command {
+        stomatopod_core::domain::control::ControlCommand::Kill { reason } => {
+            assert_eq!(reason, "manual stop");
+        }
+        _ => panic!("expected Kill command"),
+    }
+
+    // The control endpoint must have written an Incident row too.
+    let incidents = ctx.backend.meta.list_incidents(site.id, 10).await.unwrap();
+    assert_eq!(incidents.len(), 1);
+    assert_eq!(incidents[0].agent_id, "agent-1");
 }
 
 // ---- Span ingest endpoint ----

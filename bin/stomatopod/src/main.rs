@@ -132,6 +132,8 @@ async fn serve(cfg: Config) -> Result<()> {
         sentinel_token_cache: Arc::new(DashMap::new()),
         redact_keys,
         geo,
+        control_channels: dashmap::DashMap::new(),
+        control_seq: std::sync::atomic::AtomicU64::new(0),
     });
 
     let router = build_router(state);
