@@ -53,3 +53,12 @@ reqwest = { workspace = true, optional = true }
 [dev-dependencies]
 tokio = { workspace = true }
 tempfile = { workspace = true }
+criterion = { workspace = true }
+chrono = { workspace = true }
+serde_json = { workspace = true }
+ulid = { workspace = true }
+
+[[bench]]
+name = "record_batch"
+harness = false
+required-features = ["embedded"]

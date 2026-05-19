@@ -40,32 +40,34 @@ pub fn parse(ua: &str) -> UaInfo {
     }
 }
 
-fn is_bot(ua: &str) -> bool {
-    const BOT_MARKERS: &[&str] = &[
-        "bot",
-        "crawler",
-        "spider",
-        "scraper",
-        "headless",
-        "googlebot",
-        "bingbot",
-        "slurp",
-        "duckduckbot",
-        "baidu",
-        "yandexbot",
-        "facebot",
-        "ia_archiver",
-        "pingdom",
-        "uptimerobot",
-        "datadog",
-        "newrelic",
-        "curl/",
-        "python-requests",
-        "go-http-client",
-        "java/",
-        "wget/",
-        "libwww",
-    ];
+// Markers ordered roughly by frequency of real bot traffic. Any UA that
+// contains one of these (case-insensitive) is treated as a bot.
+//
+// We intentionally don't list "googlebot", "bingbot", "yandexbot",
+// "duckduckbot", "facebot", or "uptimerobot" — each contains the generic
+// "bot" substring, so the first marker already catches them.
+const BOT_MARKERS: &[&str] = &[
+    "bot",
+    "crawler",
+    "spider",
+    "headless",
+    "curl/",
+    "python-requests",
+    "go-http-client",
+    "java/",
+    "wget/",
+    "scraper",
+    "slurp",
+    "baidu",
+    "ia_archiver",
+    "pingdom",
+    "datadog",
+    "newrelic",
+    "libwww",
+];
+
+#[doc(hidden)]
+pub fn is_bot(ua: &str) -> bool {
     let lower = ua.to_ascii_lowercase();
     BOT_MARKERS.iter().any(|&m| lower.contains(m))
 }

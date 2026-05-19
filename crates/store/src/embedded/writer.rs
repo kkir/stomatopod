@@ -148,7 +148,8 @@ impl ParquetWriter {
     }
 }
 
-fn events_to_record_batch(
+#[doc(hidden)]
+pub fn events_to_record_batch(
     events: &[Event],
     schema: arrow::datatypes::SchemaRef,
 ) -> anyhow::Result<RecordBatch> {
@@ -182,11 +183,15 @@ fn events_to_record_batch(
     let mut session_b = FixedSizeBinaryBuilder::with_capacity(n, 16);
     let mut props_b = StringBuilder::with_capacity(n, n * 8);
 
+    // Scratch buffers for the per-row ULID strings — avoids two `String`
+    // allocations per event.
+    let mut ulid_buf = [0u8; 26];
+    let mut site_buf = [0u8; 26];
     for e in events {
-        id_b.append_value(e.id.to_string());
-        site_id_b.append_value(e.site_id.to_string());
+        id_b.append_value(ulid_to_str(e.id, &mut ulid_buf));
+        site_id_b.append_value(ulid_to_str(e.site_id, &mut site_buf));
         name_b.append_value(&e.name);
-        kind_b.append_value(e.kind.to_string());
+        kind_b.append_value(e.kind.as_str());
         ts_b.append_value(e.timestamp.timestamp_micros());
         recv_b.append_value(e.received_at.timestamp_micros());
         url_b.append_value(&e.url);
@@ -200,7 +205,7 @@ fn events_to_record_batch(
         browser_ver_b.append_value(&e.browser_version);
         os_b.append_value(&e.os);
         os_ver_b.append_value(&e.os_version);
-        dev_b.append_value(e.device_type.to_string());
+        dev_b.append_value(e.device_type.as_str());
         sw_b.append_option(e.screen_width);
         sh_b.append_option(e.screen_height);
         lang_b.append_option(e.language.as_deref());
@@ -244,4 +249,37 @@ fn events_to_record_batch(
             Arc::new(props_b.finish()),
         ],
     )?)
+}
+
+/// Encode a ULID into a caller-provided 26-byte buffer using Crockford base32.
+/// Returns a `&str` view into the buffer so the caller can pass it straight
+/// into a `StringBuilder` without an intermediate `String` allocation.
+fn ulid_to_str(u: Ulid, buf: &mut [u8; 26]) -> &str {
+    const ALPHA: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    let n: u128 = u.0;
+    for (i, slot) in buf.iter_mut().enumerate() {
+        let shift = (25 - i) * 5;
+        *slot = ALPHA[((n >> shift) & 0x1F) as usize];
+    }
+    // SAFETY: every byte written is from ALPHA, which is ASCII.
+    unsafe { std::str::from_utf8_unchecked(buf) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ulid_to_str_matches_display() {
+        let u = Ulid::new();
+        let mut buf = [0u8; 26];
+        assert_eq!(ulid_to_str(u, &mut buf), u.to_string());
+    }
+
+    #[test]
+    fn ulid_to_str_known_value() {
+        let u = Ulid::from_string("01ARZ3NDEKTSV4RRFFQ69G5FAV").unwrap();
+        let mut buf = [0u8; 26];
+        assert_eq!(ulid_to_str(u, &mut buf), "01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    }
 }
