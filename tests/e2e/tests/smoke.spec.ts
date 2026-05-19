@@ -101,7 +101,7 @@ test("logged-in user can access the sites list page", async ({ page }) => {
   await page.fill('input[name="email"]', ADMIN_EMAIL);
   await page.fill('input[name="password"]', ADMIN_PASSWORD);
   await page.click('button[type="submit"]');
-  await page.waitForURL(/^\//);
+  await expect(page).not.toHaveURL(/\/login/);
 
   // Navigate to sites; requires an authenticated session cookie.
   await page.goto("/sites");
@@ -118,7 +118,7 @@ test("logout clears session and requires re-authentication", async ({
   await page.fill('input[name="email"]', ADMIN_EMAIL);
   await page.fill('input[name="password"]', ADMIN_PASSWORD);
   await page.click('button[type="submit"]');
-  await page.waitForURL(/^\//);
+  await expect(page).not.toHaveURL(/\/login/);
 
   // Logout via POST (the server expects a POST).
   await page.evaluate(async () => {
