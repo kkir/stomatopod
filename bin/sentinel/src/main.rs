@@ -1,26 +1,18 @@
-mod client;
-mod config;
-mod control;
-mod extractor;
-mod policy;
-mod pricing;
-mod proxy;
-
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use anyhow::Result;
 use axum::{routing::any, Router};
 use clap::Parser;
-use config::SentinelConfig;
 use tokio::net::TcpListener;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-use crate::{
+use sentinel::{
     client::{SessionRegistry, SpanShipper},
+    config::SentinelConfig,
     control::{run_control_loop, ControlState},
     policy::{PolicyConfig, PolicyEngine},
-    proxy::ProxyState,
+    proxy::{self, ProxyState},
 };
 
 #[derive(Parser)]

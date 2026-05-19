@@ -86,12 +86,22 @@ jobs:
       - name: cargo build --release
         run: cargo build --release
 
-      - name: Check binary size
+      - name: Check stomatopod binary size
         run: |
           size=$(stat -c%s target/release/stomatopod)
-          echo "Binary size: $((size / 1024 / 1024))MB ($size bytes)"
+          echo "stomatopod size: $((size / 1024 / 1024))MB ($size bytes)"
           if [ $size -gt 20971520 ]; then
-            echo "::warning::Binary exceeds 20MB target ($((size / 1024 / 1024))MB)"
+            echo "::warning::stomatopod binary exceeds 20MB target ($((size / 1024 / 1024))MB)"
+          fi
+
+      - name: Check sentinel binary size
+        run: |
+          size=$(stat -c%s target/release/sentinel)
+          echo "sentinel size: $((size / 1024 / 1024))MB ($size bytes)"
+          # Hyper + rustls puts the sidecar in a slightly different class
+          # from the analytics server; budget is intentionally larger.
+          if [ $size -gt 26214400 ]; then
+            echo "::warning::sentinel binary exceeds 25MB target ($((size / 1024 / 1024))MB)"
           fi
 
   e2e:

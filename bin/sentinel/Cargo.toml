@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+name = "sentinel"
+path = "src/lib.rs"
+
 [[bin]]
 name = "sentinel"
 path = "src/main.rs"
@@ -33,3 +37,4 @@ tokio-stream = "0.1"
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
 tempfile = { workspace = true }
+tower = { workspace = true, features = ["util"] }
