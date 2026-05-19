@@ -21,5 +21,15 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 ulid = { workspace = true }
 blake3 = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
 bytes = { workspace = true }
+axum = { workspace = true }
+parking_lot = { workspace = true }
+futures-util = "0.3"
+eventsource-stream = "0.2"
+once_cell = "1"
+tokio-stream = "0.1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+tempfile = { workspace = true }
