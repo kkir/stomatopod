@@ -6,6 +6,7 @@ members = [
     "crates/query",
     "crates/web",
     "bin/stomatopod",
+    "bin/sentinel",
 ]
 resolver = "2"
 

@@ -232,4 +232,110 @@ impl MetaStore for EmbeddedBackend {
     async fn delete_funnel(&self, id: Ulid) -> Result<(), StoreError> {
         self.meta.delete_funnel(id).await
     }
+
+    async fn upsert_agent(
+        &self,
+        agent: &stomatopod_core::domain::agent::Agent,
+    ) -> Result<(), StoreError> {
+        self.meta.upsert_agent(agent).await
+    }
+
+    async fn list_agents(
+        &self,
+        site_id: Ulid,
+    ) -> Result<Vec<stomatopod_core::domain::agent::Agent>, StoreError> {
+        self.meta.list_agents(site_id).await
+    }
+
+    async fn get_agent(
+        &self,
+        site_id: Ulid,
+        agent_id: &str,
+    ) -> Result<Option<stomatopod_core::domain::agent::Agent>, StoreError> {
+        self.meta.get_agent(site_id, agent_id).await
+    }
+
+    async fn create_sentinel_token(
+        &self,
+        token: &stomatopod_core::domain::agent::SentinelToken,
+    ) -> Result<(), StoreError> {
+        self.meta.create_sentinel_token(token).await
+    }
+
+    async fn list_sentinel_tokens(
+        &self,
+        site_id: Ulid,
+    ) -> Result<Vec<stomatopod_core::domain::agent::SentinelToken>, StoreError> {
+        self.meta.list_sentinel_tokens(site_id).await
+    }
+
+    async fn get_sentinel_token_by_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<stomatopod_core::domain::agent::SentinelToken>, StoreError> {
+        self.meta.get_sentinel_token_by_hash(token_hash).await
+    }
+
+    async fn touch_sentinel_token(&self, id: Ulid) -> Result<(), StoreError> {
+        self.meta.touch_sentinel_token(id).await
+    }
+
+    async fn delete_sentinel_token(&self, id: Ulid) -> Result<(), StoreError> {
+        self.meta.delete_sentinel_token(id).await
+    }
+
+    async fn create_alert_channel(
+        &self,
+        channel: &stomatopod_core::domain::agent::AlertChannel,
+    ) -> Result<(), StoreError> {
+        self.meta.create_alert_channel(channel).await
+    }
+
+    async fn list_alert_channels(
+        &self,
+        site_id: Ulid,
+    ) -> Result<Vec<stomatopod_core::domain::agent::AlertChannel>, StoreError> {
+        self.meta.list_alert_channels(site_id).await
+    }
+
+    async fn delete_alert_channel(&self, id: Ulid) -> Result<(), StoreError> {
+        self.meta.delete_alert_channel(id).await
+    }
+
+    async fn upsert_policy(
+        &self,
+        policy: &stomatopod_core::domain::policy::Policy,
+    ) -> Result<(), StoreError> {
+        self.meta.upsert_policy(policy).await
+    }
+
+    async fn get_policy(
+        &self,
+        site_id: Ulid,
+    ) -> Result<Option<stomatopod_core::domain::policy::Policy>, StoreError> {
+        self.meta.get_policy(site_id).await
+    }
+
+    async fn record_incident(
+        &self,
+        incident: &stomatopod_core::domain::incident::Incident,
+    ) -> Result<(), StoreError> {
+        self.meta.record_incident(incident).await
+    }
+
+    async fn list_incidents(
+        &self,
+        site_id: Ulid,
+        limit: u32,
+    ) -> Result<Vec<stomatopod_core::domain::incident::Incident>, StoreError> {
+        self.meta.list_incidents(site_id, limit).await
+    }
+
+    async fn update_incident_status(
+        &self,
+        id: Ulid,
+        status: stomatopod_core::domain::incident::IncidentStatus,
+    ) -> Result<(), StoreError> {
+        self.meta.update_incident_status(id, status).await
+    }
 }

@@ -1,4 +1,9 @@
+pub mod agent;
+pub mod agent_span;
+pub mod control;
 pub mod event;
+pub mod incident;
 pub mod org;
+pub mod policy;
 pub mod session;
 pub mod site;
