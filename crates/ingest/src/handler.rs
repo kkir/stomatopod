@@ -157,15 +157,17 @@ pub async fn handle_ingest_inner(
     }
 }
 
-struct UtmParams {
-    source: Option<String>,
-    medium: Option<String>,
-    campaign: Option<String>,
-    term: Option<String>,
-    content: Option<String>,
+#[doc(hidden)]
+pub struct UtmParams {
+    pub source: Option<String>,
+    pub medium: Option<String>,
+    pub campaign: Option<String>,
+    pub term: Option<String>,
+    pub content: Option<String>,
 }
 
-fn extract_utm(url: &str) -> UtmParams {
+#[doc(hidden)]
+pub fn extract_utm(url: &str) -> UtmParams {
     let mut out = UtmParams {
         source: None,
         medium: None,
@@ -182,21 +184,29 @@ fn extract_utm(url: &str) -> UtmParams {
     for pair in query.split('&') {
         let mut kv = pair.splitn(2, '=');
         let key = kv.next().unwrap_or("");
-        let val = kv.next().map(urlencoding_decode);
-        match key {
-            "utm_source" => out.source = val,
-            "utm_medium" => out.medium = val,
-            "utm_campaign" => out.campaign = val,
-            "utm_term" => out.term = val,
-            "utm_content" => out.content = val,
-            _ => {}
+        // Match key first; only decode the value if this slot is actually a utm field.
+        let slot: &mut Option<String> = match key {
+            "utm_source" => &mut out.source,
+            "utm_medium" => &mut out.medium,
+            "utm_campaign" => &mut out.campaign,
+            "utm_term" => &mut out.term,
+            "utm_content" => &mut out.content,
+            _ => continue,
+        };
+        if let Some(val) = kv.next() {
+            *slot = Some(urlencoding_decode(val));
         }
     }
     out
 }
 
-fn urlencoding_decode(s: &str) -> String {
+#[doc(hidden)]
+pub fn urlencoding_decode(s: &str) -> String {
     let bytes = s.as_bytes();
+    // Fast path: nothing to decode. Skip the Vec allocation and bytewise loop.
+    if memchr::memchr2(b'%', b'+', bytes).is_none() {
+        return s.to_owned();
+    }
     let mut decoded: Vec<u8> = Vec::with_capacity(s.len());
     let mut i = 0;
     while i < bytes.len() {
@@ -215,7 +225,10 @@ fn urlencoding_decode(s: &str) -> String {
         decoded.push(bytes[i]);
         i += 1;
     }
-    String::from_utf8_lossy(&decoded).into_owned()
+    // Valid UTF-8 in the common case (ASCII or properly-encoded UTF-8 bytes);
+    // fall back to lossy conversion for the rare invalid sequence.
+    String::from_utf8(decoded)
+        .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
 
 fn from_hex(b: u8) -> Option<u8> {

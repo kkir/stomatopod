@@ -68,3 +68,5 @@ cookie = "0.18"
 clap = { version = "4", features = ["derive", "env"] }
 tempfile = "3"
 http-body-util = "0.1"
+# Benchmarking
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }

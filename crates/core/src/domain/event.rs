@@ -60,12 +60,18 @@ pub enum EventKind {
     Custom,
 }
 
+impl EventKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EventKind::Pageview => "pageview",
+            EventKind::Custom => "custom",
+        }
+    }
+}
+
 impl std::fmt::Display for EventKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EventKind::Pageview => write!(f, "pageview"),
-            EventKind::Custom => write!(f, "custom"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
@@ -79,13 +85,19 @@ pub enum DeviceType {
     Unknown,
 }
 
+impl DeviceType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DeviceType::Desktop => "desktop",
+            DeviceType::Mobile => "mobile",
+            DeviceType::Tablet => "tablet",
+            DeviceType::Unknown => "unknown",
+        }
+    }
+}
+
 impl std::fmt::Display for DeviceType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DeviceType::Desktop => write!(f, "desktop"),
-            DeviceType::Mobile => write!(f, "mobile"),
-            DeviceType::Tablet => write!(f, "tablet"),
-            DeviceType::Unknown => write!(f, "unknown"),
-        }
+        f.write_str(self.as_str())
     }
 }
