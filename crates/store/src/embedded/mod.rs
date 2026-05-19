@@ -2,6 +2,7 @@ pub mod arrow_schema;
 pub mod buffer;
 pub mod meta;
 pub mod reader;
+pub mod spans;
 pub mod wal;
 pub mod writer;
 
@@ -14,24 +15,32 @@ use ulid::Ulid;
 
 use stomatopod_core::{
     config::EmbeddedConfig,
-    domain::event::Event,
+    domain::{agent_span::AgentSpan, event::Event},
     error::StoreError,
     query::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
         pageviews::{PageviewsQuery, PageviewsResult, TimeRange, TopList},
+        spans::{AgentSummary, SpanQuery, SpanRow},
     },
-    traits::{MetaStore, StorageBackend},
+    traits::{AgentStore, MetaStore, StorageBackend},
 };
 
 use self::{
-    buffer::EventBuffer, meta::SqliteMeta, reader::EmbeddedReader, wal::Wal, writer::ParquetWriter,
+    buffer::EventBuffer,
+    meta::SqliteMeta,
+    reader::EmbeddedReader,
+    spans::{buffer::SpanBuffer, reader::SpanReader, wal::SpanWal, writer::SpanParquetWriter},
+    wal::Wal,
+    writer::ParquetWriter,
 };
 
 pub struct EmbeddedBackend {
     pub meta: Arc<SqliteMeta>,
     pub reader: Arc<EmbeddedReader>,
+    pub span_reader: Arc<SpanReader>,
     tx: mpsc::Sender<Vec<Event>>,
+    span_tx: mpsc::Sender<Vec<AgentSpan>>,
 }
 
 impl EmbeddedBackend {
@@ -40,18 +49,27 @@ impl EmbeddedBackend {
         tokio::fs::create_dir_all(&data_dir).await?;
         tokio::fs::create_dir_all(data_dir.join("parquet")).await?;
         tokio::fs::create_dir_all(data_dir.join("wal")).await?;
+        tokio::fs::create_dir_all(data_dir.join("parquet_spans").join("v1")).await?;
+        tokio::fs::create_dir_all(data_dir.join("wal_spans")).await?;
 
         let meta = Arc::new(SqliteMeta::open(&data_dir.join("meta.db")).await?);
         let wal = Wal::open(&data_dir.join("wal"), cfg.wal_fsync_interval_ms)?;
         let buffer = Arc::new(EventBuffer::new(cfg.parquet_flush_rows * 4));
         let reader = Arc::new(EmbeddedReader::new(data_dir.join("parquet")).await?);
 
+        let span_wal = SpanWal::open(&data_dir.join("wal_spans"))?;
+        let span_buffer = Arc::new(SpanBuffer::new(cfg.parquet_flush_rows * 4));
+        let span_reader =
+            Arc::new(SpanReader::new(data_dir.join("parquet_spans").join("v1")).await?);
+
         // Channel for batched writes from the ingest handler
         let (tx, rx) = mpsc::channel::<Vec<Event>>(256);
+        let (span_tx, span_rx) = mpsc::channel::<Vec<AgentSpan>>(256);
 
         // Replay WAL into buffer on startup
         wal.replay(&buffer)?;
-        info!("WAL replay complete, starting Parquet flush worker");
+        span_wal.replay(&span_buffer)?;
+        info!("WAL replay complete, starting Parquet flush workers");
 
         // Start background Parquet flush task
         let flush_writer = ParquetWriter::new(
@@ -61,7 +79,25 @@ impl EmbeddedBackend {
         );
         tokio::spawn(flush_writer.run(rx, buffer.clone(), wal.clone(), reader.clone()));
 
-        Ok(Self { meta, reader, tx })
+        let span_writer = SpanParquetWriter::new(
+            data_dir.join("parquet_spans").join("v1"),
+            cfg.parquet_flush_rows,
+            cfg.parquet_flush_interval_s,
+        );
+        tokio::spawn(span_writer.run(
+            span_rx,
+            span_buffer.clone(),
+            span_wal.clone(),
+            span_reader.clone(),
+        ));
+
+        Ok(Self {
+            meta,
+            reader,
+            span_reader,
+            tx,
+            span_tx,
+        })
     }
 }
 
@@ -337,5 +373,37 @@ impl MetaStore for EmbeddedBackend {
         status: stomatopod_core::domain::incident::IncidentStatus,
     ) -> Result<(), StoreError> {
         self.meta.update_incident_status(id, status).await
+    }
+}
+
+#[async_trait]
+impl AgentStore for EmbeddedBackend {
+    async fn ingest_spans(&self, spans: Vec<AgentSpan>) -> Result<(), StoreError> {
+        self.span_tx
+            .send(spans)
+            .await
+            .map_err(|_| StoreError::Unavailable("span ingest channel closed".into()))
+    }
+
+    async fn query_spans(&self, q: &SpanQuery) -> Result<Vec<SpanRow>, StoreError> {
+        self.span_reader.query_spans(q).await
+    }
+
+    async fn summarize_agents(
+        &self,
+        site_id: Ulid,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<AgentSummary>, StoreError> {
+        self.span_reader.summarize_agents(site_id, since).await
+    }
+
+    async fn session_cost_usd(
+        &self,
+        site_id: Ulid,
+        agent_session_id: &str,
+    ) -> Result<f64, StoreError> {
+        self.span_reader
+            .session_cost_usd(site_id, agent_session_id)
+            .await
     }
 }
