@@ -80,6 +80,7 @@ struct TestCtx {
     backend: Arc<EmbeddedBackend>,
     secret: String,
     _ingest_rx: tokio::sync::mpsc::Receiver<stomatopod_core::domain::event::Event>,
+    _span_ingest_rx: tokio::sync::mpsc::Receiver<stomatopod_core::domain::agent_span::AgentSpan>,
     _dir: tempfile::TempDir,
 }
 
@@ -103,15 +104,20 @@ async fn setup() -> TestCtx {
     });
 
     let (ingest_tx, ingest_rx) = tokio::sync::mpsc::channel(256);
+    let (span_ingest_tx, span_ingest_rx) = tokio::sync::mpsc::channel(256);
 
     let state = Arc::new(AppState {
         backend: backend.clone(),
+        agent_store: backend.clone(),
         meta: backend.clone(),
         templates: build_templates(),
         config,
         tracker_hash: "testhash".into(),
         ingest_tx,
+        span_ingest_tx,
         site_cache: Arc::new(DashMap::new()),
+        sentinel_token_cache: Arc::new(DashMap::new()),
+        redact_keys: Arc::new(vec!["api_key".into(), "authorization".into()]),
         geo: Arc::new(GeoLookup::new(None)),
     });
 
@@ -120,6 +126,7 @@ async fn setup() -> TestCtx {
         backend,
         secret,
         _ingest_rx: ingest_rx,
+        _span_ingest_rx: span_ingest_rx,
         _dir: dir,
     }
 }
@@ -305,6 +312,117 @@ async fn ingest_bot_user_agent_returns_no_content() {
 
     let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+}
+
+// ---- Span ingest endpoint ----
+
+#[tokio::test]
+async fn span_ingest_without_bearer_returns_401() {
+    let ctx = setup().await;
+    let payload = serde_json::json!({"spans": []});
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/spans")
+        .header("content-type", "application/json")
+        .body(Body::from(payload.to_string()))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn span_ingest_unknown_token_returns_401() {
+    let ctx = setup().await;
+    let payload = serde_json::json!({"spans": []});
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/spans")
+        .header("authorization", "Bearer not-a-real-token")
+        .header("content-type", "application/json")
+        .body(Body::from(payload.to_string()))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn span_ingest_valid_token_redacts_and_enqueues() {
+    use stomatopod_core::domain::agent::SentinelToken;
+    use stomatopod_ingest::span_handler::token_hash;
+
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let raw_token = "sentinel-test-token-xyz";
+    let tok = SentinelToken {
+        id: Ulid::new(),
+        site_id: site.id,
+        name: "test-sidecar".into(),
+        token_hash: token_hash(raw_token),
+        created_at: Utc::now(),
+        last_used_at: None,
+    };
+    ctx.backend.meta.create_sentinel_token(&tok).await.unwrap();
+
+    let now = Utc::now();
+    let payload = serde_json::json!({
+        "spans": [{
+            "agent_id": "agent-a",
+            "agent_session_id": "sess-1",
+            "kind": "tool_call",
+            "model": "claude-opus-4-7",
+            "started_at": now,
+            "ended_at": now,
+            "input_tokens": 10,
+            "output_tokens": 20,
+            "cost_usd": 0.001,
+            "tool_name": "shell",
+            "tool_input_hash": "deadbeef",
+            "properties": {
+                "headers": {"api_key": "sk-leaky"},
+                "ok": "fine"
+            }
+        }]
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/spans")
+        .header("authorization", format!("Bearer {raw_token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(payload.to_string()))
+        .unwrap();
+    let mut state_ctx = ctx;
+    let resp = make_app(state_ctx.state.clone())
+        .oneshot(req)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    // The handler enqueues onto span_ingest_tx; we should receive one span.
+    let received = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        state_ctx._span_ingest_rx.recv(),
+    )
+    .await
+    .expect("timed out waiting for span")
+    .expect("channel closed");
+    assert_eq!(received.agent_id, "agent-a");
+    assert_eq!(received.input_tokens, 10);
+    assert_eq!(received.site_id, site.id);
+    // Redaction applied
+    let props = received.properties.unwrap();
+    assert_eq!(
+        props["headers"]["api_key"],
+        serde_json::Value::String("[redacted]".into())
+    );
+    assert!(props["headers"].get("ok").is_none());
+    assert_eq!(props["ok"], serde_json::json!("fine"));
 }
 
 #[tokio::test]

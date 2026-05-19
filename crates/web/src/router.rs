@@ -12,7 +12,7 @@ use crate::{
         auth::{require_api_auth, require_auth},
         cors::ingest_cors,
     },
-    routes::{analytics, api, auth, dashboard, events, funnels, partials, sites},
+    routes::{analytics, api, auth, dashboard, events, funnels, partials, sites, spans},
     state::AppState,
 };
 
@@ -22,6 +22,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/event", post(api::handle_ingest))
         .route("/tracker.js", get(api::tracker_js))
         .layer(ingest_cors());
+
+    // Sentinel span ingest. Bearer-auth'd via sentinel_tokens (handler
+    // checks the header itself; no middleware needed). No CORS since
+    // calls come from sidecars, not browsers.
+    let span_ingest_routes =
+        Router::new().route("/api/v1/spans", post(spans::handle_span_ingest_route));
 
     // Analytics JSON API routes (bearer token or session auth)
     let analytics_routes = Router::new()
@@ -87,6 +93,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     Router::new()
         .merge(ingest_routes)
+        .merge(span_ingest_routes)
         .merge(analytics_routes)
         .merge(auth_routes)
         .merge(dashboard_routes)

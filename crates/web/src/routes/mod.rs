@@ -6,3 +6,4 @@ pub mod events;
 pub mod funnels;
 pub mod partials;
 pub mod sites;
+pub mod spans;
