@@ -81,6 +81,7 @@ struct TestCtx {
     secret: String,
     _ingest_rx: tokio::sync::mpsc::Receiver<stomatopod_core::domain::event::Event>,
     _span_ingest_rx: tokio::sync::mpsc::Receiver<stomatopod_core::domain::agent_span::AgentSpan>,
+    alerts_rx: tokio::sync::mpsc::Receiver<stomatopod_core::domain::incident::Incident>,
     _dir: tempfile::TempDir,
 }
 
@@ -105,6 +106,7 @@ async fn setup() -> TestCtx {
 
     let (ingest_tx, ingest_rx) = tokio::sync::mpsc::channel(256);
     let (span_ingest_tx, span_ingest_rx) = tokio::sync::mpsc::channel(256);
+    let (alerts, alerts_rx) = stomatopod_web::alerts::AlertDispatcher::channel();
 
     let state = Arc::new(AppState {
         backend: backend.clone(),
@@ -121,6 +123,7 @@ async fn setup() -> TestCtx {
         geo: Arc::new(GeoLookup::new(None)),
         control_channels: DashMap::new(),
         control_seq: std::sync::atomic::AtomicU64::new(0),
+        alerts,
     });
 
     TestCtx {
@@ -129,6 +132,7 @@ async fn setup() -> TestCtx {
         secret,
         _ingest_rx: ingest_rx,
         _span_ingest_rx: span_ingest_rx,
+        alerts_rx,
         _dir: dir,
     }
 }
@@ -316,6 +320,97 @@ async fn ingest_bot_user_agent_returns_no_content() {
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 }
 
+// ---- Alert dispatcher (webhook) ----
+
+#[tokio::test]
+async fn webhook_alert_delivered_to_mock_sink() {
+    use std::sync::Mutex;
+    use stomatopod_core::domain::{
+        agent::{AlertChannel, AlertChannelKind},
+        incident::{Incident, IncidentStatus, IncidentTrigger},
+    };
+    use stomatopod_web::alerts::run_alert_dispatcher;
+
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    // Spin up a tiny receiver that captures the POST body.
+    let received: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+    let captured = received.clone();
+    let app = axum::Router::new().route(
+        "/hook",
+        axum::routing::post(move |axum::Json(v): axum::Json<serde_json::Value>| {
+            let captured = captured.clone();
+            async move {
+                *captured.lock().unwrap() = Some(v);
+                StatusCode::OK
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    // Register the webhook channel.
+    let channel = AlertChannel {
+        id: Ulid::new(),
+        site_id: site.id,
+        kind: AlertChannelKind::Webhook,
+        url: format!("http://{}/hook", addr),
+        secret: Some("topsecret".into()),
+        created_at: Utc::now(),
+        last_error_at: None,
+    };
+    ctx.backend
+        .meta
+        .create_alert_channel(&channel)
+        .await
+        .unwrap();
+
+    // Drive the dispatcher directly.
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    let meta_clone = ctx.backend.clone();
+    let handle = tokio::spawn(async move {
+        run_alert_dispatcher(rx, meta_clone as _).await;
+    });
+
+    let incident = Incident {
+        id: Ulid::new(),
+        site_id: site.id,
+        agent_id: "demo".into(),
+        trigger: IncidentTrigger::Repetition {
+            count: 7,
+            args_hash: "abc".into(),
+        },
+        status: IncidentStatus::Open,
+        opened_at: Utc::now(),
+        closed_at: None,
+    };
+    tx.send(incident).await.unwrap();
+
+    // Poll until the receiver got something or timeout.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        if received.lock().unwrap().is_some() {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            panic!("webhook never received the alert");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let body = received.lock().unwrap().clone().unwrap();
+    assert_eq!(body["agent_id"], "demo");
+    assert_eq!(body["trigger_kind"], "repetition");
+
+    handle.abort();
+}
+
 // ---- Sentinel control / SSE ----
 
 #[tokio::test]
@@ -327,6 +422,40 @@ async fn sentinel_stream_unauthenticated_returns_401() {
         .unwrap();
     let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn sentinel_control_emits_alert() {
+    let mut ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let user_id = Ulid::new().to_string();
+    let token = sign_session(&ctx.secret, &user_id);
+    let body = serde_json::json!({
+        "site_id": site.id,
+        "agent_id": "agent-alert-x",
+        "command": "kill",
+        "reason": "burned through budget"
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/sentinel/control")
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let incident =
+        tokio::time::timeout(std::time::Duration::from_millis(500), ctx.alerts_rx.recv())
+            .await
+            .expect("timed out waiting for alert")
+            .expect("channel closed");
+    assert_eq!(incident.agent_id, "agent-alert-x");
 }
 
 #[tokio::test]

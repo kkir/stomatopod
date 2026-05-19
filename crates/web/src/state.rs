@@ -15,6 +15,8 @@ use ulid::Ulid;
 
 use stomatopod_ingest::geo::GeoLookup;
 
+use crate::alerts::AlertDispatcher;
+
 pub struct AppState {
     pub backend: Arc<dyn StorageBackend>,
     pub agent_store: Arc<dyn AgentStore>,
@@ -41,6 +43,8 @@ pub struct AppState {
     /// Monotonic sequence used to dedupe control commands on the
     /// sidecar after reconnects.
     pub control_seq: AtomicU64,
+    /// Outbound alert dispatcher (webhook + Slack).
+    pub alerts: AlertDispatcher,
 }
 
 impl AppState {

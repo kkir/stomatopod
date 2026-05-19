@@ -14,7 +14,11 @@ use dashmap::DashMap;
 use stomatopod_core::config::{Config, Mode, StorageConfig};
 use stomatopod_ingest::{batch::run_batcher, geo::GeoLookup, span_batch::run_span_batcher};
 use stomatopod_store::embedded::EmbeddedBackend;
-use stomatopod_web::{router::build_router, state::AppState};
+use stomatopod_web::{
+    alerts::{run_alert_dispatcher, AlertDispatcher},
+    router::build_router,
+    state::AppState,
+};
 
 use cli::{Cli, Commands};
 
@@ -119,6 +123,12 @@ async fn serve(cfg: Config) -> Result<()> {
     };
 
     let redact_keys = Arc::new(cfg.sentinel.redact_keys.clone());
+    let (alerts, alerts_rx) = AlertDispatcher::channel();
+    let meta_for_alerts = meta.clone();
+    tokio::spawn(async move {
+        run_alert_dispatcher(alerts_rx, meta_for_alerts).await;
+    });
+
     let state = Arc::new(AppState {
         backend,
         agent_store,
@@ -134,6 +144,7 @@ async fn serve(cfg: Config) -> Result<()> {
         geo,
         control_channels: dashmap::DashMap::new(),
         control_seq: std::sync::atomic::AtomicU64::new(0),
+        alerts,
     });
 
     let router = build_router(state);

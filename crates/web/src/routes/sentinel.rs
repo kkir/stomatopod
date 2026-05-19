@@ -111,6 +111,7 @@ pub async fn control_handler(
     if let Err(e) = state.meta.record_incident(&incident).await {
         warn!("control: record_incident failed: {e}");
     }
+    state.alerts.dispatch(incident.clone());
 
     let tx = state.control_channel(req.site_id);
     let receivers = tx.send(env).unwrap_or(0);
