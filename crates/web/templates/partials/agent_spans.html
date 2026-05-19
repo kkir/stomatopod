@@ -1,0 +1,32 @@
+{% if rows|length == 0 %}
+  <p style="color: var(--muted)">No spans yet.</p>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Started</th>
+      <th>Kind</th>
+      <th>Model</th>
+      <th>Tool</th>
+      <th>Stop</th>
+      <th>In</th>
+      <th>Out</th>
+      <th>Cost</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.started_at }}</td>
+      <td>{{ r.kind }}</td>
+      <td><code>{{ r.model }}</code></td>
+      <td>{{ r.tool_name or "" }}</td>
+      <td>{{ r.stop_reason or "" }}</td>
+      <td>{{ r.input_tokens }}</td>
+      <td>{{ r.output_tokens }}</td>
+      <td>${{ '%.5f'|format(r.cost_usd) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}

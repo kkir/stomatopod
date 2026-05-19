@@ -72,6 +72,20 @@ fn build_templates() -> Environment<'static> {
         include_str!("../templates/partials/top_devices.html"),
     )
     .unwrap();
+    env.add_template("agents.html", include_str!("../templates/agents.html"))
+        .unwrap();
+    env.add_template("agent.html", include_str!("../templates/agent.html"))
+        .unwrap();
+    env.add_template(
+        "incidents.html",
+        include_str!("../templates/incidents.html"),
+    )
+    .unwrap();
+    env.add_template(
+        "partials/agent_spans.html",
+        include_str!("../templates/partials/agent_spans.html"),
+    )
+    .unwrap();
     env
 }
 
@@ -318,6 +332,70 @@ async fn ingest_bot_user_agent_returns_no_content() {
 
     let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+}
+
+// ---- Agents dashboard ----
+
+#[tokio::test]
+async fn agents_index_renders_when_no_data() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let user_id = Ulid::new().to_string();
+    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
+    let req = Request::builder()
+        .uri("/agents")
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = body_bytes(resp).await;
+    let html = std::str::from_utf8(&bytes).unwrap();
+    assert!(html.contains("Sentinel Agents"), "page heading missing");
+}
+
+#[tokio::test]
+async fn incidents_page_lists_manual_kill() {
+    use stomatopod_core::domain::incident::{Incident, IncidentStatus, IncidentTrigger};
+
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let inc = Incident {
+        id: Ulid::new(),
+        site_id: site.id,
+        agent_id: "agent-with-incident".into(),
+        trigger: IncidentTrigger::CostThreshold { usd: 5.0 },
+        status: IncidentStatus::Open,
+        opened_at: Utc::now(),
+        closed_at: None,
+    };
+    ctx.backend.meta.record_incident(&inc).await.unwrap();
+
+    let user_id = Ulid::new().to_string();
+    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
+    let req = Request::builder()
+        .uri("/incidents")
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = std::str::from_utf8(&body_bytes(resp).await)
+        .unwrap()
+        .to_string();
+    assert!(
+        html.contains("agent-with-incident"),
+        "incidents page should list the agent"
+    );
+    assert!(html.contains("cost"));
 }
 
 // ---- Alert dispatcher (webhook) ----

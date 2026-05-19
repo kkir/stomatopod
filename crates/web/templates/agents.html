@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Agents — Stomatopod{% endblock %}
+{% block content %}
+<div class="section-header">
+  <h2>Sentinel Agents</h2>
+  <a href="/incidents" class="btn btn-ghost">Incidents</a>
+</div>
+<div class="card">
+  {% if summaries|length == 0 %}
+    <p style="color: var(--muted)">No agent activity in the last 24 hours. Run a sidecar pointed at this server to start streaming spans.</p>
+  {% else %}
+    <table>
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Last seen</th>
+          <th>Spans</th>
+          <th>Input tokens</th>
+          <th>Output tokens</th>
+          <th>Cost (USD)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in summaries %}
+        <tr>
+          <td><a href="/agents/{{ a.agent_id }}">{{ a.agent_id }}</a></td>
+          <td>{{ a.last_seen_at }}</td>
+          <td>{{ a.total_spans }}</td>
+          <td>{{ a.total_input_tokens }}</td>
+          <td>{{ a.total_output_tokens }}</td>
+          <td>${{ '%.4f'|format(a.total_cost_usd) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</div>
+{% endblock %}

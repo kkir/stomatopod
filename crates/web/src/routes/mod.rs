@@ -1,3 +1,4 @@
+pub mod agents_dashboard;
 pub mod analytics;
 pub mod api;
 pub mod auth;

@@ -12,7 +12,10 @@ use crate::{
         auth::{require_api_auth, require_auth},
         cors::ingest_cors,
     },
-    routes::{analytics, api, auth, dashboard, events, funnels, partials, sentinel, sites, spans},
+    routes::{
+        agents_dashboard, analytics, api, auth, dashboard, events, funnels, partials, sentinel,
+        sites, spans,
+    },
     state::AppState,
 };
 
@@ -68,6 +71,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/sites/:site_id/funnels/:funnel_id",
             get(funnels::funnel_detail),
         )
+        // AI firewall dashboard
+        .route("/agents", get(agents_dashboard::agents_index))
+        .route("/agents/:agent_id", get(agents_dashboard::agent_detail))
+        .route(
+            "/agents/:agent_id/spans",
+            get(agents_dashboard::agent_spans_partial),
+        )
+        .route("/incidents", get(agents_dashboard::incidents_page))
         // HTMX partial routes
         .route(
             "/sites/:site_id/partials/top-pages",

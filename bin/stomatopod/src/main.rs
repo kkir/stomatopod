@@ -229,6 +229,22 @@ fn build_templates() -> Result<JinjaEnv<'static>> {
         "partials/top_devices.html",
         include_str!("../../../crates/web/templates/partials/top_devices.html"),
     )?;
+    env.add_template(
+        "agents.html",
+        include_str!("../../../crates/web/templates/agents.html"),
+    )?;
+    env.add_template(
+        "agent.html",
+        include_str!("../../../crates/web/templates/agent.html"),
+    )?;
+    env.add_template(
+        "incidents.html",
+        include_str!("../../../crates/web/templates/incidents.html"),
+    )?;
+    env.add_template(
+        "partials/agent_spans.html",
+        include_str!("../../../crates/web/templates/partials/agent_spans.html"),
+    )?;
 
     Ok(env)
 }

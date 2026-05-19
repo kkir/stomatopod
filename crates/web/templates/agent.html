@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Agent {{ agent_id }} — Stomatopod{% endblock %}
+{% block content %}
+<div class="section-header">
+  <div>
+    <h2>Agent <code>{{ agent_id }}</code></h2>
+    <p style="color: var(--muted); margin-top: 4px">Site <code>{{ site_id }}</code></p>
+  </div>
+  <div style="display:flex; gap: 8px;">
+    <button
+      class="btn"
+      style="background: var(--red); color: #fff"
+      hx-post="/api/v1/sentinel/control"
+      hx-headers='{"content-type":"application/json"}'
+      hx-vals='{"site_id":"{{ site_id }}","agent_id":"{{ agent_id }}","command":"kill","reason":"manual kill from dashboard"}'
+      hx-swap="none"
+      hx-on::after-request="document.getElementById('kill-status').textContent='Kill sent'">
+      Kill agent
+    </button>
+    <a href="#" onclick="openHint(); return false" class="btn btn-ghost">Send hint…</a>
+    <span id="kill-status" style="color: var(--muted); align-self:center"></span>
+  </div>
+</div>
+
+<div class="stat-grid" style="margin-bottom: 1.5rem">
+  <div class="card stat">
+    <div class="label">Spans (24h)</div>
+    <div class="value">{{ total_spans }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Input tokens (24h)</div>
+    <div class="value">{{ total_input_tokens }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Output tokens (24h)</div>
+    <div class="value">{{ total_output_tokens }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Cost (24h)</div>
+    <div class="value">${{ '%.4f'|format(total_cost_usd) }}</div>
+  </div>
+</div>
+
+<div class="card"
+     hx-get="/agents/{{ agent_id }}/spans?site_id={{ site_id }}"
+     hx-trigger="load, every 2s"
+     hx-swap="innerHTML">
+  <p style="color: var(--muted)">Loading spans…</p>
+</div>
+
+<dialog id="hint-modal" style="background: var(--surface); color: var(--text); border:1px solid var(--border); border-radius:8px; padding:1.25rem; min-width: 360px">
+  <h2>Send hint</h2>
+  <form id="hint-form" style="margin-top: 1rem; display:flex; flex-direction:column; gap: 8px">
+    <textarea name="message" rows="4" required style="background: var(--bg); color: var(--text); border:1px solid var(--border); padding: 8px; border-radius: 6px; font-family: inherit"></textarea>
+    <div style="display:flex; gap: 8px; justify-content: flex-end">
+      <button type="button" onclick="document.getElementById('hint-modal').close()" class="btn btn-ghost">Cancel</button>
+      <button type="submit" class="btn btn-primary">Send</button>
+    </div>
+  </form>
+</dialog>
+<script>
+function openHint() { document.getElementById('hint-modal').showModal(); }
+document.getElementById('hint-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const message = e.target.message.value;
+  await fetch('/api/v1/sentinel/control', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      site_id: "{{ site_id }}",
+      agent_id: "{{ agent_id }}",
+      command: "hint",
+      message
+    }),
+    credentials: 'same-origin'
+  });
+  document.getElementById('hint-modal').close();
+});
+</script>
+{% endblock %}
