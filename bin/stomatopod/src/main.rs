@@ -138,7 +138,11 @@ async fn serve(cfg: Config) -> Result<()> {
 fn load_config(path: &str) -> Result<Config> {
     let cfg = ConfigBuilder::builder()
         .add_source(File::with_name(path).required(false))
-        .add_source(Environment::with_prefix("STOMATOPOD").separator("__"))
+        .add_source(
+            Environment::with_prefix("STOMATOPOD")
+                .prefix_separator("_")
+                .separator("__"),
+        )
         .build()?;
     Ok(cfg.try_deserialize()?)
 }

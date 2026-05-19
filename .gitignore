@@ -2,5 +2,6 @@
 /data
 *.mmdb
 stomatopod.toml
+!tests/e2e/stomatopod.toml
 .env
 *.log

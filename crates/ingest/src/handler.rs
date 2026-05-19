@@ -226,3 +226,68 @@ fn from_hex(b: u8) -> Option<u8> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utm_all_params_extracted() {
+        let params = extract_utm(
+            "https://example.com/?utm_source=google&utm_medium=cpc&utm_campaign=spring&utm_term=rust&utm_content=banner",
+        );
+        assert_eq!(params.source.as_deref(), Some("google"));
+        assert_eq!(params.medium.as_deref(), Some("cpc"));
+        assert_eq!(params.campaign.as_deref(), Some("spring"));
+        assert_eq!(params.term.as_deref(), Some("rust"));
+        assert_eq!(params.content.as_deref(), Some("banner"));
+    }
+
+    #[test]
+    fn utm_no_query_string_returns_none() {
+        let params = extract_utm("https://example.com/page");
+        assert!(params.source.is_none());
+        assert!(params.medium.is_none());
+        assert!(params.campaign.is_none());
+        assert!(params.term.is_none());
+        assert!(params.content.is_none());
+    }
+
+    #[test]
+    fn utm_ignores_fragment_params() {
+        let params = extract_utm("https://example.com/?utm_source=twitter#utm_medium=wrong");
+        assert_eq!(params.source.as_deref(), Some("twitter"));
+        assert!(params.medium.is_none());
+    }
+
+    #[test]
+    fn utm_percent_encoded_values_decoded() {
+        let params = extract_utm("https://example.com/?utm_campaign=hello%20world");
+        assert_eq!(params.campaign.as_deref(), Some("hello world"));
+    }
+
+    #[test]
+    fn utm_plus_encoded_space_decoded() {
+        let params = extract_utm("https://example.com/?utm_term=hello+world");
+        assert_eq!(params.term.as_deref(), Some("hello world"));
+    }
+
+    #[test]
+    fn utm_partial_percent_encoding_handled() {
+        // Incomplete % sequence should be passed through
+        let params = extract_utm("https://example.com/?utm_source=a%2");
+        assert!(params.source.is_some());
+    }
+
+    #[test]
+    fn utm_empty_value_still_present() {
+        let params = extract_utm("https://example.com/?utm_source=");
+        assert_eq!(params.source.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn utm_non_utm_params_ignored() {
+        let params = extract_utm("https://example.com/?foo=bar&baz=qux");
+        assert!(params.source.is_none());
+    }
+}

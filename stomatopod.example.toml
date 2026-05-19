@@ -1,0 +1,37 @@
+# Stomatopod configuration reference.
+# Copy this file to stomatopod.toml and adjust as needed.
+# All values shown are the defaults unless noted otherwise.
+# Every setting can also be overridden by an environment variable:
+#   STOMATOPOD_<SECTION>__<KEY>=value  (double-underscore as separator)
+# Example: STOMATOPOD_AUTH__SECRET_KEY=mysecret
+
+# Server listen address.
+[listen]
+host = "0.0.0.0"
+port = 8080
+# tls_cert = "/etc/ssl/certs/server.crt"
+# tls_key  = "/etc/ssl/private/server.key"
+
+# Authentication.  secret_key is required and has no default.
+[auth]
+secret_key = ""          # REQUIRED — set a long random string
+session_ttl_s = 2592000 # 30 days
+
+# Storage backend.  Only "embedded" is currently implemented.
+[storage]
+backend = "embedded"
+data_dir = "./data"
+wal_fsync_interval_ms = 200
+parquet_flush_rows = 50000
+parquet_flush_interval_s = 30
+
+# Optional MaxMind GeoLite2-City database for country/region lookup.
+[geo]
+# mmdb_path = "/var/lib/stomatopod/GeoLite2-City.mmdb"
+
+# Ingest pipeline tuning.
+[limits]
+ingest_channel_size = 65536
+ingest_batch_size = 1000
+ingest_flush_interval_ms = 100
+max_events_per_request = 10
