@@ -47,8 +47,11 @@ test("marketing homepage renders at / without auth", async ({ page }) => {
   // Should NOT redirect to /login.
   await expect(page).not.toHaveURL(/\/login/);
   await expect(page).toHaveURL(/\/$/);
-  // Marketing nav has a "Sign in" CTA.
-  await expect(page.getByRole("link", { name: /sign in/i })).toBeVisible();
+  // Marketing nav has a "Sign in" CTA. Scope to the nav so we don't match
+  // the body CTA or footer link, which also link to /login.
+  await expect(
+    page.getByRole("navigation").getByRole("link", { name: /sign in/i }),
+  ).toBeVisible();
 });
 
 // ---- Dashboard (requires auth) ----
