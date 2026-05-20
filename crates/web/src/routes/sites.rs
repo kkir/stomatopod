@@ -61,7 +61,7 @@ pub async fn create_site(
     };
 
     match state.meta.create_site(&site).await {
-        Ok(_) => Redirect::to(&format!("/sites/{}", site.id)).into_response(),
+        Ok(_) => Redirect::to(&format!("/app/sites/{}", site.id)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

@@ -139,6 +139,16 @@ async fn serve(cfg: Config) -> Result<()> {
         hex::encode(&h.as_bytes()[..8])
     };
 
+    // Marketing-site static assets are also embedded and cache-busted by hash.
+    let marketing_css_hash = {
+        let h = blake3::hash(stomatopod_web::routes::api::MARKETING_CSS.as_bytes());
+        hex::encode(&h.as_bytes()[..8])
+    };
+    let anime_js_hash = {
+        let h = blake3::hash(stomatopod_web::routes::api::ANIME_JS.as_bytes());
+        hex::encode(&h.as_bytes()[..8])
+    };
+
     let redact_keys = Arc::new(cfg.sentinel.redact_keys.clone());
     let (alerts, alerts_rx) = AlertDispatcher::channel();
     let meta_for_alerts = meta.clone();
@@ -153,6 +163,8 @@ async fn serve(cfg: Config) -> Result<()> {
         templates,
         config: cfg.clone(),
         tracker_hash,
+        marketing_css_hash,
+        anime_js_hash,
         ingest_tx,
         span_ingest_tx,
         site_cache: Arc::new(DashMap::new()),
@@ -261,6 +273,40 @@ fn build_templates() -> Result<JinjaEnv<'static>> {
     env.add_template(
         "partials/agent_spans.html",
         include_str!("../../../crates/web/templates/partials/agent_spans.html"),
+    )?;
+
+    // Marketing site
+    env.add_template(
+        "marketing/base.html",
+        include_str!("../../../crates/web/templates/marketing/base.html"),
+    )?;
+    env.add_template(
+        "marketing/home.html",
+        include_str!("../../../crates/web/templates/marketing/home.html"),
+    )?;
+    env.add_template(
+        "marketing/web_analytics.html",
+        include_str!("../../../crates/web/templates/marketing/web_analytics.html"),
+    )?;
+    env.add_template(
+        "marketing/ai_firewall.html",
+        include_str!("../../../crates/web/templates/marketing/ai_firewall.html"),
+    )?;
+    env.add_template(
+        "marketing/for_saas.html",
+        include_str!("../../../crates/web/templates/marketing/for_saas.html"),
+    )?;
+    env.add_template(
+        "marketing/for_agencies.html",
+        include_str!("../../../crates/web/templates/marketing/for_agencies.html"),
+    )?;
+    env.add_template(
+        "marketing/for_ai_teams.html",
+        include_str!("../../../crates/web/templates/marketing/for_ai_teams.html"),
+    )?;
+    env.add_template(
+        "marketing/for_regulated.html",
+        include_str!("../../../crates/web/templates/marketing/for_regulated.html"),
     )?;
 
     Ok(env)

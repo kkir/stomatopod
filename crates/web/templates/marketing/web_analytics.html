@@ -1,0 +1,124 @@
+{% extends "marketing/base.html" %}
+{% block title %}Web Analytics — Stomatopod{% endblock %}
+{% block meta_description %}Cookieless, self-hosted web analytics. Pageviews, sessions, referrers, funnels — in a 1.4 KB tracker and a single Rust binary.{% endblock %}
+
+{% block content %}
+
+<section class="relative overflow-hidden bg-hero-gradient text-white">
+  <div class="absolute inset-0 grid-bg opacity-25 pointer-events-none"></div>
+  <div class="absolute inset-0 bg-glow-radial pointer-events-none"></div>
+  <div class="container-wide relative pt-20 pb-24 md:pt-28 md:pb-32">
+    <div class="max-w-3xl">
+      <span class="pill-dark" data-anim="hero">Web Analytics</span>
+      <h1 class="h1 mt-6 text-white" data-anim="hero">
+        Pageviews, sessions, and funnels &mdash; <span class="text-accent-light">without the cookie banner.</span>
+      </h1>
+      <p class="lede mt-6 text-slate-300 max-w-2xl" data-anim="hero">
+        A 1.4&nbsp;KB tracker that drops nothing on your visitors and a self-hosted backend you can read end to end. The analytics product you can put in front of a privacy officer without flinching.
+      </p>
+      <div class="mt-8 flex flex-wrap gap-3" data-anim="hero">
+        <a href="/login" class="btn-primary">Sign in</a>
+        <a href="#install" class="btn-outline-light">See the snippet</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="container-wide mt-20">
+  <div class="max-w-2xl reveal">
+    <span class="eyebrow">What it does</span>
+    <h2 class="h2 mt-2">Everything you actually look at in GA. None of the bloat.</h2>
+  </div>
+  <div class="mt-12 grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+    <div class="card reveal">
+      <h3 class="h3 text-base">Cookieless sessions</h3>
+      <p class="mt-3 text-sm text-slate-600">Sessions derive from a hash of IP + user-agent. No cookies set, no fingerprinting beyond what the browser already sends.</p>
+    </div>
+    <div class="card reveal" data-delay="60">
+      <h3 class="h3 text-base">IP anonymization</h3>
+      <p class="mt-3 text-sm text-slate-600">The last octet of IPv4 is zeroed before anything reaches storage. Geo lookup runs against the anonymized address.</p>
+    </div>
+    <div class="card reveal" data-delay="120">
+      <h3 class="h3 text-base">Custom events &amp; properties</h3>
+      <p class="mt-3 text-sm text-slate-600">Send arbitrary named events from the tracker. Each event carries a JSON property bag you query in the dashboard.</p>
+    </div>
+    <div class="card reveal" data-delay="180">
+      <h3 class="h3 text-base">Funnels</h3>
+      <p class="mt-3 text-sm text-slate-600">Define multi-step conversion funnels. Drop-off, conversion rate, and per-step counts &mdash; on real session timelines.</p>
+    </div>
+    <div class="card reveal" data-delay="240">
+      <h3 class="h3 text-base">Referrers, UTM, devices</h3>
+      <p class="mt-3 text-sm text-slate-600">Top pages, top referrers, browsers, devices, countries &mdash; the columns you scan first, laid out where you expect them.</p>
+    </div>
+    <div class="card reveal" data-delay="300">
+      <h3 class="h3 text-base">Real-time ingest</h3>
+      <p class="mt-3 text-sm text-slate-600">Events land in an in-memory channel, batch-flush to Parquet on a configurable interval. Sub-second dashboards on modest hardware.</p>
+    </div>
+  </div>
+</section>
+
+<section class="container-wide mt-24">
+  <div class="rounded-3xl bg-slate-50 border border-slate-200 p-8 md:p-12 reveal">
+    <div class="grid md:grid-cols-2 gap-10 items-center">
+      <div>
+        <span class="eyebrow">vs. Google Analytics</span>
+        <h2 class="h2 mt-2">A different deal.</h2>
+        <p class="lede mt-4 text-slate-600">GA gives you a free dashboard in exchange for shipping every visitor's behavior to Google. Stomatopod gives you the dashboard in exchange for running a small Rust process.</p>
+      </div>
+      <div class="space-y-3">
+        <div class="check-row"><span><strong>Your data stays on your servers.</strong> No third-party requests in the tracker.</span></div>
+        <div class="check-row"><span><strong>No consent banner required</strong> for most use cases &mdash; nothing personally identifying is stored.</span></div>
+        <div class="check-row"><span><strong>No per-event pricing.</strong> Run it on a $5 VPS; the binary is small and the storage is Parquet.</span></div>
+        <div class="check-row"><span><strong>AGPL-3.0 source.</strong> Read every line, fork it, run it forever.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="container-wide mt-24">
+  <div class="grid md:grid-cols-2 gap-12 items-center">
+    <div class="reveal">
+      <span class="eyebrow">Install</span>
+      <h2 class="h2 mt-2">One script tag. That's the integration.</h2>
+      <p class="lede mt-4">Drop a tracker snippet into your <code>&lt;head&gt;</code> with your site's public key. No SDK to install, no bundle to ship.</p>
+      <ul class="mt-6 space-y-3">
+        <li class="check-row"><span>1.4 KB minified, no dependencies</span></li>
+        <li class="check-row"><span>Captures pageviews automatically</span></li>
+        <li class="check-row"><span><code>stomatopod('event', name, props)</code> for custom events</span></li>
+        <li class="check-row"><span>Long-cache headers; visitors pay for it once per year</span></li>
+      </ul>
+    </div>
+    <div class="reveal" data-delay="120">
+      <div class="code-block">
+<span class="c-comment">&lt;!-- Drop into &lt;head&gt; --&gt;</span>
+&lt;script
+  src=<span class="c-str">"https://your-host/tracker.js"</span>
+  data-site=<span class="c-str">"&lt;your-public-key&gt;"</span>
+  defer&gt;
+&lt;/script&gt;
+
+<span class="c-comment">// Custom event from anywhere</span>
+stomatopod(<span class="c-str">'event'</span>, <span class="c-str">'signup'</span>, {
+  plan: <span class="c-str">'pro'</span>,
+  source: <span class="c-str">'launch_page'</span>,
+});
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="container-wide mt-24 mb-12">
+  <div class="rounded-3xl bg-hero-gradient text-white p-10 md:p-14 text-center relative overflow-hidden reveal">
+    <div class="absolute inset-0 bg-glow-radial pointer-events-none"></div>
+    <div class="relative">
+      <h2 class="h2 text-white">Skip the consent fatigue.</h2>
+      <p class="mt-4 text-slate-300 max-w-xl mx-auto">Self-hosted analytics that respects your visitors and your VPS bill.</p>
+      <div class="mt-8 flex flex-wrap justify-center gap-3">
+        <a href="/login" class="btn-primary">Sign in</a>
+        <a href="/ai-firewall" class="btn-outline-light">See the AI Firewall</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}

@@ -1,0 +1,79 @@
+{% extends "marketing/base.html" %}
+{% block title %}Stomatopod for agencies & consultancies{% endblock %}
+{% block meta_description %}Self-hosted analytics for digital agencies: many sites in one dashboard, your clients' data on your infrastructure, AGPL-friendly licensing.{% endblock %}
+
+{% block content %}
+
+<section class="relative overflow-hidden bg-hero-gradient text-white">
+  <div class="absolute inset-0 grid-bg opacity-25 pointer-events-none"></div>
+  <div class="absolute inset-0 bg-glow-radial pointer-events-none"></div>
+  <div class="container-wide relative pt-20 pb-24 md:pt-28 md:pb-32">
+    <div class="max-w-3xl">
+      <span class="pill-dark" data-anim="hero">For agencies & consultancies</span>
+      <h1 class="h1 mt-6 text-white" data-anim="hero">
+        Your clients' analytics, <span class="text-accent-light">on your infrastructure.</span>
+      </h1>
+      <p class="lede mt-6 text-slate-300 max-w-2xl" data-anim="hero">
+        Manage many sites from one dashboard. Keep client data on hardware you control. Hand off when the engagement ends &mdash; or don't, because they want to keep paying you to run it.
+      </p>
+      <div class="mt-8 flex flex-wrap gap-3" data-anim="hero">
+        <a href="/web-analytics" class="btn-primary">Web Analytics</a>
+        <a href="/login" class="btn-outline-light">Sign in</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="container-wide mt-20">
+  <div class="max-w-2xl reveal">
+    <span class="eyebrow">Built for the way you actually work</span>
+    <h2 class="h2 mt-2">One backend. Many sites. Many clients.</h2>
+  </div>
+  <div class="mt-12 grid md:grid-cols-3 gap-5">
+    <div class="card reveal">
+      <h3 class="h3 text-base">Multi-site by default</h3>
+      <p class="mt-3 text-sm text-slate-600">Every site has its own public key, dashboard, and funnels. Spin up a new client in a minute.</p>
+    </div>
+    <div class="card reveal" data-delay="80">
+      <h3 class="h3 text-base">Bring-your-own-data</h3>
+      <p class="mt-3 text-sm text-slate-600">No GA, no Plausible cloud, no third-party data processor agreements. The data lives where you run the binary.</p>
+    </div>
+    <div class="card reveal" data-delay="160">
+      <h3 class="h3 text-base">Hand-off ready</h3>
+      <p class="mt-3 text-sm text-slate-600">Migration is a domain change. Want to give the client the dashboard? Move the binary and the data dir. Done.</p>
+    </div>
+  </div>
+</section>
+
+<section class="container-wide mt-24">
+  <div class="rounded-3xl bg-slate-50 border border-slate-200 p-8 md:p-12 reveal">
+    <div class="grid md:grid-cols-2 gap-10 items-center">
+      <div>
+        <span class="eyebrow">Licensing</span>
+        <h2 class="h2 mt-2">AGPL works for agency work.</h2>
+        <p class="lede mt-4 text-slate-600">You run Stomatopod for your clients. You don't sublicense the source. AGPL is a fine fit &mdash; it's the deployments you can run, not a restriction on the client relationship.</p>
+      </div>
+      <div class="space-y-3">
+        <div class="check-row"><span>Run as many instances as you like.</span></div>
+        <div class="check-row"><span>White-label friendly &mdash; brand the dashboard, the tracker URL, the binary name.</span></div>
+        <div class="check-row"><span>Source available to audit before you stake a client relationship on it.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="container-wide mt-24 mb-12">
+  <div class="rounded-3xl bg-hero-gradient text-white p-10 md:p-14 text-center relative overflow-hidden reveal">
+    <div class="absolute inset-0 bg-glow-radial pointer-events-none"></div>
+    <div class="relative">
+      <h2 class="h2 text-white">A retainer line item you'll actually keep.</h2>
+      <p class="mt-4 text-slate-300 max-w-xl mx-auto">Hosted analytics, in your infrastructure, for the entire client book.</p>
+      <div class="mt-8 flex flex-wrap justify-center gap-3">
+        <a href="/web-analytics" class="btn-primary">See Web Analytics</a>
+        <a href="https://github.com" class="btn-outline-light">View source</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}

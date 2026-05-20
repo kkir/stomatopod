@@ -40,3 +40,30 @@ pub async fn tracker_js(State(_state): State<Arc<AppState>>) -> impl IntoRespons
         .body(TRACKER.to_string())
         .unwrap()
 }
+
+/// Compiled marketing CSS (Tailwind output). Embedded at compile time and
+/// served from a hash-busted URL by [`crate::routes::marketing`].
+pub static MARKETING_CSS: &str = include_str!("../../../../assets/dist/marketing.css");
+/// Vendored anime.js bundle, served from a hash-busted URL.
+pub static ANIME_JS: &str = include_str!("../../../../assets/vendor/anime.min.js");
+
+pub async fn marketing_css() -> impl IntoResponse {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/css; charset=utf-8")
+        .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+        .body(MARKETING_CSS.to_string())
+        .unwrap()
+}
+
+pub async fn anime_js() -> impl IntoResponse {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )
+        .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+        .body(ANIME_JS.to_string())
+        .unwrap()
+}

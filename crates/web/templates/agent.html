@@ -33,7 +33,7 @@
 </div>
 
 <div class="card"
-     hx-get="/agents/{{ agent_id }}/spans?site_id={{ site_id }}"
+     hx-get="/app/agents/{{ agent_id }}/spans?site_id={{ site_id }}"
      hx-trigger="load, every 2s"
      hx-swap="innerHTML">
   <p style="color: var(--muted)">Loading spans…</p>

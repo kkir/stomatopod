@@ -37,7 +37,7 @@ pub async fn index(State(state): State<Arc<AppState>>) -> Response {
         .into_response();
     }
 
-    Redirect::to(&format!("/sites/{}", sites[0].id)).into_response()
+    Redirect::to(&format!("/app/sites/{}", sites[0].id)).into_response()
 }
 
 pub async fn site_overview(

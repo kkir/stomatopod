@@ -6,9 +6,9 @@
 </div>
 
 <div class="tabs" style="margin-bottom:1.5rem">
-  <a href="/sites/{{ site.id }}?range={{ range }}">Overview</a>
-  <a href="/sites/{{ site.id }}/events?range={{ range }}">Events</a>
-  <a href="/sites/{{ site.id }}/funnels?range={{ range }}" class="active">Funnels</a>
+  <a href="/app/sites/{{ site.id }}?range={{ range }}">Overview</a>
+  <a href="/app/sites/{{ site.id }}/events?range={{ range }}">Events</a>
+  <a href="/app/sites/{{ site.id }}/funnels?range={{ range }}" class="active">Funnels</a>
 </div>
 
 {% if result %}
@@ -27,14 +27,14 @@
     {% endfor %}
   </div>
 </div>
-<a href="/sites/{{ site.id }}/funnels" class="btn btn-ghost">← All Funnels</a>
+<a href="/app/sites/{{ site.id }}/funnels" class="btn btn-ghost">← All Funnels</a>
 {% else %}
 
 <!-- Funnel list + create form -->
 {% if funnels %}
 <div style="display:grid;gap:.75rem;margin-bottom:1.5rem">
   {% for f in funnels %}
-  <a href="/sites/{{ site.id }}/funnels/{{ f.id }}?range={{ range }}" style="display:block;text-decoration:none">
+  <a href="/app/sites/{{ site.id }}/funnels/{{ f.id }}?range={{ range }}" style="display:block;text-decoration:none">
     <div class="card" style="display:flex;justify-content:space-between;align-items:center">
       <span style="font-weight:500">{{ f.name }}</span>
       <span style="color:#8892a4;font-size:12px">View →</span>
@@ -46,7 +46,7 @@
 
 <div class="card">
   <h2 style="margin-bottom:1rem">Create Funnel</h2>
-  <form method="post" action="/sites/{{ site.id }}/funnels">
+  <form method="post" action="/app/sites/{{ site.id }}/funnels">
     <div style="margin-bottom:.75rem">
       <label style="display:block;font-size:12px;color:#8892a4;margin-bottom:4px">Funnel Name</label>
       <input name="name" placeholder="e.g. Signup Flow" required style="width:100%">
