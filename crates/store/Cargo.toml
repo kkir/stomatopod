@@ -17,7 +17,7 @@ embedded = [
     "dep:crc32fast",
 ]
 postgres = []
-clickhouse = ["dep:reqwest"]
+clickhouse = ["dep:reqwest", "dep:hex"]
 
 [dependencies]
 stomatopod-core = { path = "../core" }
@@ -49,6 +49,7 @@ crc32fast = { workspace = true, optional = true }
 
 # ClickHouse backend
 reqwest = { workspace = true, optional = true }
+hex = { version = "0.4", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

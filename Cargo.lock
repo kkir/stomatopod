@@ -3519,6 +3519,7 @@ dependencies = [
  "criterion",
  "crossbeam",
  "datafusion",
+ "hex",
  "parking_lot",
  "parquet",
  "reqwest",
