@@ -58,9 +58,11 @@ pub struct SpanIngestRow {
 
 pub struct SpanIngestContext {
     pub meta: Arc<dyn MetaStore>,
-    pub tx: mpsc::Sender<AgentSpan>,
-    /// Cache: token_hash → site_id. Avoids a SQLite hit on every span POST.
-    pub token_cache: Arc<DashMap<String, Ulid>>,
+    pub tx: mpsc::Sender<Vec<AgentSpan>>,
+    /// Cache: token_hash → (site_id, token_id). Storing the token id
+    /// lets the cache-hit path also touch `last_used_at` so auditing
+    /// doesn't stop updating once a token is hot.
+    pub token_cache: Arc<DashMap<String, (Ulid, Ulid)>>,
     /// Object keys whose values should be stripped from `properties`
     /// before storage. Defends against the sidecar accidentally
     /// shipping secrets in tool args.
@@ -78,21 +80,14 @@ pub async fn handle_span_ingest(
     let token_hash = hex_blake3(bearer_token);
 
     // Hot-path token check via the cache.
-    let site_id = if let Some(id) = ctx.token_cache.get(&token_hash) {
-        *id
+    let (site_id, token_id) = if let Some(v) = ctx.token_cache.get(&token_hash) {
+        *v
     } else {
         match ctx.meta.get_sentinel_token_by_hash(&token_hash).await {
             Ok(Some(tok)) => {
-                ctx.token_cache.insert(token_hash.clone(), tok.site_id);
-                // Fire-and-forget last-used update.
-                let meta = ctx.meta.clone();
-                let id = tok.id;
-                tokio::spawn(async move {
-                    if let Err(e) = meta.touch_sentinel_token(id).await {
-                        warn!("touch_sentinel_token failed: {e}");
-                    }
-                });
-                tok.site_id
+                ctx.token_cache
+                    .insert(token_hash.clone(), (tok.site_id, tok.id));
+                (tok.site_id, tok.id)
             }
             Ok(None) => return StatusCode::UNAUTHORIZED,
             Err(e) => {
@@ -101,6 +96,17 @@ pub async fn handle_span_ingest(
             }
         }
     };
+
+    // Fire-and-forget last-used update on every request — including
+    // cache hits, so audit/rotation views don't stall once a token is hot.
+    {
+        let meta = ctx.meta.clone();
+        tokio::spawn(async move {
+            if let Err(e) = meta.touch_sentinel_token(token_id).await {
+                warn!("touch_sentinel_token failed: {e}");
+            }
+        });
+    }
 
     if payload.spans.is_empty() {
         return StatusCode::NO_CONTENT;
@@ -127,24 +133,26 @@ pub async fn handle_span_ingest(
         });
     }
 
+    // Validate + map every row before touching the channel, so a
+    // mid-batch error doesn't leave the channel in a half-accepted
+    // state (which would cause client retries to create duplicates).
     let received_at = Utc::now();
+    let mut spans: Vec<AgentSpan> = Vec::with_capacity(payload.spans.len());
     for row in payload.spans {
-        let span = match row_to_span(row, site_id, &ctx.redact_keys, received_at) {
-            Ok(s) => s,
+        match row_to_span(row, site_id, &ctx.redact_keys, received_at) {
+            Ok(s) => spans.push(s),
             Err(e) => {
                 warn!("malformed span row: {e}");
                 return StatusCode::BAD_REQUEST;
             }
-        };
-        match ctx.tx.try_send(span) {
-            Ok(_) => {}
-            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                return StatusCode::TOO_MANY_REQUESTS
-            }
-            Err(_) => return StatusCode::SERVICE_UNAVAILABLE,
         }
     }
-    StatusCode::NO_CONTENT
+    // Atomic enqueue: either the whole batch lands or none of it does.
+    match ctx.tx.try_send(spans) {
+        Ok(_) => StatusCode::NO_CONTENT,
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => StatusCode::TOO_MANY_REQUESTS,
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE,
+    }
 }
 
 fn row_to_span(

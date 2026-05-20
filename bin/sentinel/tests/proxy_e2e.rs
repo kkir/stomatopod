@@ -13,8 +13,8 @@ use axum::{
 use sentinel::{
     client::{SessionRegistry, SpanRow, SpanShipper},
     config::{
-        ListenConfig, PolicyConfig as PolicyCfg, RedactConfig, SentinelConfig, ServerConfig,
-        UpstreamConfig,
+        LimitsConfig, ListenConfig, PolicyConfig as PolicyCfg, RedactConfig, SentinelConfig,
+        ServerConfig, UpstreamConfig,
     },
     control::{ControlCommand, ControlEnvelope, ControlState},
     policy::{PolicyConfig, PolicyEngine},
@@ -93,6 +93,7 @@ fn build_state(upstream: SocketAddr, stomatopod: SocketAddr) -> Arc<ProxyState> 
         },
         policy: PolicyCfg::default(),
         redact: RedactConfig::default(),
+        limits: LimitsConfig::default(),
     });
     let http = reqwest::Client::new();
     let spool = std::env::temp_dir().join(format!("sentinel-e2e-{}", ulid::Ulid::new()));

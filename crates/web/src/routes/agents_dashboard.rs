@@ -18,8 +18,8 @@ use crate::state::AppState;
 async fn first_site_id(state: &Arc<AppState>) -> Option<Ulid> {
     let orgs = state.meta.list_orgs().await.ok()?;
     let org = orgs.into_iter().next()?;
-    let mut sites = state.meta.list_sites(org.id).await.ok()?;
-    sites.pop().map(|s| s.id)
+    let sites = state.meta.list_sites(org.id).await.ok()?;
+    sites.into_iter().next().map(|s| s.id)
 }
 
 pub async fn agents_index(State(state): State<Arc<AppState>>) -> Response {

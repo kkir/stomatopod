@@ -35,15 +35,15 @@ pub async fn stream_handler(
         .and_then(|s| s.strip_prefix("Bearer "))
         .ok_or(StatusCode::UNAUTHORIZED)?;
     let token_hash = stomatopod_ingest::span_handler::token_hash(bearer);
-    let site_id = if let Some(id) = state.sentinel_token_cache.get(&token_hash) {
-        *id
+    let (site_id, _token_id) = if let Some(v) = state.sentinel_token_cache.get(&token_hash) {
+        *v
     } else {
         match state.meta.get_sentinel_token_by_hash(&token_hash).await {
             Ok(Some(tok)) => {
                 state
                     .sentinel_token_cache
-                    .insert(token_hash.clone(), tok.site_id);
-                tok.site_id
+                    .insert(token_hash.clone(), (tok.site_id, tok.id));
+                (tok.site_id, tok.id)
             }
             Ok(None) => return Err(StatusCode::UNAUTHORIZED),
             Err(e) => {

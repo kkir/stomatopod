@@ -10,6 +10,30 @@ pub struct SentinelConfig {
     pub policy: PolicyConfig,
     #[serde(default)]
     pub redact: RedactConfig,
+    #[serde(default)]
+    pub limits: LimitsConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LimitsConfig {
+    /// Maximum bytes the proxy will buffer from an incoming request
+    /// body before forwarding. Protects against OOM from oversized
+    /// payloads; defaults to 16 MiB which covers normal LLM requests
+    /// with room for large `messages` arrays.
+    #[serde(default = "default_max_request_body_bytes")]
+    pub max_request_body_bytes: usize,
+}
+
+impl Default for LimitsConfig {
+    fn default() -> Self {
+        Self {
+            max_request_body_bytes: default_max_request_body_bytes(),
+        }
+    }
+}
+
+fn default_max_request_body_bytes() -> usize {
+    16 * 1024 * 1024
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

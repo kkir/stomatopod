@@ -135,7 +135,7 @@ async fn post(s: &Arc<SpanShipper>, batch: &[SpanRow]) -> anyhow::Result<()> {
     }
 }
 
-fn spool_to_disk(dir: &std::path::Path, batch: &[SpanRow]) -> std::io::Result<()> {
+fn spool_to_disk(dir: &std::path::Path, batch: &[SpanRow]) -> anyhow::Result<()> {
     use std::io::Write;
     std::fs::create_dir_all(dir)?;
     let path = dir.join(format!("spool-{}.json", ulid::Ulid::new()));

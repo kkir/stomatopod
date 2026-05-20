@@ -94,7 +94,8 @@ struct TestCtx {
     backend: Arc<EmbeddedBackend>,
     secret: String,
     _ingest_rx: tokio::sync::mpsc::Receiver<stomatopod_core::domain::event::Event>,
-    _span_ingest_rx: tokio::sync::mpsc::Receiver<stomatopod_core::domain::agent_span::AgentSpan>,
+    _span_ingest_rx:
+        tokio::sync::mpsc::Receiver<Vec<stomatopod_core::domain::agent_span::AgentSpan>>,
     alerts_rx: tokio::sync::mpsc::Receiver<stomatopod_core::domain::incident::Incident>,
     _dir: tempfile::TempDir,
 }
@@ -675,19 +676,22 @@ async fn span_ingest_valid_token_redacts_and_enqueues() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
-    // The handler enqueues onto span_ingest_tx; we should receive one span.
-    let received = tokio::time::timeout(
+    // The handler enqueues onto span_ingest_tx; we should receive one
+    // batch containing a single span.
+    let batch = tokio::time::timeout(
         std::time::Duration::from_millis(500),
         state_ctx._span_ingest_rx.recv(),
     )
     .await
     .expect("timed out waiting for span")
     .expect("channel closed");
+    assert_eq!(batch.len(), 1);
+    let received = &batch[0];
     assert_eq!(received.agent_id, "agent-a");
     assert_eq!(received.input_tokens, 10);
     assert_eq!(received.site_id, site.id);
     // Redaction applied
-    let props = received.properties.unwrap();
+    let props = received.properties.clone().unwrap();
     assert_eq!(
         props["headers"]["api_key"],
         serde_json::Value::String("[redacted]".into())

@@ -56,11 +56,15 @@ enum Vendor {
 
 async fn forward(s: Arc<ProxyState>, req: Request, vendor: Vendor) -> Response {
     let (parts, body) = req.into_parts();
-    let body_bytes = match axum::body::to_bytes(body, usize::MAX).await {
+    // Cap how much we'll buffer so a malicious/buggy client can't OOM
+    // the sidecar. axum's `to_bytes` returns a length-limit error which
+    // we surface as 413 rather than 400 for clarity.
+    let max_body = s.cfg.limits.max_request_body_bytes;
+    let body_bytes = match axum::body::to_bytes(body, max_body).await {
         Ok(b) => b,
         Err(e) => {
-            warn!("failed to buffer request body: {e}");
-            return (StatusCode::BAD_REQUEST, "bad request body").into_response();
+            warn!("failed to buffer request body (max {max_body} bytes): {e}");
+            return (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response();
         }
     };
 
@@ -145,8 +149,12 @@ async fn forward(s: Arc<ProxyState>, req: Request, vendor: Vendor) -> Response {
         }
         builder = builder.header(k, v);
     }
+    // Stringify the length explicitly — `HeaderValue` doesn't have a
+    // `From<usize>` impl that holds across targets, and converting via
+    // `as u64` then `HeaderValue::from(u64)` would silently truncate on
+    // unusual platforms.
     builder
-        .header("content-length", resp_bytes.len())
+        .header("content-length", resp_bytes.len().to_string())
         .body(Body::from(resp_bytes))
         .unwrap_or_else(|_| {
             (StatusCode::INTERNAL_SERVER_ERROR, "response build failed").into_response()
