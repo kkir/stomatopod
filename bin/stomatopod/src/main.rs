@@ -13,7 +13,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 use dashmap::DashMap;
 use stomatopod_core::config::{Config, Mode, StorageConfig};
 use stomatopod_ingest::{batch::run_batcher, geo::GeoLookup, span_batch::run_span_batcher};
-use stomatopod_store::embedded::EmbeddedBackend;
+use stomatopod_store::{
+    clickhouse::ClickhouseBackend, embedded::EmbeddedBackend, postgres::PostgresBackend,
+};
 use stomatopod_web::{
     alerts::{run_alert_dispatcher, AlertDispatcher},
     router::build_router,
@@ -68,7 +70,11 @@ async fn serve(cfg: Config) -> Result<()> {
 
     let cfg = Arc::new(cfg);
 
-    // Build storage backend
+    // Build storage backend. The Postgres backend owns metadata, events,
+    // and spans in a single database; ClickHouse is analytics-only (no
+    // MetaStore) and is intended to be paired with a Postgres metadata
+    // store — wiring that split is out of scope here, so the ClickHouse
+    // variant still bails with a precise message.
     let (backend, agent_store, meta): (
         Arc<dyn stomatopod_core::traits::StorageBackend>,
         Arc<dyn stomatopod_core::traits::AgentStore>,
@@ -79,11 +85,22 @@ async fn serve(cfg: Config) -> Result<()> {
             let backend = Arc::new(backend);
             (backend.clone(), backend.clone(), backend)
         }
-        StorageConfig::Postgres(_) => {
-            anyhow::bail!("Postgres backend not yet implemented")
+        StorageConfig::Postgres(pg_cfg) => {
+            let backend = PostgresBackend::connect(pg_cfg).await?;
+            backend.bootstrap().await?;
+            let backend = Arc::new(backend);
+            (backend.clone(), backend.clone(), backend)
         }
-        StorageConfig::Clickhouse(_) => {
-            anyhow::bail!("ClickHouse backend not yet implemented")
+        StorageConfig::Clickhouse(ch_cfg) => {
+            // Force compile-time use of the symbol so the feature flag stays
+            // wired up; the real ClickHouse deployment topology pairs this
+            // with a separate Postgres MetaStore.
+            let _ = ClickhouseBackend::new(ch_cfg);
+            anyhow::bail!(
+                "ClickHouse backend is implemented but not yet routed: SaaS deployments \
+                 should pair it with a Postgres MetaStore. Use storage.kind = \"postgres\" \
+                 for single-database SaaS, or storage.kind = \"embedded\" for self-hosted."
+            )
         }
     };
 
