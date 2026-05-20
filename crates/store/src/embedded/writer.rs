@@ -103,6 +103,16 @@ impl ParquetWriter {
         events: Vec<Event>,
         reader: &EmbeddedReader,
     ) -> anyhow::Result<()> {
+        // FIXME(events-partition-layout): this writes a flat
+        // `<site_id>/<date>/*.parquet` layout, but the DataFusion
+        // `ListingTable` registered in `reader.rs` defaults to
+        // `listing_table_ignore_subdirectory=true`, which only descends into
+        // path segments containing `=`. Files land on disk but queries miss
+        // them after the in-memory buffer is drained. The span writer in
+        // `embedded/spans/writer.rs` uses the correct Hive-style
+        // `date=<YYYY-MM-DD>` layout — mirror that here (and add a partition
+        // column to the schema/reader). Deferred: needs a migration path for
+        // any existing on-disk data laid out flat.
         let dir = self.data_dir.join(site_id).join(date);
         tokio::fs::create_dir_all(&dir).await?;
 

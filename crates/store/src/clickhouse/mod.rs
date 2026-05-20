@@ -7,14 +7,15 @@ use ulid::Ulid;
 
 use stomatopod_core::{
     config::ClickhouseConfig,
-    domain::event::Event,
+    domain::{agent_span::AgentSpan, event::Event},
     error::StoreError,
     query::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
         pageviews::{PageviewsQuery, PageviewsResult, TimeRange, TopList},
+        spans::{AgentSummary, SpanQuery, SpanRow},
     },
-    traits::StorageBackend,
+    traits::{AgentStore, StorageBackend},
 };
 
 pub struct ClickhouseBackend {
@@ -126,5 +127,37 @@ impl StorageBackend for ClickhouseBackend {
 
     async fn query_funnel(&self, _q: &FunnelQuery) -> Result<FunnelResult, StoreError> {
         todo!("clickhouse query_funnel")
+    }
+}
+
+// AgentStore is deferred to Phase 8+. The trait is implemented here as
+// `todo!()` stubs so the SaaS backend already satisfies the `Arc<dyn
+// AgentStore>` bound in `bin/stomatopod/src/main.rs` when it is eventually
+// wired up — main currently bails on `StorageConfig::Clickhouse` before this
+// impl is ever called.
+#[async_trait]
+impl AgentStore for ClickhouseBackend {
+    async fn ingest_spans(&self, _spans: Vec<AgentSpan>) -> Result<(), StoreError> {
+        todo!("clickhouse ingest_spans (Phase 8+)")
+    }
+
+    async fn query_spans(&self, _q: &SpanQuery) -> Result<Vec<SpanRow>, StoreError> {
+        todo!("clickhouse query_spans (Phase 8+)")
+    }
+
+    async fn summarize_agents(
+        &self,
+        _site_id: Ulid,
+        _since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<AgentSummary>, StoreError> {
+        todo!("clickhouse summarize_agents (Phase 8+)")
+    }
+
+    async fn session_cost_usd(
+        &self,
+        _site_id: Ulid,
+        _agent_session_id: &str,
+    ) -> Result<f64, StoreError> {
+        todo!("clickhouse session_cost_usd (Phase 8+)")
     }
 }

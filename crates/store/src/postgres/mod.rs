@@ -8,6 +8,7 @@ use stomatopod_core::{
     config::PostgresConfig,
     domain::{
         agent::{Agent, AlertChannel, SentinelToken},
+        agent_span::AgentSpan,
         event::Event,
         incident::{Incident, IncidentStatus},
         org::{Funnel, Organization, User},
@@ -19,8 +20,9 @@ use stomatopod_core::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
         pageviews::{PageviewsQuery, PageviewsResult, TimeRange, TopList},
+        spans::{AgentSummary, SpanQuery, SpanRow},
     },
-    traits::{MetaStore, StorageBackend},
+    traits::{AgentStore, MetaStore, StorageBackend},
 };
 
 pub struct PostgresBackend {
@@ -211,5 +213,37 @@ impl MetaStore for PostgresBackend {
         _status: IncidentStatus,
     ) -> Result<(), StoreError> {
         todo!("postgres update_incident_status")
+    }
+}
+
+// AgentStore is deferred to Phase 8+. The trait is implemented here as
+// `todo!()` stubs so the SaaS backend already satisfies the `Arc<dyn
+// AgentStore>` bound in `bin/stomatopod/src/main.rs` when it is eventually
+// wired up — main currently bails on `StorageConfig::Postgres` before this
+// impl is ever called.
+#[async_trait]
+impl AgentStore for PostgresBackend {
+    async fn ingest_spans(&self, _spans: Vec<AgentSpan>) -> Result<(), StoreError> {
+        todo!("postgres ingest_spans (Phase 8+)")
+    }
+
+    async fn query_spans(&self, _q: &SpanQuery) -> Result<Vec<SpanRow>, StoreError> {
+        todo!("postgres query_spans (Phase 8+)")
+    }
+
+    async fn summarize_agents(
+        &self,
+        _site_id: Ulid,
+        _since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<AgentSummary>, StoreError> {
+        todo!("postgres summarize_agents (Phase 8+)")
+    }
+
+    async fn session_cost_usd(
+        &self,
+        _site_id: Ulid,
+        _agent_session_id: &str,
+    ) -> Result<f64, StoreError> {
+        todo!("postgres session_cost_usd (Phase 8+)")
     }
 }
