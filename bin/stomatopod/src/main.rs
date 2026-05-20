@@ -12,9 +12,13 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 
 use dashmap::DashMap;
 use stomatopod_core::config::{Config, Mode, StorageConfig};
-use stomatopod_ingest::{batch::run_batcher, geo::GeoLookup};
+use stomatopod_ingest::{batch::run_batcher, geo::GeoLookup, span_batch::run_span_batcher};
 use stomatopod_store::embedded::EmbeddedBackend;
-use stomatopod_web::{router::build_router, state::AppState};
+use stomatopod_web::{
+    alerts::{run_alert_dispatcher, AlertDispatcher},
+    router::build_router,
+    state::AppState,
+};
 
 use cli::{Cli, Commands};
 
@@ -65,14 +69,15 @@ async fn serve(cfg: Config) -> Result<()> {
     let cfg = Arc::new(cfg);
 
     // Build storage backend
-    let (backend, meta): (
+    let (backend, agent_store, meta): (
         Arc<dyn stomatopod_core::traits::StorageBackend>,
+        Arc<dyn stomatopod_core::traits::AgentStore>,
         Arc<dyn stomatopod_core::traits::MetaStore>,
     ) = match &cfg.storage {
         StorageConfig::Embedded(emb_cfg) => {
             let backend = EmbeddedBackend::open(emb_cfg).await?;
             let backend = Arc::new(backend);
-            (backend.clone(), backend)
+            (backend.clone(), backend.clone(), backend)
         }
         StorageConfig::Postgres(_) => {
             anyhow::bail!("Postgres backend not yet implemented")
@@ -96,6 +101,14 @@ async fn serve(cfg: Config) -> Result<()> {
         run_batcher(ingest_rx, batcher_backend, batch_size, flush_ms).await;
     });
 
+    // Span ingest channel + batcher (parallel pipeline for the AI firewall).
+    let (span_ingest_tx, span_ingest_rx) =
+        tokio::sync::mpsc::channel(cfg.limits.ingest_channel_size);
+    let span_store = agent_store.clone();
+    tokio::spawn(async move {
+        run_span_batcher(span_ingest_rx, span_store, batch_size, flush_ms).await;
+    });
+
     // Geo lookup
     let geo = Arc::new(GeoLookup::new(cfg.geo.mmdb_path.as_deref()));
 
@@ -109,15 +122,29 @@ async fn serve(cfg: Config) -> Result<()> {
         hex::encode(&h.as_bytes()[..8])
     };
 
+    let redact_keys = Arc::new(cfg.sentinel.redact_keys.clone());
+    let (alerts, alerts_rx) = AlertDispatcher::channel();
+    let meta_for_alerts = meta.clone();
+    tokio::spawn(async move {
+        run_alert_dispatcher(alerts_rx, meta_for_alerts).await;
+    });
+
     let state = Arc::new(AppState {
         backend,
+        agent_store,
         meta,
         templates,
         config: cfg.clone(),
         tracker_hash,
         ingest_tx,
+        span_ingest_tx,
         site_cache: Arc::new(DashMap::new()),
+        sentinel_token_cache: Arc::new(DashMap::new()),
+        redact_keys,
         geo,
+        control_channels: dashmap::DashMap::new(),
+        control_seq: std::sync::atomic::AtomicU64::new(0),
+        alerts,
     });
 
     let router = build_router(state);
@@ -201,6 +228,22 @@ fn build_templates() -> Result<JinjaEnv<'static>> {
     env.add_template(
         "partials/top_devices.html",
         include_str!("../../../crates/web/templates/partials/top_devices.html"),
+    )?;
+    env.add_template(
+        "agents.html",
+        include_str!("../../../crates/web/templates/agents.html"),
+    )?;
+    env.add_template(
+        "agent.html",
+        include_str!("../../../crates/web/templates/agent.html"),
+    )?;
+    env.add_template(
+        "incidents.html",
+        include_str!("../../../crates/web/templates/incidents.html"),
+    )?;
+    env.add_template(
+        "partials/agent_spans.html",
+        include_str!("../../../crates/web/templates/partials/agent_spans.html"),
     )?;
 
     Ok(env)

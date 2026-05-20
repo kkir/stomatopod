@@ -10,6 +10,31 @@ pub struct Config {
     pub geo: GeoConfig,
     pub auth: AuthConfig,
     pub limits: LimitsConfig,
+    pub sentinel: SentinelConfig,
+}
+
+/// AI firewall server-side settings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct SentinelConfig {
+    /// Object keys whose values are stripped from span `properties`
+    /// before storage. Case-insensitive.
+    pub redact_keys: Vec<String>,
+}
+
+impl Default for SentinelConfig {
+    fn default() -> Self {
+        Self {
+            redact_keys: vec![
+                "authorization".into(),
+                "api_key".into(),
+                "apikey".into(),
+                "password".into(),
+                "secret".into(),
+                "token".into(),
+            ],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]

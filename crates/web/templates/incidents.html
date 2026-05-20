@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Incidents — Stomatopod{% endblock %}
+{% block content %}
+<div class="section-header">
+  <h2>Incidents</h2>
+  <a href="/agents" class="btn btn-ghost">Back to agents</a>
+</div>
+<div class="card">
+  {% if incidents|length == 0 %}
+    <p style="color: var(--muted)">No incidents recorded.</p>
+  {% else %}
+    <table>
+      <thead>
+        <tr>
+          <th>Opened</th>
+          <th>Agent</th>
+          <th>Trigger</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for inc in incidents %}
+        <tr>
+          <td>{{ inc.opened_at }}</td>
+          <td>{{ inc.agent_id }}</td>
+          <td>{{ inc.trigger_summary }}</td>
+          <td>{{ inc.status }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</div>
+{% endblock %}

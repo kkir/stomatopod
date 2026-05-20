@@ -3,7 +3,11 @@ use ulid::Ulid;
 
 use crate::{
     domain::{
+        agent::{Agent, AlertChannel, SentinelToken},
+        agent_span::AgentSpan,
+        incident::{Incident, IncidentStatus},
         org::{Funnel, Organization, User},
+        policy::Policy,
         site::Site,
     },
     error::StoreError,
@@ -11,6 +15,7 @@ use crate::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
         pageviews::{PageviewsQuery, PageviewsResult, TimeRange, TopList},
+        spans::{AgentSummary, SpanQuery, SpanRow},
     },
 };
 
@@ -99,4 +104,69 @@ pub trait MetaStore: Send + Sync + 'static {
     async fn get_funnel(&self, id: Ulid) -> Result<Option<Funnel>, StoreError>;
     async fn list_funnels(&self, site_id: Ulid) -> Result<Vec<Funnel>, StoreError>;
     async fn delete_funnel(&self, id: Ulid) -> Result<(), StoreError>;
+
+    // ---- Agents ----
+    async fn upsert_agent(&self, agent: &Agent) -> Result<(), StoreError>;
+    async fn list_agents(&self, site_id: Ulid) -> Result<Vec<Agent>, StoreError>;
+    async fn get_agent(&self, site_id: Ulid, agent_id: &str) -> Result<Option<Agent>, StoreError>;
+
+    // ---- Sentinel tokens ----
+    async fn create_sentinel_token(&self, token: &SentinelToken) -> Result<(), StoreError>;
+    async fn list_sentinel_tokens(&self, site_id: Ulid) -> Result<Vec<SentinelToken>, StoreError>;
+    async fn get_sentinel_token_by_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<SentinelToken>, StoreError>;
+    async fn touch_sentinel_token(&self, id: Ulid) -> Result<(), StoreError>;
+    async fn delete_sentinel_token(&self, id: Ulid) -> Result<(), StoreError>;
+
+    // ---- Alert channels ----
+    async fn create_alert_channel(&self, channel: &AlertChannel) -> Result<(), StoreError>;
+    async fn list_alert_channels(&self, site_id: Ulid) -> Result<Vec<AlertChannel>, StoreError>;
+    async fn delete_alert_channel(&self, id: Ulid) -> Result<(), StoreError>;
+
+    // ---- Policies ----
+    async fn upsert_policy(&self, policy: &Policy) -> Result<(), StoreError>;
+    async fn get_policy(&self, site_id: Ulid) -> Result<Option<Policy>, StoreError>;
+
+    // ---- Incidents ----
+    async fn record_incident(&self, incident: &Incident) -> Result<(), StoreError>;
+    async fn list_incidents(&self, site_id: Ulid, limit: u32) -> Result<Vec<Incident>, StoreError>;
+    async fn update_incident_status(
+        &self,
+        id: Ulid,
+        status: IncidentStatus,
+    ) -> Result<(), StoreError>;
+}
+
+/// Span ingest + query for the AI firewall product surface.
+///
+/// Deliberately separate from `StorageBackend` so other backends
+/// (postgres, clickhouse) can opt in without implementing stubs, and so
+/// analytics-only deployments aren't forced to carry agent-observability
+/// machinery.
+#[async_trait]
+pub trait AgentStore: Send + Sync + 'static {
+    /// Enqueue a batch of spans. Returns only after durability is
+    /// guaranteed (WAL flush for embedded).
+    async fn ingest_spans(&self, spans: Vec<AgentSpan>) -> Result<(), StoreError>;
+
+    /// Recent spans for a single agent (or all agents in a site if
+    /// `agent_id` is None), ordered by `started_at` descending.
+    async fn query_spans(&self, q: &SpanQuery) -> Result<Vec<SpanRow>, StoreError>;
+
+    /// Per-agent summary cards for the dashboard.
+    async fn summarize_agents(
+        &self,
+        site_id: Ulid,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<AgentSummary>, StoreError>;
+
+    /// Running session cost — used by the server-side cost-threshold
+    /// detector and by the dashboard's cost meter.
+    async fn session_cost_usd(
+        &self,
+        site_id: Ulid,
+        agent_session_id: &str,
+    ) -> Result<f64, StoreError>;
 }

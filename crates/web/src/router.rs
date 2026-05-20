@@ -12,7 +12,10 @@ use crate::{
         auth::{require_api_auth, require_auth},
         cors::ingest_cors,
     },
-    routes::{analytics, api, auth, dashboard, events, funnels, partials, sites},
+    routes::{
+        agents_dashboard, analytics, api, auth, dashboard, events, funnels, partials, sentinel,
+        sites, spans,
+    },
     state::AppState,
 };
 
@@ -22,6 +25,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/event", post(api::handle_ingest))
         .route("/tracker.js", get(api::tracker_js))
         .layer(ingest_cors());
+
+    // Sentinel span ingest. Bearer-auth'd via sentinel_tokens (handler
+    // checks the header itself; no middleware needed). No CORS since
+    // calls come from sidecars, not browsers.
+    let span_ingest_routes =
+        Router::new().route("/api/v1/spans", post(spans::handle_span_ingest_route));
 
     // Analytics JSON API routes (bearer token or session auth)
     let analytics_routes = Router::new()
@@ -62,6 +71,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/sites/:site_id/funnels/:funnel_id",
             get(funnels::funnel_detail),
         )
+        // AI firewall dashboard
+        .route("/agents", get(agents_dashboard::agents_index))
+        .route("/agents/:agent_id", get(agents_dashboard::agent_detail))
+        .route(
+            "/agents/:agent_id/spans",
+            get(agents_dashboard::agent_spans_partial),
+        )
+        .route("/incidents", get(agents_dashboard::incidents_page))
         // HTMX partial routes
         .route(
             "/sites/:site_id/partials/top-pages",
@@ -85,12 +102,32 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         .layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
-    Router::new()
+    // Sentinel SSE control stream — bearer-auth'd inline. MUST be
+    // attached OUTSIDE the CompressionLayer; gzip would buffer SSE
+    // chunks indefinitely and break keep-alive.
+    let sentinel_stream =
+        Router::new().route("/api/v1/sentinel/stream", get(sentinel::stream_handler));
+
+    // Operator control endpoint — session/bearer auth via require_api_auth.
+    let sentinel_control = Router::new()
+        .route("/api/v1/sentinel/control", post(sentinel::control_handler))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_api_auth,
+        ));
+
+    let compressed = Router::new()
         .merge(ingest_routes)
+        .merge(span_ingest_routes)
         .merge(analytics_routes)
+        .merge(sentinel_control)
         .merge(auth_routes)
         .merge(dashboard_routes)
-        .layer(CompressionLayer::new())
+        .layer(CompressionLayer::new());
+
+    Router::new()
+        .merge(compressed)
+        .merge(sentinel_stream)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

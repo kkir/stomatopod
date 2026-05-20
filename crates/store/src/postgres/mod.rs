@@ -7,8 +7,11 @@ use ulid::Ulid;
 use stomatopod_core::{
     config::PostgresConfig,
     domain::{
+        agent::{Agent, AlertChannel, SentinelToken},
         event::Event,
+        incident::{Incident, IncidentStatus},
         org::{Funnel, Organization, User},
+        policy::Policy,
         site::Site,
     },
     error::StoreError,
@@ -143,5 +146,70 @@ impl MetaStore for PostgresBackend {
     }
     async fn delete_funnel(&self, _id: Ulid) -> Result<(), StoreError> {
         todo!()
+    }
+
+    // ---- AI firewall metadata (Phase 8+) ----
+    async fn upsert_agent(&self, _agent: &Agent) -> Result<(), StoreError> {
+        todo!("postgres upsert_agent")
+    }
+    async fn list_agents(&self, _site_id: Ulid) -> Result<Vec<Agent>, StoreError> {
+        todo!("postgres list_agents")
+    }
+    async fn get_agent(
+        &self,
+        _site_id: Ulid,
+        _agent_id: &str,
+    ) -> Result<Option<Agent>, StoreError> {
+        todo!("postgres get_agent")
+    }
+    async fn create_sentinel_token(&self, _token: &SentinelToken) -> Result<(), StoreError> {
+        todo!("postgres create_sentinel_token")
+    }
+    async fn list_sentinel_tokens(&self, _site_id: Ulid) -> Result<Vec<SentinelToken>, StoreError> {
+        todo!("postgres list_sentinel_tokens")
+    }
+    async fn get_sentinel_token_by_hash(
+        &self,
+        _token_hash: &str,
+    ) -> Result<Option<SentinelToken>, StoreError> {
+        todo!("postgres get_sentinel_token_by_hash")
+    }
+    async fn touch_sentinel_token(&self, _id: Ulid) -> Result<(), StoreError> {
+        todo!("postgres touch_sentinel_token")
+    }
+    async fn delete_sentinel_token(&self, _id: Ulid) -> Result<(), StoreError> {
+        todo!("postgres delete_sentinel_token")
+    }
+    async fn create_alert_channel(&self, _channel: &AlertChannel) -> Result<(), StoreError> {
+        todo!("postgres create_alert_channel")
+    }
+    async fn list_alert_channels(&self, _site_id: Ulid) -> Result<Vec<AlertChannel>, StoreError> {
+        todo!("postgres list_alert_channels")
+    }
+    async fn delete_alert_channel(&self, _id: Ulid) -> Result<(), StoreError> {
+        todo!("postgres delete_alert_channel")
+    }
+    async fn upsert_policy(&self, _policy: &Policy) -> Result<(), StoreError> {
+        todo!("postgres upsert_policy")
+    }
+    async fn get_policy(&self, _site_id: Ulid) -> Result<Option<Policy>, StoreError> {
+        todo!("postgres get_policy")
+    }
+    async fn record_incident(&self, _incident: &Incident) -> Result<(), StoreError> {
+        todo!("postgres record_incident")
+    }
+    async fn list_incidents(
+        &self,
+        _site_id: Ulid,
+        _limit: u32,
+    ) -> Result<Vec<Incident>, StoreError> {
+        todo!("postgres list_incidents")
+    }
+    async fn update_incident_status(
+        &self,
+        _id: Ulid,
+        _status: IncidentStatus,
+    ) -> Result<(), StoreError> {
+        todo!("postgres update_incident_status")
     }
 }

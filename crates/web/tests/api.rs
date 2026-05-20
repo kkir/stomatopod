@@ -72,6 +72,20 @@ fn build_templates() -> Environment<'static> {
         include_str!("../templates/partials/top_devices.html"),
     )
     .unwrap();
+    env.add_template("agents.html", include_str!("../templates/agents.html"))
+        .unwrap();
+    env.add_template("agent.html", include_str!("../templates/agent.html"))
+        .unwrap();
+    env.add_template(
+        "incidents.html",
+        include_str!("../templates/incidents.html"),
+    )
+    .unwrap();
+    env.add_template(
+        "partials/agent_spans.html",
+        include_str!("../templates/partials/agent_spans.html"),
+    )
+    .unwrap();
     env
 }
 
@@ -80,6 +94,9 @@ struct TestCtx {
     backend: Arc<EmbeddedBackend>,
     secret: String,
     _ingest_rx: tokio::sync::mpsc::Receiver<stomatopod_core::domain::event::Event>,
+    _span_ingest_rx:
+        tokio::sync::mpsc::Receiver<Vec<stomatopod_core::domain::agent_span::AgentSpan>>,
+    alerts_rx: tokio::sync::mpsc::Receiver<stomatopod_core::domain::incident::Incident>,
     _dir: tempfile::TempDir,
 }
 
@@ -103,16 +120,25 @@ async fn setup() -> TestCtx {
     });
 
     let (ingest_tx, ingest_rx) = tokio::sync::mpsc::channel(256);
+    let (span_ingest_tx, span_ingest_rx) = tokio::sync::mpsc::channel(256);
+    let (alerts, alerts_rx) = stomatopod_web::alerts::AlertDispatcher::channel();
 
     let state = Arc::new(AppState {
         backend: backend.clone(),
+        agent_store: backend.clone(),
         meta: backend.clone(),
         templates: build_templates(),
         config,
         tracker_hash: "testhash".into(),
         ingest_tx,
+        span_ingest_tx,
         site_cache: Arc::new(DashMap::new()),
+        sentinel_token_cache: Arc::new(DashMap::new()),
+        redact_keys: Arc::new(vec!["api_key".into(), "authorization".into()]),
         geo: Arc::new(GeoLookup::new(None)),
+        control_channels: DashMap::new(),
+        control_seq: std::sync::atomic::AtomicU64::new(0),
+        alerts,
     });
 
     TestCtx {
@@ -120,6 +146,8 @@ async fn setup() -> TestCtx {
         backend,
         secret,
         _ingest_rx: ingest_rx,
+        _span_ingest_rx: span_ingest_rx,
+        alerts_rx,
         _dir: dir,
     }
 }
@@ -305,6 +333,371 @@ async fn ingest_bot_user_agent_returns_no_content() {
 
     let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+}
+
+// ---- Agents dashboard ----
+
+#[tokio::test]
+async fn agents_index_renders_when_no_data() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let user_id = Ulid::new().to_string();
+    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
+    let req = Request::builder()
+        .uri("/agents")
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = body_bytes(resp).await;
+    let html = std::str::from_utf8(&bytes).unwrap();
+    assert!(html.contains("Sentinel Agents"), "page heading missing");
+}
+
+#[tokio::test]
+async fn incidents_page_lists_manual_kill() {
+    use stomatopod_core::domain::incident::{Incident, IncidentStatus, IncidentTrigger};
+
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let inc = Incident {
+        id: Ulid::new(),
+        site_id: site.id,
+        agent_id: "agent-with-incident".into(),
+        trigger: IncidentTrigger::CostThreshold { usd: 5.0 },
+        status: IncidentStatus::Open,
+        opened_at: Utc::now(),
+        closed_at: None,
+    };
+    ctx.backend.meta.record_incident(&inc).await.unwrap();
+
+    let user_id = Ulid::new().to_string();
+    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
+    let req = Request::builder()
+        .uri("/incidents")
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = std::str::from_utf8(&body_bytes(resp).await)
+        .unwrap()
+        .to_string();
+    assert!(
+        html.contains("agent-with-incident"),
+        "incidents page should list the agent"
+    );
+    assert!(html.contains("cost"));
+}
+
+// ---- Alert dispatcher (webhook) ----
+
+#[tokio::test]
+async fn webhook_alert_delivered_to_mock_sink() {
+    use std::sync::Mutex;
+    use stomatopod_core::domain::{
+        agent::{AlertChannel, AlertChannelKind},
+        incident::{Incident, IncidentStatus, IncidentTrigger},
+    };
+    use stomatopod_web::alerts::run_alert_dispatcher;
+
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    // Spin up a tiny receiver that captures the POST body.
+    let received: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+    let captured = received.clone();
+    let app = axum::Router::new().route(
+        "/hook",
+        axum::routing::post(move |axum::Json(v): axum::Json<serde_json::Value>| {
+            let captured = captured.clone();
+            async move {
+                *captured.lock().unwrap() = Some(v);
+                StatusCode::OK
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    // Register the webhook channel.
+    let channel = AlertChannel {
+        id: Ulid::new(),
+        site_id: site.id,
+        kind: AlertChannelKind::Webhook,
+        url: format!("http://{}/hook", addr),
+        secret: Some("topsecret".into()),
+        created_at: Utc::now(),
+        last_error_at: None,
+    };
+    ctx.backend
+        .meta
+        .create_alert_channel(&channel)
+        .await
+        .unwrap();
+
+    // Drive the dispatcher directly.
+    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    let meta_clone = ctx.backend.clone();
+    let handle = tokio::spawn(async move {
+        run_alert_dispatcher(rx, meta_clone as _).await;
+    });
+
+    let incident = Incident {
+        id: Ulid::new(),
+        site_id: site.id,
+        agent_id: "demo".into(),
+        trigger: IncidentTrigger::Repetition {
+            count: 7,
+            args_hash: "abc".into(),
+        },
+        status: IncidentStatus::Open,
+        opened_at: Utc::now(),
+        closed_at: None,
+    };
+    tx.send(incident).await.unwrap();
+
+    // Poll until the receiver got something or timeout.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        if received.lock().unwrap().is_some() {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            panic!("webhook never received the alert");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let body = received.lock().unwrap().clone().unwrap();
+    assert_eq!(body["agent_id"], "demo");
+    assert_eq!(body["trigger_kind"], "repetition");
+
+    handle.abort();
+}
+
+// ---- Sentinel control / SSE ----
+
+#[tokio::test]
+async fn sentinel_stream_unauthenticated_returns_401() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/api/v1/sentinel/stream")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn sentinel_control_emits_alert() {
+    let mut ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let user_id = Ulid::new().to_string();
+    let token = sign_session(&ctx.secret, &user_id);
+    let body = serde_json::json!({
+        "site_id": site.id,
+        "agent_id": "agent-alert-x",
+        "command": "kill",
+        "reason": "burned through budget"
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/sentinel/control")
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let incident =
+        tokio::time::timeout(std::time::Duration::from_millis(500), ctx.alerts_rx.recv())
+            .await
+            .expect("timed out waiting for alert")
+            .expect("channel closed");
+    assert_eq!(incident.agent_id, "agent-alert-x");
+}
+
+#[tokio::test]
+async fn sentinel_control_publishes_to_broadcast_channel() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    // Pre-subscribe so the control POST has a receiver.
+    let mut rx = ctx.state.control_channel(site.id).subscribe();
+
+    let user_id = Ulid::new().to_string();
+    let token = sign_session(&ctx.secret, &user_id);
+
+    let body = serde_json::json!({
+        "site_id": site.id,
+        "agent_id": "agent-1",
+        "command": "kill",
+        "reason": "manual stop"
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/sentinel/control")
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let env = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv())
+        .await
+        .expect("timed out")
+        .expect("recv");
+    assert_eq!(env.agent_id, "agent-1");
+    match env.command {
+        stomatopod_core::domain::control::ControlCommand::Kill { reason } => {
+            assert_eq!(reason, "manual stop");
+        }
+        _ => panic!("expected Kill command"),
+    }
+
+    // The control endpoint must have written an Incident row too.
+    let incidents = ctx.backend.meta.list_incidents(site.id, 10).await.unwrap();
+    assert_eq!(incidents.len(), 1);
+    assert_eq!(incidents[0].agent_id, "agent-1");
+}
+
+// ---- Span ingest endpoint ----
+
+#[tokio::test]
+async fn span_ingest_without_bearer_returns_401() {
+    let ctx = setup().await;
+    let payload = serde_json::json!({"spans": []});
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/spans")
+        .header("content-type", "application/json")
+        .body(Body::from(payload.to_string()))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn span_ingest_unknown_token_returns_401() {
+    let ctx = setup().await;
+    let payload = serde_json::json!({"spans": []});
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/spans")
+        .header("authorization", "Bearer not-a-real-token")
+        .header("content-type", "application/json")
+        .body(Body::from(payload.to_string()))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn span_ingest_valid_token_redacts_and_enqueues() {
+    use stomatopod_core::domain::agent::SentinelToken;
+    use stomatopod_ingest::span_handler::token_hash;
+
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let raw_token = "sentinel-test-token-xyz";
+    let tok = SentinelToken {
+        id: Ulid::new(),
+        site_id: site.id,
+        name: "test-sidecar".into(),
+        token_hash: token_hash(raw_token),
+        created_at: Utc::now(),
+        last_used_at: None,
+    };
+    ctx.backend.meta.create_sentinel_token(&tok).await.unwrap();
+
+    let now = Utc::now();
+    let payload = serde_json::json!({
+        "spans": [{
+            "agent_id": "agent-a",
+            "agent_session_id": "sess-1",
+            "kind": "tool_call",
+            "model": "claude-opus-4-7",
+            "started_at": now,
+            "ended_at": now,
+            "input_tokens": 10,
+            "output_tokens": 20,
+            "cost_usd": 0.001,
+            "tool_name": "shell",
+            "tool_input_hash": "deadbeef",
+            "properties": {
+                "headers": {"api_key": "sk-leaky"},
+                "ok": "fine"
+            }
+        }]
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/spans")
+        .header("authorization", format!("Bearer {raw_token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(payload.to_string()))
+        .unwrap();
+    let mut state_ctx = ctx;
+    let resp = make_app(state_ctx.state.clone())
+        .oneshot(req)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    // The handler enqueues onto span_ingest_tx; we should receive one
+    // batch containing a single span.
+    let batch = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        state_ctx._span_ingest_rx.recv(),
+    )
+    .await
+    .expect("timed out waiting for span")
+    .expect("channel closed");
+    assert_eq!(batch.len(), 1);
+    let received = &batch[0];
+    assert_eq!(received.agent_id, "agent-a");
+    assert_eq!(received.input_tokens, 10);
+    assert_eq!(received.site_id, site.id);
+    // Redaction applied
+    let props = received.properties.clone().unwrap();
+    assert_eq!(
+        props["headers"]["api_key"],
+        serde_json::Value::String("[redacted]".into())
+    );
+    assert!(props["headers"].get("ok").is_none());
+    assert_eq!(props["ok"], serde_json::json!("fine"));
 }
 
 #[tokio::test]
