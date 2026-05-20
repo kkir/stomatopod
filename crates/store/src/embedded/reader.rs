@@ -43,6 +43,11 @@ impl EmbeddedReader {
             while let Some(entry) = entries.next_entry().await? {
                 if entry.file_type().await?.is_dir() {
                     let site_id = entry.file_name().to_string_lossy().to_string();
+                    if let Err(e) = migrate_flat_date_dirs(&entry.path()).await {
+                        tracing::warn!(
+                            "Could not migrate flat date partitions for site {site_id}: {e}"
+                        );
+                    }
                     if let Err(e) = reader.register_site(&site_id).await {
                         tracing::warn!("Could not register site {site_id}: {e}");
                     }
@@ -68,7 +73,9 @@ impl EmbeddedReader {
             return Ok(());
         }
 
-        let url = ListingTableUrl::parse(format!("file://{}", site_dir.to_string_lossy()))?;
+        // Trailing slash is required: without it object_store treats the
+        // path as a single file rather than a directory prefix.
+        let url = ListingTableUrl::parse(format!("file://{}/", site_dir.to_string_lossy()))?;
 
         let file_format =
             Arc::new(datafusion::datasource::file_format::parquet::ParquetFormat::default());
@@ -98,16 +105,26 @@ impl EmbeddedReader {
         let start = q.range.start.timestamp_micros();
         let end = q.range.end.timestamp_micros();
 
+        // `timestamp` is a reserved keyword in DataFusion's SQL parser (it
+        // expects `timestamp '2024-...'` literal syntax after it); quote the
+        // column to force identifier parsing. We also avoid the `FILTER
+        // (WHERE ...)` aggregate clause, which the parser rejects — `CASE
+        // WHEN ... THEN 1 END` is equivalent.
+        //
+        // Each aggregate is wrapped in `CAST(... AS BIGINT)` so the read
+        // side can rely on a single `Int64Array` downcast — DataFusion
+        // promotes integer aggregates to wider types and the column types
+        // would otherwise differ between SUM and COUNT.
         let sql = format!(
             r#"
             SELECT
-                date_trunc('{granularity_fn}', timestamp) AS bucket,
-                COUNT(*) FILTER (WHERE kind = 'pageview') AS pageviews,
-                COUNT(DISTINCT session_id) AS sessions
+                date_trunc('{granularity_fn}', "timestamp") AS bucket,
+                CAST(SUM(CASE WHEN CAST(kind AS VARCHAR) = 'pageview' THEN 1 ELSE 0 END) AS BIGINT) AS pageviews,
+                CAST(COUNT(DISTINCT session_id) AS BIGINT) AS sessions
             FROM {table}
             WHERE site_id = '{site_id}'
-              AND timestamp >= to_timestamp_micros({start})
-              AND timestamp <= to_timestamp_micros({end})
+              AND "timestamp" >= to_timestamp_micros({start})
+              AND "timestamp" <= to_timestamp_micros({end})
             GROUP BY 1
             ORDER BY 1
             "#
@@ -118,10 +135,12 @@ impl EmbeddedReader {
 
         let mut result = PageviewsResult::default();
         for batch in &batches {
-            use arrow::array::{Int64Array, TimestampMicrosecondArray};
+            // `date_trunc` returns `Timestamp(Nanosecond, …)` regardless of
+            // the input precision, so downcast as nanos and rescale.
+            use arrow::array::{Int64Array, TimestampNanosecondArray};
             let bucket_col = batch
                 .column_by_name("bucket")
-                .and_then(|c| c.as_any().downcast_ref::<TimestampMicrosecondArray>());
+                .and_then(|c| c.as_any().downcast_ref::<TimestampNanosecondArray>());
             let pv_col = batch
                 .column_by_name("pageviews")
                 .and_then(|c| c.as_any().downcast_ref::<Int64Array>());
@@ -131,9 +150,8 @@ impl EmbeddedReader {
 
             if let (Some(buckets), Some(pvs), Some(sessions)) = (bucket_col, pv_col, sess_col) {
                 for i in 0..batch.num_rows() {
-                    let ts_us = buckets.value(i);
-                    let ts = chrono::DateTime::from_timestamp_micros(ts_us)
-                        .unwrap_or_default()
+                    let ts_ns = buckets.value(i);
+                    let ts = chrono::DateTime::from_timestamp_nanos(ts_ns)
                         .with_timezone(&chrono::Utc);
                     let pv = pvs.value(i) as u64;
                     let sess = sessions.value(i) as u64;
@@ -219,13 +237,13 @@ impl EmbeddedReader {
             r#"
             SELECT
                 COALESCE(CAST({field} AS VARCHAR), 'Direct / None') AS value,
-                COUNT(*) AS pageviews,
-                COUNT(DISTINCT session_id) AS sessions
+                CAST(COUNT(*) AS BIGINT) AS pageviews,
+                CAST(COUNT(DISTINCT session_id) AS BIGINT) AS sessions
             FROM {table}
             WHERE site_id = '{site_id_str}'
-              AND timestamp >= to_timestamp_micros({start})
-              AND timestamp <= to_timestamp_micros({end})
-              AND kind = 'pageview'
+              AND "timestamp" >= to_timestamp_micros({start})
+              AND "timestamp" <= to_timestamp_micros({end})
+              AND CAST(kind AS VARCHAR) = 'pageview'
             GROUP BY 1
             ORDER BY pageviews DESC
             LIMIT {limit}
@@ -293,14 +311,14 @@ impl EmbeddedReader {
         let sql = format!(
             r#"
             SELECT
-                name AS value,
-                COUNT(*) AS pageviews,
-                COUNT(DISTINCT session_id) AS sessions
+                CAST(name AS VARCHAR) AS value,
+                CAST(COUNT(*) AS BIGINT) AS pageviews,
+                CAST(COUNT(DISTINCT session_id) AS BIGINT) AS sessions
             FROM {table}
             WHERE site_id = '{site_id_str}'
-              AND timestamp >= to_timestamp_micros({start})
-              AND timestamp <= to_timestamp_micros({end})
-              AND kind = 'custom'
+              AND "timestamp" >= to_timestamp_micros({start})
+              AND "timestamp" <= to_timestamp_micros({end})
+              AND CAST(kind AS VARCHAR) = 'custom'
               {name_filter}
             GROUP BY 1
             ORDER BY pageviews DESC
@@ -339,12 +357,12 @@ impl EmbeddedReader {
         for step in &q.steps {
             let sql = format!(
                 r#"
-                SELECT COUNT(DISTINCT session_id) AS sessions
+                SELECT CAST(COUNT(DISTINCT session_id) AS BIGINT) AS sessions
                 FROM {table}
                 WHERE site_id = '{site_id_str}'
-                  AND timestamp >= to_timestamp_micros({start})
-                  AND timestamp <= to_timestamp_micros({end})
-                  AND name = '{}'
+                  AND "timestamp" >= to_timestamp_micros({start})
+                  AND "timestamp" <= to_timestamp_micros({end})
+                  AND CAST(name AS VARCHAR) = '{}'
                 "#,
                 step.event_name.replace('\'', "''")
             );
@@ -421,6 +439,63 @@ impl EmbeddedReader {
 
 fn table_name(site_id: &str) -> String {
     format!("events_{}", site_id.replace('-', "_"))
+}
+
+/// Rename any pre-existing flat `<date>/` partitions under a site directory
+/// to Hive-style `date=<date>/` partitions. Earlier versions wrote the flat
+/// layout, but DataFusion's `ListingTable` defaults to
+/// `listing_table_ignore_subdirectory=true` and so skipped those files at
+/// query time. Idempotent — directories already named `date=...` are left
+/// alone, and a target collision falls back to merging files into the
+/// existing Hive directory.
+async fn migrate_flat_date_dirs(site_dir: &std::path::Path) -> Result<()> {
+    let mut entries = tokio::fs::read_dir(site_dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        if !entry.file_type().await?.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name_str) = name.to_str() else {
+            continue;
+        };
+        if name_str.contains('=') {
+            continue;
+        }
+        if !looks_like_iso_date(name_str) {
+            continue;
+        }
+        let from = entry.path();
+        let to = site_dir.join(format!("date={name_str}"));
+        if tokio::fs::metadata(&to).await.is_ok() {
+            // Target exists: move individual files in and drop the empty source.
+            let mut files = tokio::fs::read_dir(&from).await?;
+            while let Some(f) = files.next_entry().await? {
+                let dest = to.join(f.file_name());
+                if let Err(e) = tokio::fs::rename(f.path(), &dest).await {
+                    tracing::warn!("Could not merge {:?} into {:?}: {e}", f.path(), dest);
+                }
+            }
+            let _ = tokio::fs::remove_dir(&from).await;
+        } else {
+            tokio::fs::rename(&from, &to).await?;
+        }
+        info!(
+            "Migrated flat date partition {:?} → {:?}",
+            from.file_name().unwrap_or_default(),
+            to.file_name().unwrap_or_default()
+        );
+    }
+    Ok(())
+}
+
+fn looks_like_iso_date(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[0..4].iter().all(|b| b.is_ascii_digit())
+        && bytes[5..7].iter().all(|b| b.is_ascii_digit())
+        && bytes[8..10].iter().all(|b| b.is_ascii_digit())
 }
 
 fn granularity_trunc(g: &Granularity) -> &'static str {
