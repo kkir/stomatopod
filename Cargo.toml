@@ -34,7 +34,7 @@ bincode = "1"
 zstd = "0.13"
 crc32fast = "1"
 # Storage — postgres
-sqlx = { version = "0.7", default-features = false, features = ["postgres", "runtime-tokio-rustls", "macros", "migrate"] }
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio-rustls", "chrono"] }
 # Storage — clickhouse
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 # Serialization

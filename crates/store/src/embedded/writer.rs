@@ -103,7 +103,11 @@ impl ParquetWriter {
         events: Vec<Event>,
         reader: &EmbeddedReader,
     ) -> anyhow::Result<()> {
-        let dir = self.data_dir.join(site_id).join(date);
+        // Hive-style date partition. DataFusion's `ListingTable` defaults to
+        // `listing_table_ignore_subdirectory=true`, which only descends into
+        // path segments containing `=`. A bare `<date>/foo.parquet` is
+        // silently skipped by the reader; `date=<date>/foo.parquet` is not.
+        let dir = self.data_dir.join(site_id).join(format!("date={date}"));
         tokio::fs::create_dir_all(&dir).await?;
 
         let part_id = Ulid::new().to_string();

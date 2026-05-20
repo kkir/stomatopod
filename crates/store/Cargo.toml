@@ -16,8 +16,8 @@ embedded = [
     "dep:zstd",
     "dep:crc32fast",
 ]
-postgres = []
-clickhouse = ["dep:reqwest"]
+postgres = ["dep:sqlx"]
+clickhouse = ["dep:reqwest", "dep:hex"]
 
 [dependencies]
 stomatopod-core = { path = "../core" }
@@ -44,11 +44,12 @@ bincode = { workspace = true, optional = true }
 zstd = { workspace = true, optional = true }
 crc32fast = { workspace = true, optional = true }
 
-# Postgres backend (sqlx added when implementing)
-# sqlx = { workspace = true, optional = true }
+# Postgres backend
+sqlx = { workspace = true, optional = true }
 
 # ClickHouse backend
 reqwest = { workspace = true, optional = true }
+hex = { version = "0.4", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

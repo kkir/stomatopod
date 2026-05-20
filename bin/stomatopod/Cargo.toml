@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 stomatopod-core = { path = "../../crates/core" }
-stomatopod-store = { path = "../../crates/store", features = ["embedded"] }
+stomatopod-store = { path = "../../crates/store", features = ["embedded", "postgres", "clickhouse"] }
 stomatopod-ingest = { path = "../../crates/ingest" }
 stomatopod-query = { path = "../../crates/query" }
 stomatopod-web = { path = "../../crates/web" }
