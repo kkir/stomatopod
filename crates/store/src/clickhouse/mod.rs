@@ -49,11 +49,8 @@ impl ClickhouseBackend {
     /// Create the `events` and `agent_spans` tables if they don't exist.
     /// Idempotent — safe to call on every boot.
     pub async fn bootstrap(&self) -> Result<(), StoreError> {
-        self.execute(&format!(
-            "CREATE DATABASE IF NOT EXISTS {}",
-            self.database
-        ))
-        .await?;
+        self.execute(&format!("CREATE DATABASE IF NOT EXISTS {}", self.database))
+            .await?;
         for stmt in ddl::all_statements() {
             self.execute(stmt).await?;
         }
@@ -817,7 +814,10 @@ mod tests {
     fn sql_quote_escapes_single_quote_and_backslash() {
         assert_eq!(sql::quote("a'b"), "'a\\'b'");
         assert_eq!(sql::quote("a\\b"), "'a\\\\b'");
-        assert_eq!(sql::quote("'; DROP TABLE events; --"), "'\\'; DROP TABLE events; --'");
+        assert_eq!(
+            sql::quote("'; DROP TABLE events; --"),
+            "'\\'; DROP TABLE events; --'"
+        );
     }
 
     #[test]

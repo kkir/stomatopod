@@ -151,8 +151,8 @@ impl EmbeddedReader {
             if let (Some(buckets), Some(pvs), Some(sessions)) = (bucket_col, pv_col, sess_col) {
                 for i in 0..batch.num_rows() {
                     let ts_ns = buckets.value(i);
-                    let ts = chrono::DateTime::from_timestamp_nanos(ts_ns)
-                        .with_timezone(&chrono::Utc);
+                    let ts =
+                        chrono::DateTime::from_timestamp_nanos(ts_ns).with_timezone(&chrono::Utc);
                     let pv = pvs.value(i) as u64;
                     let sess = sessions.value(i) as u64;
                     result.total_pageviews += pv;

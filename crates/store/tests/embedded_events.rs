@@ -141,11 +141,7 @@ async fn legacy_flat_partitions_are_migrated_on_open() {
     // Rewrite the layout to look like the old flat structure.
     let site_dir = dir.path().join("parquet").join(site_id.to_string());
     let mut entries = std::fs::read_dir(&site_dir).unwrap();
-    let hive_dir = entries
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
+    let hive_dir = entries.next().unwrap().unwrap().path();
     let date_segment = hive_dir
         .file_name()
         .unwrap()

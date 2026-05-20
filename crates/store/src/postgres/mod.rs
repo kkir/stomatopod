@@ -458,11 +458,12 @@ impl MetaStore for PostgresBackend {
     }
 
     async fn list_orgs(&self) -> Result<Vec<Organization>, StoreError> {
-        let rows =
-            sqlx::query("SELECT id, name, slug, plan, created_at FROM orgs ORDER BY created_at ASC")
-                .fetch_all(&self.pool)
-                .await
-                .map_err(StoreError::db)?;
+        let rows = sqlx::query(
+            "SELECT id, name, slug, plan, created_at FROM orgs ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
         rows.into_iter().map(row_to_org).collect()
     }
 
@@ -856,9 +857,7 @@ impl AgentStore for PostgresBackend {
                 Ok(SpanRow {
                     id: row.try_get("id").map_err(StoreError::query)?,
                     agent_id: row.try_get("agent_id").map_err(StoreError::query)?,
-                    agent_session_id: row
-                        .try_get("agent_session_id")
-                        .map_err(StoreError::query)?,
+                    agent_session_id: row.try_get("agent_session_id").map_err(StoreError::query)?,
                     kind: row.try_get("kind").map_err(StoreError::query)?,
                     model: row.try_get("model").map_err(StoreError::query)?,
                     started_at: row.try_get("started_at").map_err(StoreError::query)?,
@@ -1363,7 +1362,10 @@ mod tests {
 
     #[test]
     fn incident_status_parses_known_values() {
-        assert!(matches!(parse_incident_status("open"), IncidentStatus::Open));
+        assert!(matches!(
+            parse_incident_status("open"),
+            IncidentStatus::Open
+        ));
         assert!(matches!(
             parse_incident_status("acknowledged"),
             IncidentStatus::Acknowledged
