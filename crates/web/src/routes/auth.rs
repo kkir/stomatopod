@@ -73,7 +73,7 @@ pub async fn login_submit(
 
     axum::http::Response::builder()
         .status(axum::http::StatusCode::SEE_OTHER)
-        .header("Location", "/")
+        .header("Location", "/app")
         .header("Set-Cookie", cookie)
         .body(axum::body::Body::empty())
         .unwrap()
@@ -86,7 +86,7 @@ pub async fn logout() -> impl IntoResponse {
     );
     axum::http::Response::builder()
         .status(axum::http::StatusCode::SEE_OTHER)
-        .header("Location", "/login")
+        .header("Location", "/")
         .header("Set-Cookie", cookie)
         .body(axum::body::Body::empty())
         .unwrap()

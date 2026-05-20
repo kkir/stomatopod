@@ -9,7 +9,7 @@
 <div id="add-site" style="display:none;margin-bottom:1.5rem">
   <div class="card">
     <h2 style="margin-bottom:1rem">Add a new site</h2>
-    <form method="post" action="/sites" style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end">
+    <form method="post" action="/app/sites" style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end">
       <div>
         <label style="display:block;font-size:12px;color:#8892a4;margin-bottom:4px">Domain</label>
         <input name="domain" placeholder="example.com" required>
@@ -26,7 +26,7 @@
 {% if sites %}
 <div style="display:grid;gap:.75rem">
   {% for site in sites %}
-  <a href="/sites/{{ site.id }}" style="display:block;text-decoration:none">
+  <a href="/app/sites/{{ site.id }}" style="display:block;text-decoration:none">
     <div class="card" style="display:flex;justify-content:space-between;align-items:center">
       <div>
         <div style="font-weight:600">{{ site.name }}</div>

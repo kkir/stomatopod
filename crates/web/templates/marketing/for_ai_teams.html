@@ -1,0 +1,114 @@
+{% extends "marketing/base.html" %}
+{% block title %}Stomatopod for AI/LLM application teams{% endblock %}
+{% block meta_description %}Sentinel from Stomatopod is an AI firewall: cost caps, token velocity limits, tool-loop detection, and SSE kill switches for production LLM agents.{% endblock %}
+
+{% block content %}
+
+<section class="relative overflow-hidden bg-hero-gradient text-white">
+  <div class="absolute inset-0 grid-bg opacity-25 pointer-events-none"></div>
+  <div class="absolute inset-0 bg-glow-radial pointer-events-none"></div>
+  <div class="container-wide relative pt-20 pb-24 md:pt-28 md:pb-32">
+    <div class="max-w-3xl">
+      <span class="pill-dark" data-anim="hero">For AI / LLM teams</span>
+      <h1 class="h1 mt-6 text-white" data-anim="hero">
+        Don't let an agent <span class="text-accent-light">spend the runway.</span>
+      </h1>
+      <p class="lede mt-6 text-slate-300 max-w-2xl" data-anim="hero">
+        Sentinel sits in front of your LLM provider, watches every tool call and token, and pulls the plug when an agent starts looping or burning dollars faster than you signed up for.
+      </p>
+      <div class="mt-8 flex flex-wrap gap-3" data-anim="hero">
+        <a href="/ai-firewall" class="btn-primary">See Sentinel</a>
+        <a href="/login" class="btn-outline-light">Sign in</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="container-wide mt-20">
+  <div class="max-w-2xl reveal">
+    <span class="eyebrow">Failure modes Sentinel was designed for</span>
+    <h2 class="h2 mt-2">If you've shipped one agent, you've seen one of these.</h2>
+  </div>
+  <div class="mt-12 grid md:grid-cols-2 gap-5">
+    <div class="card reveal">
+      <h3 class="h3 text-base">The infinite tool loop</h3>
+      <p class="mt-3 text-sm text-slate-600">Agent calls <code>web_search("X")</code>, decides the answer isn't there, calls <code>web_search("X")</code> again. Sentinel sees five-in-a-row and stops it.</p>
+    </div>
+    <div class="card reveal" data-delay="80">
+      <h3 class="h3 text-base">The midnight cost spiral</h3>
+      <p class="mt-3 text-sm text-slate-600">A misconfigured retry storm sends 200 requests per second to a 200k-context model. Sentinel hits a velocity cap and pauses the agent.</p>
+    </div>
+    <div class="card reveal" data-delay="160">
+      <h3 class="h3 text-base">The session that never converges</h3>
+      <p class="mt-3 text-sm text-slate-600">An agent burns through $30 of context fighting itself. Hard cost cap fires, incident opens, the session ends with a logged reason.</p>
+    </div>
+    <div class="card reveal" data-delay="240">
+      <h3 class="h3 text-base">The prompt-injection escape</h3>
+      <p class="mt-3 text-sm text-slate-600">A tool result tries to redirect the agent. You see the span trail in the dashboard, can replay it, can pin policies against it.</p>
+    </div>
+  </div>
+</section>
+
+<section class="container-wide mt-24">
+  <div class="grid md:grid-cols-2 gap-12 items-center">
+    <div class="reveal">
+      <span class="eyebrow">What you get</span>
+      <h2 class="h2 mt-2">Observability that's already a kill switch.</h2>
+      <ul class="mt-6 space-y-3">
+        <li class="check-row"><span>Spans for every LLM call, tool call, and reasoning step.</span></li>
+        <li class="check-row"><span>Token and dollar totals per agent, per session, per day.</span></li>
+        <li class="check-row"><span>Configurable policies: cost cap, velocity, repetition.</span></li>
+        <li class="check-row"><span>SSE stream to sidecars so kills land in milliseconds.</span></li>
+        <li class="check-row"><span>Incident dashboard with replay-ready span timelines.</span></li>
+        <li class="check-row"><span>Property redaction so secrets in tool args never reach storage.</span></li>
+      </ul>
+    </div>
+    <div class="reveal" data-delay="120">
+      <div class="code-block">
+<span class="c-comment"># Run Sentinel in front of your model</span>
+$ sentinel \
+    --upstream https://api.anthropic.com \
+    --stomatopod-url https://your-host \
+    --token <span class="c-str">"&lt;sentinel-token&gt;"</span> \
+    --listen 0.0.0.0:7081
+
+<span class="c-comment"># Point your agent at it (no SDK change)</span>
+ANTHROPIC_BASE_URL=http://sentinel:7081 \
+  python your_agent.py
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="container-wide mt-24">
+  <div class="rounded-3xl bg-slate-50 border border-slate-200 p-8 md:p-12 reveal">
+    <div class="grid md:grid-cols-2 gap-10 items-center">
+      <div>
+        <span class="eyebrow">Why self-hosted matters here</span>
+        <h2 class="h2 mt-2">Your prompts never leave your perimeter.</h2>
+        <p class="lede mt-4 text-slate-600">Sentinel ingests spans into the same backend as your analytics. No SaaS observability vendor sits between your agent prompts and the model. That matters for IP, compliance, and customer trust.</p>
+      </div>
+      <div class="space-y-3">
+        <div class="check-row"><span>Configurable PII redaction before span storage.</span></div>
+        <div class="check-row"><span>One backend, one auth model, one dashboard.</span></div>
+        <div class="check-row"><span>Read the source under AGPL-3.0.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="container-wide mt-24 mb-12">
+  <div class="rounded-3xl bg-hero-gradient text-white p-10 md:p-14 text-center relative overflow-hidden reveal">
+    <div class="absolute inset-0 bg-glow-radial pointer-events-none"></div>
+    <div class="relative">
+      <h2 class="h2 text-white">Ship the agent. Sleep through the night.</h2>
+      <p class="mt-4 text-slate-300 max-w-xl mx-auto">A firewall for the things you can't predict your agent will do.</p>
+      <div class="mt-8 flex flex-wrap justify-center gap-3">
+        <a href="/ai-firewall" class="btn-primary">See Sentinel</a>
+        <a href="/web-analytics" class="btn-outline-light">Web Analytics too</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}

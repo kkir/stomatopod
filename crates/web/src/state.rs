@@ -24,6 +24,10 @@ pub struct AppState {
     pub templates: Environment<'static>,
     pub config: Arc<Config>,
     pub tracker_hash: String,
+    /// Cache-busting hash for the compiled marketing CSS.
+    pub marketing_css_hash: String,
+    /// Cache-busting hash for the vendored anime.js bundle.
+    pub anime_js_hash: String,
     /// Channel to the batch accumulator for event ingestion.
     pub ingest_tx: mpsc::Sender<stomatopod_core::domain::event::Event>,
     /// Channel to the span batch accumulator. Whole request batches

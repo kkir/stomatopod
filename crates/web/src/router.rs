@@ -13,8 +13,8 @@ use crate::{
         cors::ingest_cors,
     },
     routes::{
-        agents_dashboard, analytics, api, auth, dashboard, events, funnels, partials, sentinel,
-        sites, spans,
+        agents_dashboard, analytics, api, auth, dashboard, events, funnels, marketing, partials,
+        sentinel, sites, spans,
     },
     state::AppState,
 };
@@ -25,6 +25,25 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/v1/event", post(api::handle_ingest))
         .route("/tracker.js", get(api::tracker_js))
         .layer(ingest_cors());
+
+    // Public marketing site (no auth, no CORS).
+    let marketing_routes = Router::new()
+        .route("/", get(marketing::home))
+        .route("/web-analytics", get(marketing::web_analytics))
+        .route("/ai-firewall", get(marketing::ai_firewall))
+        .route("/for/saas", get(marketing::for_saas))
+        .route("/for/agencies", get(marketing::for_agencies))
+        .route("/for/ai-teams", get(marketing::for_ai_teams))
+        .route("/for/regulated", get(marketing::for_regulated));
+
+    // Hash-busted static assets for the marketing site. The hash is part of
+    // the URL (rendered into the marketing templates) so the response can be
+    // cached for a year.
+    let marketing_css_path = format!("/static/marketing.{}.css", state.marketing_css_hash);
+    let anime_js_path = format!("/static/anime.{}.js", state.anime_js_hash);
+    let marketing_assets = Router::new()
+        .route(&marketing_css_path, get(api::marketing_css))
+        .route(&anime_js_path, get(api::anime_js));
 
     // Sentinel span ingest. Bearer-auth'd via sentinel_tokens (handler
     // checks the header itself; no middleware needed). No CORS since
@@ -57,47 +76,50 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout));
 
-    // Protected dashboard routes
+    // Protected dashboard routes — live under /app so / can serve marketing.
     let dashboard_routes = Router::new()
-        .route("/", get(dashboard::index))
-        .route("/sites", get(sites::sites_list).post(sites::create_site))
-        .route("/sites/:site_id", get(dashboard::site_overview))
-        .route("/sites/:site_id/events", get(events::events_list))
+        .route("/app", get(dashboard::index))
         .route(
-            "/sites/:site_id/funnels",
+            "/app/sites",
+            get(sites::sites_list).post(sites::create_site),
+        )
+        .route("/app/sites/:site_id", get(dashboard::site_overview))
+        .route("/app/sites/:site_id/events", get(events::events_list))
+        .route(
+            "/app/sites/:site_id/funnels",
             get(funnels::funnels_page).post(funnels::create_funnel),
         )
         .route(
-            "/sites/:site_id/funnels/:funnel_id",
+            "/app/sites/:site_id/funnels/:funnel_id",
             get(funnels::funnel_detail),
         )
         // AI firewall dashboard
-        .route("/agents", get(agents_dashboard::agents_index))
-        .route("/agents/:agent_id", get(agents_dashboard::agent_detail))
+        .route("/app/agents", get(agents_dashboard::agents_index))
+        .route("/app/agents/:agent_id", get(agents_dashboard::agent_detail))
         .route(
-            "/agents/:agent_id/spans",
+            "/app/agents/:agent_id/spans",
             get(agents_dashboard::agent_spans_partial),
         )
-        .route("/incidents", get(agents_dashboard::incidents_page))
+        .route("/app/incidents", get(agents_dashboard::incidents_page))
         // HTMX partial routes
         .route(
-            "/sites/:site_id/partials/top-pages",
+            "/app/sites/:site_id/partials/top-pages",
             get(partials::top_pages),
         )
         .route(
-            "/sites/:site_id/partials/top-referrers",
+            "/app/sites/:site_id/partials/top-referrers",
             get(partials::top_referrers),
         )
         .route(
-            "/sites/:site_id/partials/top-countries",
+            "/app/sites/:site_id/partials/top-countries",
             get(partials::top_countries),
         )
         .route(
-            "/sites/:site_id/partials/top-browsers",
+            "/app/sites/:site_id/partials/top-browsers",
             get(partials::top_browsers),
         )
         .route(
-            "/sites/:site_id/partials/top-devices",
+            "/app/sites/:site_id/partials/top-devices",
             get(partials::top_devices),
         )
         .layer(middleware::from_fn_with_state(state.clone(), require_auth));
@@ -122,6 +144,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(analytics_routes)
         .merge(sentinel_control)
         .merge(auth_routes)
+        .merge(marketing_routes)
+        .merge(marketing_assets)
         .merge(dashboard_routes)
         .layer(CompressionLayer::new());
 

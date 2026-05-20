@@ -1,0 +1,167 @@
+{% extends "marketing/base.html" %}
+{% block title %}Stomatopod — Privacy-first analytics & AI agent firewall{% endblock %}
+
+{% block content %}
+
+<section class="relative overflow-hidden bg-hero-gradient text-white">
+  <div class="absolute inset-0 grid-bg opacity-30 pointer-events-none"></div>
+  <div class="absolute inset-0 bg-glow-radial pointer-events-none"></div>
+  <div class="container-wide relative pt-20 pb-28 md:pt-28 md:pb-36">
+    <div class="max-w-3xl">
+      <span class="pill-dark" data-anim="hero">v0.1 &middot; AGPL-3.0 &middot; Rust</span>
+      <h1 class="h1 mt-6 text-white" data-anim="hero">
+        Web analytics and AI agent safety,<br class="hidden md:block">
+        <span class="text-accent-light">in one self-hosted binary.</span>
+      </h1>
+      <p class="lede mt-6 text-slate-300 max-w-2xl" data-anim="hero">
+        Stomatopod is two products sharing one backend: a cookieless web analytics tracker, and Sentinel &mdash; an AI agent firewall that watches LLM calls, caps cost, and kills runaway loops before they bill you.
+      </p>
+      <div class="mt-8 flex flex-wrap gap-3" data-anim="hero">
+        <a href="/web-analytics" class="btn-primary">Explore Web Analytics</a>
+        <a href="/ai-firewall" class="btn-outline-light">Explore AI Firewall</a>
+      </div>
+      <div class="mt-10 flex flex-wrap items-center gap-x-8 gap-y-3 text-sm text-slate-300" data-anim="hero">
+        <span class="check-row text-slate-200">No cookies, no fingerprinting</span>
+        <span class="check-row text-slate-200">Self-hosted, your data stays put</span>
+        <span class="check-row text-slate-200">Open source under AGPL-3.0</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="container-wide -mt-16 relative z-10">
+  <div class="grid md:grid-cols-2 gap-6">
+    <a href="/web-analytics" class="card card-hover reveal block group">
+      <div class="flex items-start gap-4">
+        <div class="flex-none w-12 h-12 rounded-xl bg-accent/10 text-accent flex items-center justify-center">
+          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l3-3 4 4 5-6"/></svg>
+        </div>
+        <div>
+          <div class="eyebrow">Web Analytics</div>
+          <h2 class="h3 mt-1">Pageviews, sessions, funnels &mdash; without cookie banners</h2>
+          <p class="mt-3 text-muted">A 1.4 KB tracker, cookieless session identification, and funnels you actually understand. Drop-in replacement for GA when you don't want to ship your visitors to a third party.</p>
+          <div class="mt-4 text-sm font-semibold text-accent inline-flex items-center gap-1.5 group-hover:gap-2.5 transition-all">
+            Read more
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </div>
+        </div>
+      </div>
+    </a>
+    <a href="/ai-firewall" class="card card-hover reveal block group" data-delay="100">
+      <div class="flex items-start gap-4">
+        <div class="flex-none w-12 h-12 rounded-xl bg-accent/10 text-accent flex items-center justify-center">
+          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
+        </div>
+        <div>
+          <div class="eyebrow">AI Firewall &middot; Sentinel</div>
+          <h2 class="h3 mt-1">Observe, cap, and kill runaway LLM agents</h2>
+          <p class="mt-3 text-muted">A sidecar proxy that ingests every LLM and tool span, tracks tokens and cost, detects tool loops, and pulls the plug via SSE when an agent crosses a policy threshold.</p>
+          <div class="mt-4 text-sm font-semibold text-accent inline-flex items-center gap-1.5 group-hover:gap-2.5 transition-all">
+            Read more
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+</section>
+
+<section class="container-wide mt-28">
+  <div class="text-center max-w-2xl mx-auto reveal">
+    <span class="eyebrow">Pillars</span>
+    <h2 class="h2 mt-2">Built for teams that don't want to outsource their data.</h2>
+  </div>
+  <div class="mt-12 grid md:grid-cols-3 gap-6">
+    <div class="card reveal">
+      <div class="text-3xl font-bold text-accent"><span data-counter="0" data-suffix="">0</span></div>
+      <div class="mt-1 text-sm uppercase tracking-wider text-muted font-semibold">Cookies dropped</div>
+      <p class="mt-3 text-sm text-slate-600">Sessions are identified by a hash of IP + user-agent. The last octet of IPv4 is zeroed before any storage.</p>
+    </div>
+    <div class="card reveal" data-delay="80">
+      <div class="text-3xl font-bold text-accent">100<span class="text-base">%</span></div>
+      <div class="mt-1 text-sm uppercase tracking-wider text-muted font-semibold">Self-hosted</div>
+      <p class="mt-3 text-sm text-slate-600">Embedded storage (Parquet + SQLite) ships out of the box. No SaaS account required, ever. Postgres and ClickHouse backends are in flight.</p>
+    </div>
+    <div class="card reveal" data-delay="160">
+      <div class="text-3xl font-bold text-accent">2&times;</div>
+      <div class="mt-1 text-sm uppercase tracking-wider text-muted font-semibold">Products, one binary</div>
+      <p class="mt-3 text-sm text-slate-600">Analytics ingest and Sentinel span ingest share a backend, a dashboard, and a deploy. One thing to run.</p>
+    </div>
+  </div>
+</section>
+
+<section class="container-wide mt-28">
+  <div class="max-w-2xl reveal">
+    <span class="eyebrow">Who it's for</span>
+    <h2 class="h2 mt-2">Pick the path that matches your team.</h2>
+    <p class="lede mt-4">Four common shapes. Stomatopod is the same product in each &mdash; the framing changes.</p>
+  </div>
+  <div class="mt-12 grid md:grid-cols-2 lg:grid-cols-4 gap-5">
+    <a href="/for/saas" class="card card-hover reveal block">
+      <div class="text-accent text-xs font-semibold uppercase tracking-widest">SaaS & indie devs</div>
+      <h3 class="h3 mt-2 text-lg">Skip the consent banner</h3>
+      <p class="mt-3 text-sm text-slate-600">Privacy-friendly tracking, one binary on a small VPS, no per-event pricing. Built for shipping fast.</p>
+    </a>
+    <a href="/for/agencies" class="card card-hover reveal block" data-delay="80">
+      <div class="text-accent text-xs font-semibold uppercase tracking-widest">Agencies</div>
+      <h3 class="h3 mt-2 text-lg">Own your clients' data</h3>
+      <p class="mt-3 text-sm text-slate-600">Manage many sites from one dashboard. White-label friendly. Hand-off is a domain change.</p>
+    </a>
+    <a href="/for/ai-teams" class="card card-hover reveal block" data-delay="160">
+      <div class="text-accent text-xs font-semibold uppercase tracking-widest">AI / LLM teams</div>
+      <h3 class="h3 mt-2 text-lg">Don't let an agent bankrupt you</h3>
+      <p class="mt-3 text-sm text-slate-600">Token and cost caps, tool-loop detection, SSE kill switch. Cheaper than a $14K OpenAI bill at 3 AM.</p>
+    </a>
+    <a href="/for/regulated" class="card card-hover reveal block" data-delay="240">
+      <div class="text-accent text-xs font-semibold uppercase tracking-widest">Regulated industries</div>
+      <h3 class="h3 mt-2 text-lg">Keep data in your perimeter</h3>
+      <p class="mt-3 text-sm text-slate-600">No third-party trackers, IP anonymization, AGPL source you can audit. Sized for GDPR-conscious teams.</p>
+    </a>
+  </div>
+</section>
+
+<section class="container-wide mt-28">
+  <div class="grid md:grid-cols-2 gap-12 items-center">
+    <div class="reveal">
+      <span class="eyebrow">Quickstart</span>
+      <h2 class="h2 mt-2">One binary. A config file. You're tracking.</h2>
+      <p class="lede mt-4">Embedded mode needs no database to set up. Drop the tracker snippet into your site, point Sentinel at your LLM gateway, and the dashboard lights up.</p>
+      <div class="mt-6 flex flex-wrap gap-3">
+        <a href="/login" class="btn-primary">Sign in</a>
+        <a href="https://github.com" class="btn-ghost">View on GitHub</a>
+      </div>
+    </div>
+    <div class="reveal" data-delay="120">
+      <div class="code-block">
+<span class="c-comment"># 1. Build &amp; run</span>
+$ cargo run --release --bin stomatopod
+
+<span class="c-comment"># 2. Track a pageview from your site</span>
+&lt;script src=<span class="c-str">"https://your-host/tracker.js"</span>
+        data-site=<span class="c-str">"&lt;public-key&gt;"</span>&gt;&lt;/script&gt;
+
+<span class="c-comment"># 3. (Optional) Wire Sentinel for agents</span>
+$ sentinel \
+    --upstream https://api.anthropic.com \
+    --stomatopod-url https://your-host \
+    --token <span class="c-str">"&lt;sentinel-token&gt;"</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="container-wide mt-28 mb-12">
+  <div class="rounded-3xl bg-hero-gradient text-white p-10 md:p-16 text-center relative overflow-hidden reveal">
+    <div class="absolute inset-0 bg-glow-radial pointer-events-none"></div>
+    <div class="relative">
+      <h2 class="h2 text-white">Ready to keep your data &mdash; and your agents &mdash; in line?</h2>
+      <p class="mt-4 text-slate-300 max-w-xl mx-auto">Self-hosted, AGPL-3.0, and small enough to read end to end.</p>
+      <div class="mt-8 flex flex-wrap justify-center gap-3">
+        <a href="/web-analytics" class="btn-primary">Web Analytics</a>
+        <a href="/ai-firewall" class="btn-outline-light">AI Firewall</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}

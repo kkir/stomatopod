@@ -86,6 +86,46 @@ fn build_templates() -> Environment<'static> {
         include_str!("../templates/partials/agent_spans.html"),
     )
     .unwrap();
+    env.add_template(
+        "marketing/base.html",
+        include_str!("../templates/marketing/base.html"),
+    )
+    .unwrap();
+    env.add_template(
+        "marketing/home.html",
+        include_str!("../templates/marketing/home.html"),
+    )
+    .unwrap();
+    env.add_template(
+        "marketing/web_analytics.html",
+        include_str!("../templates/marketing/web_analytics.html"),
+    )
+    .unwrap();
+    env.add_template(
+        "marketing/ai_firewall.html",
+        include_str!("../templates/marketing/ai_firewall.html"),
+    )
+    .unwrap();
+    env.add_template(
+        "marketing/for_saas.html",
+        include_str!("../templates/marketing/for_saas.html"),
+    )
+    .unwrap();
+    env.add_template(
+        "marketing/for_agencies.html",
+        include_str!("../templates/marketing/for_agencies.html"),
+    )
+    .unwrap();
+    env.add_template(
+        "marketing/for_ai_teams.html",
+        include_str!("../templates/marketing/for_ai_teams.html"),
+    )
+    .unwrap();
+    env.add_template(
+        "marketing/for_regulated.html",
+        include_str!("../templates/marketing/for_regulated.html"),
+    )
+    .unwrap();
     env
 }
 
@@ -130,6 +170,8 @@ async fn setup() -> TestCtx {
         templates: build_templates(),
         config,
         tracker_hash: "testhash".into(),
+        marketing_css_hash: "testcss".into(),
+        anime_js_hash: "testanime".into(),
         ingest_tx,
         span_ingest_tx,
         site_cache: Arc::new(DashMap::new()),
@@ -348,7 +390,7 @@ async fn agents_index_renders_when_no_data() {
     let user_id = Ulid::new().to_string();
     let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
     let req = Request::builder()
-        .uri("/agents")
+        .uri("/app/agents")
         .header("cookie", &cookie)
         .body(Body::empty())
         .unwrap();
@@ -383,7 +425,7 @@ async fn incidents_page_lists_manual_kill() {
     let user_id = Ulid::new().to_string();
     let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
     let req = Request::builder()
-        .uri("/incidents")
+        .uri("/app/incidents")
         .header("cookie", &cookie)
         .body(Body::empty())
         .unwrap();
@@ -911,7 +953,7 @@ async fn login_with_correct_credentials_redirects() {
         .get("location")
         .and_then(|v: &axum::http::HeaderValue| v.to_str().ok())
         .unwrap_or("");
-    assert_eq!(location, "/", "successful login should redirect to /");
+    assert_eq!(location, "/app", "successful login should redirect to /app");
 }
 
 #[tokio::test]
@@ -935,7 +977,7 @@ async fn login_with_unknown_email_shows_error() {
 }
 
 #[tokio::test]
-async fn logout_clears_cookie_and_redirects_to_login() {
+async fn logout_clears_cookie_and_redirects_to_marketing_home() {
     let ctx = setup().await;
     let req = Request::builder()
         .method("POST")
@@ -950,7 +992,7 @@ async fn logout_clears_cookie_and_redirects_to_login() {
         .get("location")
         .and_then(|v: &axum::http::HeaderValue| v.to_str().ok())
         .unwrap_or("");
-    assert_eq!(location, "/login");
+    assert_eq!(location, "/");
 
     let set_cookie = resp
         .headers()
@@ -968,7 +1010,7 @@ async fn logout_clears_cookie_and_redirects_to_login() {
 #[tokio::test]
 async fn unauthenticated_dashboard_redirects_to_login() {
     let ctx = setup().await;
-    let req = Request::builder().uri("/").body(Body::empty()).unwrap();
+    let req = Request::builder().uri("/app").body(Body::empty()).unwrap();
 
     let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);

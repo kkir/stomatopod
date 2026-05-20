@@ -34,6 +34,17 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Build marketing assets (Tailwind)
+        run: |
+          npm ci
+          npm run build:assets
+
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
@@ -60,6 +71,17 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Build marketing assets (Tailwind)
+        run: |
+          npm ci
+          npm run build:assets
+
       - name: cargo test --all
         run: cargo test --all --all-features
 
@@ -82,6 +104,17 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-release-
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Build marketing assets (Tailwind)
+        run: |
+          npm ci
+          npm run build:assets
 
       - name: cargo build --release
         run: cargo build --release
@@ -125,17 +158,24 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Build server binary
-        run: cargo build --bin stomatopod
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: tests/e2e/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            tests/e2e/package-lock.json
 
-      - name: Install Playwright and dependencies
+      - name: Build marketing assets (Tailwind)
+        run: |
+          npm ci
+          npm run build:assets
+
+      - name: Build server binary
+        run: cargo build --bin stomatopod
+
+      - name: Install E2E npm dependencies (Playwright)
         run: npm ci
         working-directory: tests/e2e
 

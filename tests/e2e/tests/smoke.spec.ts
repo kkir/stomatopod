@@ -26,25 +26,35 @@ test("invalid credentials show an error message", async ({ page }) => {
   await expect(page).toHaveURL(/\/login/);
 });
 
-test("successful login redirects away from login page", async ({ page }) => {
+test("successful login redirects to the dashboard", async ({ page }) => {
   await page.goto("/login");
   await page.fill('input[name="email"]', ADMIN_EMAIL);
   await page.fill('input[name="password"]', ADMIN_PASSWORD);
   await page.click('button[type="submit"]');
 
-  // After a successful login the server redirects to /.
+  // After a successful login the server redirects to /app.
   // With no sites configured the index page shows the "Your Sites" list.
   await expect(page).not.toHaveURL(/\/login/);
+  await expect(page).toHaveURL(/\/app/);
   // The page should not show the error class.
   await expect(page.locator(".error")).toHaveCount(0);
 });
 
+// ---- Marketing site (public) ----
+
+test("marketing homepage renders at / without auth", async ({ page }) => {
+  await page.goto("/");
+  // Should NOT redirect to /login.
+  await expect(page).not.toHaveURL(/\/login/);
+  await expect(page).toHaveURL(/\/$/);
+  // Marketing nav has a "Sign in" CTA.
+  await expect(page.getByRole("link", { name: /sign in/i })).toBeVisible();
+});
+
 // ---- Dashboard (requires auth) ----
 
-test("unauthenticated visit to dashboard redirects to login", async ({
-  page,
-}) => {
-  await page.goto("/");
+test("unauthenticated visit to /app redirects to login", async ({ page }) => {
+  await page.goto("/app");
   await expect(page).toHaveURL(/\/login/);
 });
 
@@ -104,7 +114,7 @@ test("logged-in user can access the sites list page", async ({ page }) => {
   await expect(page).not.toHaveURL(/\/login/);
 
   // Navigate to sites; requires an authenticated session cookie.
-  await page.goto("/sites");
+  await page.goto("/app/sites");
   await expect(page).not.toHaveURL(/\/login/);
   // The page title comes from base.html
   await expect(page).toHaveTitle(/stomatopod/i);
@@ -125,7 +135,8 @@ test("logout clears session and requires re-authentication", async ({
     await fetch("/logout", { method: "POST" });
   });
 
-  // After logout the session cookie is expired; dashboard should redirect.
-  await page.goto("/");
+  // After logout the session cookie is expired; the dashboard should
+  // redirect to /login. (Marketing pages at / remain public either way.)
+  await page.goto("/app");
   await expect(page).toHaveURL(/\/login/);
 });

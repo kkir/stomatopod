@@ -5,3 +5,5 @@ stomatopod.toml
 !tests/e2e/stomatopod.toml
 .env
 *.log
+node_modules/
+assets/dist/
