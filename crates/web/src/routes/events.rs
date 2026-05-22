@@ -16,19 +16,13 @@ use crate::{
 
 #[derive(Deserialize, Default)]
 pub struct EventsQuery {
-    #[serde(default = "default_range")]
-    pub range: String,
     pub name: Option<String>,
-}
-
-fn default_range() -> String {
-    "30d".into()
 }
 
 pub async fn events_list(
     State(state): State<Arc<AppState>>,
     SiteId(site_id): SiteId,
-    Range(range): Range,
+    Range { range, label }: Range,
     Query(params): Query<EventsQuery>,
 ) -> Result<Response, AppError> {
     let q = EventQuery {
@@ -51,7 +45,7 @@ pub async fn events_list(
         "events.html",
         minijinja::context! {
             site => serde_json::to_value(&site).unwrap(),
-            range => params.range,
+            range => label,
             events => serde_json::to_value(&result.rows).unwrap(),
         },
     )?;

@@ -81,12 +81,18 @@ impl StorageBackend for PostgresBackend {
         }
         // Bulk INSERT in chunks that respect Postgres's 32 767 parameter
         // limit per statement. With 27 columns we cap each chunk at
-        // 1 000 rows (27 000 params) — well under the limit while still
-        // collapsing thousands of round-trips into a handful.
+        // ~1 200 rows — well under the limit while still collapsing
+        // thousands of round-trips into a handful.
+        //
+        // All chunks run inside a single transaction so a multi-chunk
+        // batch is atomic: a failure on the second chunk doesn't leave
+        // the first one durably committed, which would otherwise force
+        // callers to dedupe on retry.
         const COLUMNS: usize = 27;
         const MAX_PARAMS: usize = 32_767;
         let chunk_size = MAX_PARAMS / COLUMNS;
 
+        let mut tx = self.pool.begin().await.map_err(StoreError::db)?;
         for chunk in events.chunks(chunk_size) {
             let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
                 "INSERT INTO events (\
@@ -126,11 +132,9 @@ impl StorageBackend for PostgresBackend {
                     .push_bind(&e.session_id[..])
                     .push_bind(e.properties.as_ref().map(|p| p.to_string()));
             });
-            qb.build()
-                .execute(&self.pool)
-                .await
-                .map_err(StoreError::db)?;
+            qb.build().execute(&mut *tx).await.map_err(StoreError::db)?;
         }
+        tx.commit().await.map_err(StoreError::db)?;
         Ok(())
     }
 
@@ -746,10 +750,14 @@ impl AgentStore for PostgresBackend {
         if spans.is_empty() {
             return Ok(());
         }
+        // Same chunking + atomicity rationale as `ingest_events`: all
+        // chunks run inside one transaction so a partial failure rolls
+        // the whole batch back rather than half-committing.
         const COLUMNS: usize = 18;
         const MAX_PARAMS: usize = 32_767;
         let chunk_size = MAX_PARAMS / COLUMNS;
 
+        let mut tx = self.pool.begin().await.map_err(StoreError::db)?;
         for chunk in spans.chunks(chunk_size) {
             let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
                 "INSERT INTO agent_spans (\
@@ -778,11 +786,9 @@ impl AgentStore for PostgresBackend {
                     .push_bind(&s.stop_reason)
                     .push_bind(s.properties.as_ref().map(|p| p.to_string()));
             });
-            qb.build()
-                .execute(&self.pool)
-                .await
-                .map_err(StoreError::db)?;
+            qb.build().execute(&mut *tx).await.map_err(StoreError::db)?;
         }
+        tx.commit().await.map_err(StoreError::db)?;
         Ok(())
     }
 

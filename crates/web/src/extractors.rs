@@ -4,7 +4,7 @@ use axum::{
     http::request::Parts,
 };
 use serde::Deserialize;
-use stomatopod_core::query::pageviews::TimeRange;
+use stomatopod_core::query::pageviews::{canonical_label, TimeRange};
 use ulid::Ulid;
 
 use crate::error::AppError;
@@ -43,7 +43,14 @@ fn default_range_label() -> String {
 /// Query extractor that reads `?range=` and turns it into a `TimeRange` via
 /// `TimeRange::from_label`. Centralises the label table so the web routes
 /// and the CLI agree on what `"7d"` means.
-pub struct Range(pub TimeRange);
+///
+/// Holds the canonicalised label alongside the parsed `TimeRange` so
+/// handlers can pass a known-good value back into templates and link URLs
+/// without propagating arbitrary user input from `?range=`.
+pub struct Range {
+    pub range: TimeRange,
+    pub label: &'static str,
+}
 
 #[async_trait]
 impl<S: Send + Sync> FromRequestParts<S> for Range {
@@ -53,6 +60,9 @@ impl<S: Send + Sync> FromRequestParts<S> for Range {
         let Query(p): Query<RangeParam> = Query::from_request_parts(parts, state)
             .await
             .map_err(|_| AppError::BadRequest("invalid range query"))?;
-        Ok(Range(TimeRange::from_label(&p.range)))
+        Ok(Range {
+            range: TimeRange::from_label(&p.range),
+            label: canonical_label(&p.range),
+        })
     }
 }

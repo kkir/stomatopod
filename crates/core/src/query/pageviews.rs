@@ -22,6 +22,20 @@ impl TimeRange {
     }
 }
 
+/// Canonical form of a dashboard range label. Unknown inputs fall back to
+/// the default range (matching `TimeRange::from_label`), so handlers can
+/// safely thread the result back into templates and link URLs without
+/// propagating a bogus user-supplied value.
+pub fn canonical_label(label: &str) -> &'static str {
+    match label {
+        "7d" => "7d",
+        "30d" => "30d",
+        "90d" => "90d",
+        "12m" => "12m",
+        _ => "30d",
+    }
+}
+
 /// Map a dashboard range label to a day count. Centralised so the web,
 /// partial, and CLI surfaces all agree on what `"7d"` means.
 pub fn days_for_label(label: &str) -> i64 {
@@ -149,17 +163,6 @@ impl TopListField {
             TopListField::Country => "partials/top_countries.html",
             TopListField::Browser => "partials/top_browsers.html",
             TopListField::Device => "partials/top_devices.html",
-        }
-    }
-
-    /// URL path segment used by the route table (e.g. `top_pages`).
-    pub fn route_segment(&self) -> &'static str {
-        match self {
-            TopListField::Page => "top_pages",
-            TopListField::Referrer => "top_referrers",
-            TopListField::Country => "top_countries",
-            TopListField::Browser => "top_browsers",
-            TopListField::Device => "top_devices",
         }
     }
 }

@@ -55,11 +55,15 @@ pub async fn login_submit(
     }
 
     let session_value = sign_session(&state.config.auth.secret_key, &user.id.to_string());
+    // Clamp the configured TTL to `i64::MAX` (≈ 292 billion years) so an
+    // accidentally absurd config value can't wrap to a negative max-age
+    // and immediately invalidate every cookie.
+    let ttl_secs = i64::try_from(state.config.auth.session_ttl_s).unwrap_or(i64::MAX);
     let cookie = Cookie::build((SESSION_COOKIE, session_value))
         .path("/")
         .http_only(true)
         .same_site(SameSite::Lax)
-        .max_age(Duration::seconds(state.config.auth.session_ttl_s as i64))
+        .max_age(Duration::seconds(ttl_secs))
         .build();
     Ok((jar.add(cookie), Redirect::to("/app")).into_response())
 }

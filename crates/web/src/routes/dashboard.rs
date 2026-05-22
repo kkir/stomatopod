@@ -1,8 +1,7 @@
 use axum::{
-    extract::{Query, State},
+    extract::State,
     response::{IntoResponse, Redirect, Response},
 };
-use serde::Deserialize;
 use std::sync::Arc;
 
 use stomatopod_core::query::pageviews::{Granularity, PageviewsQuery};
@@ -14,16 +13,6 @@ use crate::{
     state::AppState,
     templates,
 };
-
-#[derive(Deserialize, Default)]
-pub struct DashboardQuery {
-    #[serde(default = "default_range")]
-    pub range: String,
-}
-
-fn default_range() -> String {
-    "30d".into()
-}
 
 pub async fn index(State(state): State<Arc<AppState>>) -> Result<Response, AppError> {
     let orgs = state.meta.list_orgs().await?;
@@ -47,8 +36,7 @@ pub async fn index(State(state): State<Arc<AppState>>) -> Result<Response, AppEr
 pub async fn site_overview(
     State(state): State<Arc<AppState>>,
     SiteId(site_id): SiteId,
-    Range(range): Range,
-    Query(params): Query<DashboardQuery>,
+    Range { range, label }: Range,
 ) -> Result<Response, AppError> {
     let query = PageviewsQuery {
         site_id,
@@ -70,7 +58,7 @@ pub async fn site_overview(
         "site.html",
         minijinja::context! {
             site => serde_json::to_value(&site).unwrap(),
-            range => params.range,
+            range => label,
             total_pageviews => report.pageviews.total_pageviews,
             total_sessions => report.pageviews.total_sessions,
             bounce_rate => format!("{:.1}%", report.pageviews.bounce_rate * 100.0),

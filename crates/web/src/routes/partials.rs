@@ -32,7 +32,7 @@ async fn top_partial(
 pub async fn top_pages(
     State(state): State<Arc<AppState>>,
     SiteId(site_id): SiteId,
-    Range(range): Range,
+    Range { range, .. }: Range,
 ) -> Result<impl IntoResponse, AppError> {
     top_partial(&state, site_id, range, TopListField::Page).await
 }
@@ -40,7 +40,7 @@ pub async fn top_pages(
 pub async fn top_referrers(
     State(state): State<Arc<AppState>>,
     SiteId(site_id): SiteId,
-    Range(range): Range,
+    Range { range, .. }: Range,
 ) -> Result<impl IntoResponse, AppError> {
     top_partial(&state, site_id, range, TopListField::Referrer).await
 }
@@ -48,7 +48,7 @@ pub async fn top_referrers(
 pub async fn top_countries(
     State(state): State<Arc<AppState>>,
     SiteId(site_id): SiteId,
-    Range(range): Range,
+    Range { range, .. }: Range,
 ) -> Result<impl IntoResponse, AppError> {
     top_partial(&state, site_id, range, TopListField::Country).await
 }
@@ -56,7 +56,7 @@ pub async fn top_countries(
 pub async fn top_browsers(
     State(state): State<Arc<AppState>>,
     SiteId(site_id): SiteId,
-    Range(range): Range,
+    Range { range, .. }: Range,
 ) -> Result<impl IntoResponse, AppError> {
     top_partial(&state, site_id, range, TopListField::Browser).await
 }
@@ -64,7 +64,7 @@ pub async fn top_browsers(
 pub async fn top_devices(
     State(state): State<Arc<AppState>>,
     SiteId(site_id): SiteId,
-    Range(range): Range,
+    Range { range, .. }: Range,
 ) -> Result<impl IntoResponse, AppError> {
     top_partial(&state, site_id, range, TopListField::Device).await
 }

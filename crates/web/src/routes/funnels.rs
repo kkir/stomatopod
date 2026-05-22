@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Redirect, Response},
     Form,
@@ -21,20 +21,10 @@ use crate::{
     templates,
 };
 
-#[derive(Deserialize, Default)]
-pub struct FunnelListQuery {
-    #[serde(default = "default_range")]
-    pub range: String,
-}
-
-fn default_range() -> String {
-    "30d".into()
-}
-
 pub async fn funnels_page(
     State(state): State<Arc<AppState>>,
     SiteId(site_id): SiteId,
-    Query(params): Query<FunnelListQuery>,
+    Range { label, .. }: Range,
 ) -> Result<Response, AppError> {
     let funnels = state.meta.list_funnels(site_id).await?;
     let site = state
@@ -49,7 +39,7 @@ pub async fn funnels_page(
         minijinja::context! {
             site => serde_json::to_value(&site).unwrap(),
             funnels => serde_json::to_value(&funnels).unwrap(),
-            range => params.range,
+            range => label,
         },
     )?;
     Ok(html.into_response())
@@ -58,8 +48,7 @@ pub async fn funnels_page(
 pub async fn funnel_detail(
     State(state): State<Arc<AppState>>,
     Path((site_id_str, funnel_id_str)): Path<(String, String)>,
-    Range(range): Range,
-    Query(params): Query<FunnelListQuery>,
+    Range { range, label }: Range,
 ) -> Result<Response, AppError> {
     let site_id =
         Ulid::from_string(&site_id_str).map_err(|_| AppError::BadRequest("invalid site id"))?;
@@ -94,7 +83,7 @@ pub async fn funnel_detail(
             site => serde_json::to_value(&site).unwrap(),
             funnel => serde_json::to_value(&funnel).unwrap(),
             result => serde_json::to_value(&result).unwrap(),
-            range => params.range,
+            range => label,
         },
     )?;
     Ok(html.into_response())
