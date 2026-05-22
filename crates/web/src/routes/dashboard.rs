@@ -56,7 +56,7 @@ pub async fn site_overview(
         }
     };
 
-    let range = parse_range(&params.range);
+    let range = TimeRange::from_label(&params.range);
     let query = PageviewsQuery {
         site_id,
         range: range.clone(),
@@ -98,15 +98,4 @@ pub async fn site_overview(
         .unwrap_or_else(|e| format!("<p>Template error: {e}</p>"));
 
     axum::response::Html(html).into_response()
-}
-
-fn parse_range(range: &str) -> TimeRange {
-    let days: i64 = match range {
-        "7d" => 7,
-        "30d" => 30,
-        "90d" => 90,
-        "12m" => 365,
-        _ => 30,
-    };
-    TimeRange::last_n_days(days)
 }

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use stomatopod_core::{
     error::StoreError,
-    query::pageviews::{PageviewsQuery, PageviewsResult, TopList},
+    query::pageviews::{PageviewsQuery, PageviewsResult, TopList, TopListField},
     traits::StorageBackend,
 };
 
@@ -22,32 +22,19 @@ pub async fn fetch_dashboard(
     limit: u32,
 ) -> Result<DashboardReport, StoreError> {
     let site_id = q.site_id;
-    let range = q.range.clone();
-    let b = backend.clone();
+    let range = &q.range;
 
+    // Six concurrent queries: pageviews plus one per `TopListField` variant.
+    // `backend` is `&Arc<dyn …>` so each call site borrows it without cloning;
+    // `range` is borrowed too, so no `TimeRange` clones across the join.
+    let top = |field| backend.query_top_list(site_id, field, range, limit);
     let (pageviews, top_pages, top_referrers, top_countries, top_browsers, top_devices) = tokio::try_join!(
         backend.query_pageviews(q),
-        b.query_top_pages(site_id, &range, limit),
-        {
-            let b = backend.clone();
-            let r = range.clone();
-            async move { b.query_top_referrers(site_id, &r, limit).await }
-        },
-        {
-            let b = backend.clone();
-            let r = range.clone();
-            async move { b.query_top_countries(site_id, &r, limit).await }
-        },
-        {
-            let b = backend.clone();
-            let r = range.clone();
-            async move { b.query_top_browsers(site_id, &r, limit).await }
-        },
-        {
-            let b = backend.clone();
-            let r = range.clone();
-            async move { b.query_top_devices(site_id, &r, limit).await }
-        },
+        top(TopListField::Page),
+        top(TopListField::Referrer),
+        top(TopListField::Country),
+        top(TopListField::Browser),
+        top(TopListField::Device),
     )?;
 
     Ok(DashboardReport {

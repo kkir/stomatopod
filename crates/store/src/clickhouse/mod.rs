@@ -21,7 +21,7 @@ use stomatopod_core::{
     query::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
-        pageviews::{PageviewsQuery, PageviewsResult, TimeBucket, TimeRange, TopList},
+        pageviews::{PageviewsQuery, PageviewsResult, TimeBucket, TimeRange, TopList, TopListField},
         spans::{AgentSummary, SpanQuery, SpanRow},
     },
     traits::{AgentStore, StorageBackend},
@@ -135,51 +135,14 @@ impl StorageBackend for ClickhouseBackend {
         Ok(result)
     }
 
-    async fn query_top_pages(
+    async fn query_top_list(
         &self,
         site_id: Ulid,
+        field: TopListField,
         range: &TimeRange,
         limit: u32,
     ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "url").await
-    }
-
-    async fn query_top_referrers(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "referrer")
-            .await
-    }
-
-    async fn query_top_countries(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "country_code")
-            .await
-    }
-
-    async fn query_top_browsers(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "browser").await
-    }
-
-    async fn query_top_devices(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "device_type")
+        self.query_top_field(site_id, range, limit, field.column())
             .await
     }
 

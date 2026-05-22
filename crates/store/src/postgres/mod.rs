@@ -31,7 +31,8 @@ use stomatopod_core::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
         pageviews::{
-            Granularity, PageviewsQuery, PageviewsResult, TimeBucket, TimeRange, TopList, TopRow,
+            Granularity, PageviewsQuery, PageviewsResult, TimeBucket, TimeRange, TopList,
+            TopListField, TopRow,
         },
         spans::{AgentSummary, SpanQuery, SpanRow},
     },
@@ -170,51 +171,14 @@ impl StorageBackend for PostgresBackend {
         Ok(result)
     }
 
-    async fn query_top_pages(
+    async fn query_top_list(
         &self,
         site_id: Ulid,
+        field: TopListField,
         range: &TimeRange,
         limit: u32,
     ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "url").await
-    }
-
-    async fn query_top_referrers(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "referrer")
-            .await
-    }
-
-    async fn query_top_countries(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "country_code")
-            .await
-    }
-
-    async fn query_top_browsers(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "browser").await
-    }
-
-    async fn query_top_devices(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "device_type")
+        self.query_top_field(site_id, range, limit, field.column())
             .await
     }
 

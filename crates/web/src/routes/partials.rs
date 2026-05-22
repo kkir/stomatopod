@@ -6,7 +6,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use ulid::Ulid;
 
-use stomatopod_core::query::pageviews::TimeRange;
+use stomatopod_core::query::pageviews::{TimeRange, TopListField};
 
 use crate::state::AppState;
 
@@ -18,16 +18,6 @@ pub struct PartialQuery {
 
 fn default_range() -> String {
     "30d".into()
-}
-
-fn parse_days(range: &str) -> i64 {
-    match range {
-        "7d" => 7,
-        "30d" => 30,
-        "90d" => 90,
-        "12m" => 365,
-        _ => 30,
-    }
 }
 
 fn render_rows(
@@ -42,23 +32,31 @@ fn render_rows(
     )
 }
 
+async fn top_partial(
+    state: &AppState,
+    site_id_str: &str,
+    range_label: &str,
+    field: TopListField,
+) -> axum::response::Html<String> {
+    let Ok(site_id) = Ulid::from_string(site_id_str) else {
+        return axum::response::Html("<p>Invalid site ID</p>".into());
+    };
+    let range = TimeRange::from_label(range_label);
+    let result = state
+        .backend
+        .query_top_list(site_id, field, &range, 20)
+        .await
+        .unwrap_or_default();
+    let rows = serde_json::to_value(&result.rows).unwrap();
+    render_rows(state, field.template_partial(), &rows)
+}
+
 pub async fn top_pages(
     State(state): State<Arc<AppState>>,
     Path(site_id_str): Path<String>,
     Query(params): Query<PartialQuery>,
 ) -> impl IntoResponse {
-    let site_id = match Ulid::from_string(&site_id_str) {
-        Ok(id) => id,
-        Err(_) => return axum::response::Html("<p>Invalid site ID</p>".into()),
-    };
-    let range = TimeRange::last_n_days(parse_days(&params.range));
-    let result = state
-        .backend
-        .query_top_pages(site_id, &range, 20)
-        .await
-        .unwrap_or_default();
-    let rows = serde_json::to_value(&result.rows).unwrap();
-    render_rows(&state, "partials/top_pages.html", &rows)
+    top_partial(&state, &site_id_str, &params.range, TopListField::Page).await
 }
 
 pub async fn top_referrers(
@@ -66,18 +64,7 @@ pub async fn top_referrers(
     Path(site_id_str): Path<String>,
     Query(params): Query<PartialQuery>,
 ) -> impl IntoResponse {
-    let site_id = match Ulid::from_string(&site_id_str) {
-        Ok(id) => id,
-        Err(_) => return axum::response::Html("<p>Invalid site ID</p>".into()),
-    };
-    let range = TimeRange::last_n_days(parse_days(&params.range));
-    let result = state
-        .backend
-        .query_top_referrers(site_id, &range, 20)
-        .await
-        .unwrap_or_default();
-    let rows = serde_json::to_value(&result.rows).unwrap();
-    render_rows(&state, "partials/top_referrers.html", &rows)
+    top_partial(&state, &site_id_str, &params.range, TopListField::Referrer).await
 }
 
 pub async fn top_countries(
@@ -85,18 +72,7 @@ pub async fn top_countries(
     Path(site_id_str): Path<String>,
     Query(params): Query<PartialQuery>,
 ) -> impl IntoResponse {
-    let site_id = match Ulid::from_string(&site_id_str) {
-        Ok(id) => id,
-        Err(_) => return axum::response::Html("<p>Invalid site ID</p>".into()),
-    };
-    let range = TimeRange::last_n_days(parse_days(&params.range));
-    let result = state
-        .backend
-        .query_top_countries(site_id, &range, 20)
-        .await
-        .unwrap_or_default();
-    let rows = serde_json::to_value(&result.rows).unwrap();
-    render_rows(&state, "partials/top_countries.html", &rows)
+    top_partial(&state, &site_id_str, &params.range, TopListField::Country).await
 }
 
 pub async fn top_browsers(
@@ -104,18 +80,7 @@ pub async fn top_browsers(
     Path(site_id_str): Path<String>,
     Query(params): Query<PartialQuery>,
 ) -> impl IntoResponse {
-    let site_id = match Ulid::from_string(&site_id_str) {
-        Ok(id) => id,
-        Err(_) => return axum::response::Html("<p>Invalid site ID</p>".into()),
-    };
-    let range = TimeRange::last_n_days(parse_days(&params.range));
-    let result = state
-        .backend
-        .query_top_browsers(site_id, &range, 20)
-        .await
-        .unwrap_or_default();
-    let rows = serde_json::to_value(&result.rows).unwrap();
-    render_rows(&state, "partials/top_browsers.html", &rows)
+    top_partial(&state, &site_id_str, &params.range, TopListField::Browser).await
 }
 
 pub async fn top_devices(
@@ -123,16 +88,5 @@ pub async fn top_devices(
     Path(site_id_str): Path<String>,
     Query(params): Query<PartialQuery>,
 ) -> impl IntoResponse {
-    let site_id = match Ulid::from_string(&site_id_str) {
-        Ok(id) => id,
-        Err(_) => return axum::response::Html("<p>Invalid site ID</p>".into()),
-    };
-    let range = TimeRange::last_n_days(parse_days(&params.range));
-    let result = state
-        .backend
-        .query_top_devices(site_id, &range, 20)
-        .await
-        .unwrap_or_default();
-    let rows = serde_json::to_value(&result.rows).unwrap();
-    render_rows(&state, "partials/top_devices.html", &rows)
+    top_partial(&state, &site_id_str, &params.range, TopListField::Device).await
 }

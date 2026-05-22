@@ -16,7 +16,8 @@ use stomatopod_core::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
         pageviews::{
-            Granularity, PageviewsQuery, PageviewsResult, TimeBucket, TimeRange, TopList, TopRow,
+            Granularity, PageviewsQuery, PageviewsResult, TimeBucket, TimeRange, TopList,
+            TopListField, TopRow,
         },
     },
 };
@@ -169,51 +170,14 @@ impl EmbeddedReader {
         Ok(result)
     }
 
-    pub async fn query_top_pages(
+    pub async fn query_top_list(
         &self,
         site_id: Ulid,
+        field: TopListField,
         range: &TimeRange,
         limit: u32,
     ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "url").await
-    }
-
-    pub async fn query_top_referrers(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "referrer")
-            .await
-    }
-
-    pub async fn query_top_countries(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "country_code")
-            .await
-    }
-
-    pub async fn query_top_browsers(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "browser").await
-    }
-
-    pub async fn query_top_devices(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, "device_type")
+        self.query_top_field(site_id, range, limit, field.column())
             .await
     }
 
