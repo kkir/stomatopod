@@ -149,6 +149,20 @@
           duration: 780,
           delay: anime.stagger(110),
         });
+
+        // Settle-bounce: after the hero pill rises into place, give it a tiny
+        // scale tick so it feels like it lands. Easy to miss, easy to feel.
+        var heroPills = document.querySelectorAll('.pill-dark[data-anim="hero"]');
+        if (heroPills.length) {
+          anime({
+            targets: heroPills,
+            scale: [
+              { value: 1.035, duration: 220, easing: 'easeOutQuad' },
+              { value: 1.0,   duration: 380, easing: 'easeOutQuad' },
+            ],
+            delay: anime.stagger(120, { start: 620 }),
+          });
+        }
       }
 
       var reveals = document.querySelectorAll('.reveal');
@@ -203,6 +217,110 @@
         }, { threshold: 0.4 });
         counters.forEach(function (el) { co.observe(el); });
       }
+
+      /* --------------------------------------------------------------
+         Magnetic-feel CTAs in dark hero sections.
+         The button's transform is fully owned by anime.js for the
+         duration of the hover; on mouseleave it springs back with a
+         soft elastic ease. Skipped on touch / coarse pointers.
+         -------------------------------------------------------------- */
+      var hoverCapable = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+      if (hoverCapable) {
+        var magnets = document.querySelectorAll(
+          'section.bg-hero-gradient .btn-primary, section.bg-hero-gradient .btn-outline-light, .bg-hero-gradient.rounded-3xl .btn-primary, .bg-hero-gradient.rounded-3xl .btn-outline-light'
+        );
+        magnets.forEach(function (btn) {
+          btn.style.willChange = 'transform';
+          btn.addEventListener('mouseenter', function () {
+            anime.remove(btn);
+            anime.set(btn, { translateY: -1 }); // preserve the hover lift baseline
+          });
+          btn.addEventListener('mousemove', function (e) {
+            var r = btn.getBoundingClientRect();
+            var x = (e.clientX - r.left - r.width  / 2) * 0.22;
+            var y = (e.clientY - r.top  - r.height / 2) * 0.18 - 1;
+            anime.set(btn, { translateX: x, translateY: y });
+          });
+          btn.addEventListener('mouseleave', function () {
+            anime.remove(btn);
+            anime({
+              targets: btn,
+              translateX: 0,
+              translateY: 0,
+              duration: 640,
+              easing: 'easeOutElastic(1, 0.45)',
+            });
+          });
+        });
+      }
+
+      /* --------------------------------------------------------------
+         "Read more" arrow nudge on card hover — replaces the
+         CSS gap-1.5 → gap-2.5 transition with a smoother
+         translateX on the SVG itself.
+         -------------------------------------------------------------- */
+      if (hoverCapable) {
+        document.querySelectorAll('.card-hover').forEach(function (card) {
+          var arrow = card.querySelector('a[class*="group-hover"] svg, .group-hover\\:gap-2\\.5 svg');
+          if (!arrow) {
+            // Fall back: any svg inside a flex row with "Read more" sibling text.
+            arrow = card.querySelector('svg');
+          }
+          if (!arrow) return;
+          card.addEventListener('mouseenter', function () {
+            anime.remove(arrow);
+            anime({ targets: arrow, translateX: 4, duration: 280, easing: 'easeOutQuart' });
+          });
+          card.addEventListener('mouseleave', function () {
+            anime.remove(arrow);
+            anime({ targets: arrow, translateX: 0, duration: 380, easing: 'easeOutQuad' });
+          });
+        });
+      }
+
+      /* --------------------------------------------------------------
+         Logo mark micro-wiggle on hover — a 12° tick of the diamond,
+         so the brand mark feels like it acknowledges you.
+         -------------------------------------------------------------- */
+      document.querySelectorAll('header a, footer .flex.items-center').forEach(function (host) {
+        var mark = host.querySelector('.rotate-45');
+        if (!mark) return;
+        host.addEventListener('mouseenter', function () {
+          anime.remove(mark);
+          anime({
+            targets: mark,
+            rotate: [
+              { value: 57, duration: 240, easing: 'easeOutQuad' },
+              { value: 45, duration: 520, easing: 'easeOutElastic(1, 0.55)' },
+            ],
+          });
+        });
+      });
+
+      /* --------------------------------------------------------------
+         In-page anchor links: glide instead of jump, with a long
+         easeInOutQuart curve. CSS scroll-behavior:smooth still
+         handles the no-JS path.
+         -------------------------------------------------------------- */
+      document.querySelectorAll('a[href^="#"]').forEach(function (a) {
+        var href = a.getAttribute('href');
+        if (!href || href === '#') return;
+        a.addEventListener('click', function (e) {
+          var target = document.querySelector(href);
+          if (!target) return;
+          e.preventDefault();
+          var top = target.getBoundingClientRect().top + window.scrollY - 72;
+          var scroller = { y: window.scrollY };
+          anime({
+            targets: scroller,
+            y: top,
+            duration: 820,
+            easing: 'easeInOutQuart',
+            update: function () { window.scrollTo(0, scroller.y); },
+          });
+          history.replaceState(null, '', href);
+        });
+      });
     }
 
     if (document.readyState === 'loading') {
