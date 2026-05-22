@@ -12,7 +12,7 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use sqlx::{postgres::PgPoolOptions, PgPool, QueryBuilder, Row};
 use ulid::Ulid;
 
 use stomatopod_core::{
@@ -79,60 +79,58 @@ impl StorageBackend for PostgresBackend {
         if events.is_empty() {
             return Ok(());
         }
-        // One multi-row INSERT per batch. UNNEST keeps the wire format
-        // compact and avoids 27 * N parameter placeholders that grow
-        // beyond Postgres's per-statement limit (32 767) on big batches.
-        let mut tx = self.pool.begin().await.map_err(StoreError::db)?;
-        for e in &events {
-            sqlx::query(
-                "INSERT INTO events (
-                    id, site_id, name, kind, timestamp, received_at, url, referrer,
-                    utm_source, utm_medium, utm_campaign, utm_term, utm_content,
-                    browser, browser_version, os, os_version, device_type,
-                    screen_width, screen_height, language,
-                    ip_anonymized, country_code, region, city,
-                    session_id, properties
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8,
-                    $9, $10, $11, $12, $13,
-                    $14, $15, $16, $17, $18,
-                    $19, $20, $21,
-                    $22, $23, $24, $25,
-                    $26, $27
-                )",
-            )
-            .bind(e.id.to_string())
-            .bind(e.site_id.to_string())
-            .bind(&e.name)
-            .bind(e.kind.as_str())
-            .bind(e.timestamp)
-            .bind(e.received_at)
-            .bind(&e.url)
-            .bind(&e.referrer)
-            .bind(&e.utm_source)
-            .bind(&e.utm_medium)
-            .bind(&e.utm_campaign)
-            .bind(&e.utm_term)
-            .bind(&e.utm_content)
-            .bind(&e.browser)
-            .bind(&e.browser_version)
-            .bind(&e.os)
-            .bind(&e.os_version)
-            .bind(e.device_type.as_str())
-            .bind(e.screen_width.map(|v| v as i32))
-            .bind(e.screen_height.map(|v| v as i32))
-            .bind(&e.language)
-            .bind(&e.ip_anonymized)
-            .bind(&e.country_code)
-            .bind(&e.region)
-            .bind(&e.city)
-            .bind(&e.session_id[..])
-            .bind(e.properties.as_ref().map(|p| p.to_string()))
-            .execute(&mut *tx)
-            .await
-            .map_err(StoreError::db)?;
+        // Bulk INSERT in chunks that respect Postgres's 32 767 parameter
+        // limit per statement. With 27 columns we cap each chunk at
+        // 1 000 rows (27 000 params) — well under the limit while still
+        // collapsing thousands of round-trips into a handful.
+        const COLUMNS: usize = 27;
+        const MAX_PARAMS: usize = 32_767;
+        let chunk_size = MAX_PARAMS / COLUMNS;
+
+        for chunk in events.chunks(chunk_size) {
+            let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+                "INSERT INTO events (\
+                    id, site_id, name, kind, timestamp, received_at, url, referrer, \
+                    utm_source, utm_medium, utm_campaign, utm_term, utm_content, \
+                    browser, browser_version, os, os_version, device_type, \
+                    screen_width, screen_height, language, \
+                    ip_anonymized, country_code, region, city, \
+                    session_id, properties) ",
+            );
+            qb.push_values(chunk, |mut b, e| {
+                b.push_bind(e.id.to_string())
+                    .push_bind(e.site_id.to_string())
+                    .push_bind(&e.name)
+                    .push_bind(e.kind.as_str())
+                    .push_bind(e.timestamp)
+                    .push_bind(e.received_at)
+                    .push_bind(&e.url)
+                    .push_bind(&e.referrer)
+                    .push_bind(&e.utm_source)
+                    .push_bind(&e.utm_medium)
+                    .push_bind(&e.utm_campaign)
+                    .push_bind(&e.utm_term)
+                    .push_bind(&e.utm_content)
+                    .push_bind(&e.browser)
+                    .push_bind(&e.browser_version)
+                    .push_bind(&e.os)
+                    .push_bind(&e.os_version)
+                    .push_bind(e.device_type.as_str())
+                    .push_bind(e.screen_width.map(|v| v as i32))
+                    .push_bind(e.screen_height.map(|v| v as i32))
+                    .push_bind(&e.language)
+                    .push_bind(&e.ip_anonymized)
+                    .push_bind(&e.country_code)
+                    .push_bind(&e.region)
+                    .push_bind(&e.city)
+                    .push_bind(&e.session_id[..])
+                    .push_bind(e.properties.as_ref().map(|p| p.to_string()));
+            });
+            qb.build()
+                .execute(&self.pool)
+                .await
+                .map_err(StoreError::db)?;
         }
-        tx.commit().await.map_err(StoreError::db)?;
         Ok(())
     }
 
@@ -748,44 +746,43 @@ impl AgentStore for PostgresBackend {
         if spans.is_empty() {
             return Ok(());
         }
-        let mut tx = self.pool.begin().await.map_err(StoreError::db)?;
-        for s in &spans {
-            sqlx::query(
-                "INSERT INTO agent_spans (
-                    id, site_id, agent_id, agent_session_id, parent_span_id,
-                    kind, model, started_at, ended_at,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-                    cost_usd, tool_name, tool_input_hash, stop_reason, properties
-                ) VALUES (
-                    $1, $2, $3, $4, $5,
-                    $6, $7, $8, $9,
-                    $10, $11, $12, $13,
-                    $14, $15, $16, $17, $18
-                )",
-            )
-            .bind(s.id.to_string())
-            .bind(s.site_id.to_string())
-            .bind(&s.agent_id)
-            .bind(&s.agent_session_id)
-            .bind(s.parent_span_id.map(|p| p.to_string()))
-            .bind(s.kind.as_str())
-            .bind(&s.model)
-            .bind(s.started_at)
-            .bind(s.ended_at)
-            .bind(s.input_tokens as i64)
-            .bind(s.output_tokens as i64)
-            .bind(s.cache_read_tokens as i64)
-            .bind(s.cache_creation_tokens as i64)
-            .bind(s.cost_usd)
-            .bind(&s.tool_name)
-            .bind(&s.tool_input_hash)
-            .bind(&s.stop_reason)
-            .bind(s.properties.as_ref().map(|p| p.to_string()))
-            .execute(&mut *tx)
-            .await
-            .map_err(StoreError::db)?;
+        const COLUMNS: usize = 18;
+        const MAX_PARAMS: usize = 32_767;
+        let chunk_size = MAX_PARAMS / COLUMNS;
+
+        for chunk in spans.chunks(chunk_size) {
+            let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+                "INSERT INTO agent_spans (\
+                    id, site_id, agent_id, agent_session_id, parent_span_id, \
+                    kind, model, started_at, ended_at, \
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, \
+                    cost_usd, tool_name, tool_input_hash, stop_reason, properties) ",
+            );
+            qb.push_values(chunk, |mut b, s| {
+                b.push_bind(s.id.to_string())
+                    .push_bind(s.site_id.to_string())
+                    .push_bind(&s.agent_id)
+                    .push_bind(&s.agent_session_id)
+                    .push_bind(s.parent_span_id.map(|p| p.to_string()))
+                    .push_bind(s.kind.as_str())
+                    .push_bind(&s.model)
+                    .push_bind(s.started_at)
+                    .push_bind(s.ended_at)
+                    .push_bind(s.input_tokens as i64)
+                    .push_bind(s.output_tokens as i64)
+                    .push_bind(s.cache_read_tokens as i64)
+                    .push_bind(s.cache_creation_tokens as i64)
+                    .push_bind(s.cost_usd)
+                    .push_bind(&s.tool_name)
+                    .push_bind(&s.tool_input_hash)
+                    .push_bind(&s.stop_reason)
+                    .push_bind(s.properties.as_ref().map(|p| p.to_string()));
+            });
+            qb.build()
+                .execute(&self.pool)
+                .await
+                .map_err(StoreError::db)?;
         }
-        tx.commit().await.map_err(StoreError::db)?;
         Ok(())
     }
 
