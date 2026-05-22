@@ -1,10 +1,11 @@
 use axum::{
     extract::{Request, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     middleware::Next,
     response::{IntoResponse, Redirect, Response},
     Json,
 };
+use axum_extra::extract::cookie::CookieJar;
 use std::sync::Arc;
 
 use crate::state::AppState;
@@ -35,17 +36,9 @@ pub fn verify_session(secret: &str, value: &str) -> Option<String> {
 }
 
 fn extract_session_cookie(secret: &str, req: &Request) -> bool {
-    req.headers()
-        .get("cookie")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|header| {
-            header.split(';').find_map(|part| {
-                let part = part.trim();
-                let (k, v) = part.split_once('=')?;
-                (k.trim() == SESSION_COOKIE).then(|| v.trim().to_string())
-            })
-        })
-        .and_then(|val| verify_session(secret, &val))
+    CookieJar::from_headers(req.headers())
+        .get(SESSION_COOKIE)
+        .and_then(|c| verify_session(secret, c.value()))
         .is_some()
 }
 
@@ -72,7 +65,7 @@ pub async fn require_api_auth(
 
     let has_bearer = req
         .headers()
-        .get("authorization")
+        .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "))
         .and_then(|token| verify_session(secret, token))

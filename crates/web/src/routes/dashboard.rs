@@ -1,16 +1,19 @@
 use axum::{
-    extract::{Path, Query, State},
-    http::StatusCode,
+    extract::{Query, State},
     response::{IntoResponse, Redirect, Response},
 };
 use serde::Deserialize;
 use std::sync::Arc;
-use ulid::Ulid;
 
-use stomatopod_core::query::pageviews::{Granularity, PageviewsQuery, TimeRange};
+use stomatopod_core::query::pageviews::{Granularity, PageviewsQuery};
 use stomatopod_query::reports::fetch_dashboard;
 
-use crate::state::AppState;
+use crate::{
+    error::AppError,
+    extractors::{Range, SiteId},
+    state::AppState,
+    templates,
+};
 
 #[derive(Deserialize, Default)]
 pub struct DashboardQuery {
@@ -22,67 +25,50 @@ fn default_range() -> String {
     "30d".into()
 }
 
-pub async fn index(State(state): State<Arc<AppState>>) -> Response {
-    let sites = match state.meta.list_orgs().await {
-        Ok(orgs) if !orgs.is_empty() => state.meta.list_sites(orgs[0].id).await.unwrap_or_default(),
-        _ => vec![],
+pub async fn index(State(state): State<Arc<AppState>>) -> Result<Response, AppError> {
+    let orgs = state.meta.list_orgs().await?;
+    let sites = match orgs.first() {
+        Some(org) => state.meta.list_sites(org.id).await?,
+        None => vec![],
     };
 
     if sites.is_empty() {
-        let tmpl = state.templates.get_template("index.html").unwrap();
-        return axum::response::Html(
-            tmpl.render(minijinja::context! { sites => [] as [i32;0] })
-                .unwrap(),
-        )
-        .into_response();
+        return Ok(templates::render(
+            &state,
+            "index.html",
+            minijinja::context! { sites => [] as [i32; 0] },
+        )?
+        .into_response());
     }
 
-    Redirect::to(&format!("/app/sites/{}", sites[0].id)).into_response()
+    Ok(Redirect::to(&format!("/app/sites/{}", sites[0].id)).into_response())
 }
 
 pub async fn site_overview(
     State(state): State<Arc<AppState>>,
-    Path(site_id_str): Path<String>,
+    SiteId(site_id): SiteId,
+    Range(range): Range,
     Query(params): Query<DashboardQuery>,
-) -> Response {
-    let site_id = match Ulid::from_string(&site_id_str) {
-        Ok(id) => id,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                axum::response::Html("<p>Invalid site ID</p>".to_string()),
-            )
-                .into_response()
-        }
-    };
-
-    let range = TimeRange::from_label(&params.range);
+) -> Result<Response, AppError> {
     let query = PageviewsQuery {
         site_id,
-        range: range.clone(),
+        range,
         granularity: Granularity::Day,
         filters: vec![],
     };
 
-    let report = match fetch_dashboard(&state.backend, &query, 20).await {
-        Ok(r) => r,
-        Err(e) => return axum::response::Html(format!("<p>Query error: {e}</p>")).into_response(),
-    };
+    let report = fetch_dashboard(&state.backend, &query, 20).await?;
 
-    let site = match state.meta.get_site(site_id).await.ok().flatten() {
-        Some(s) => s,
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                axum::response::Html("<p>Site not found</p>".to_string()),
-            )
-                .into_response()
-        }
-    };
+    let site = state
+        .meta
+        .get_site(site_id)
+        .await?
+        .ok_or(AppError::NotFound("site not found"))?;
 
-    let tmpl = state.templates.get_template("site.html").unwrap();
-    let html = tmpl
-        .render(minijinja::context! {
+    let html = templates::render(
+        &state,
+        "site.html",
+        minijinja::context! {
             site => serde_json::to_value(&site).unwrap(),
             range => params.range,
             total_pageviews => report.pageviews.total_pageviews,
@@ -94,8 +80,8 @@ pub async fn site_overview(
             top_browsers => serde_json::to_value(&report.top_browsers.rows).unwrap(),
             top_devices => serde_json::to_value(&report.top_devices.rows).unwrap(),
             buckets => serde_json::to_value(&report.pageviews.buckets).unwrap(),
-        })
-        .unwrap_or_else(|e| format!("<p>Template error: {e}</p>"));
+        },
+    )?;
 
-    axum::response::Html(html).into_response()
+    Ok(html.into_response())
 }

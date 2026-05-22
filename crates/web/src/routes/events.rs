@@ -1,15 +1,18 @@
 use axum::{
-    extract::{Path, Query, State},
-    http::StatusCode,
+    extract::{Query, State},
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
 use std::sync::Arc;
-use ulid::Ulid;
 
-use stomatopod_core::query::{events::EventQuery, pageviews::TimeRange};
+use stomatopod_core::query::events::EventQuery;
 
-use crate::state::AppState;
+use crate::{
+    error::AppError,
+    extractors::{Range, SiteId},
+    state::AppState,
+    templates,
+};
 
 #[derive(Deserialize, Default)]
 pub struct EventsQuery {
@@ -24,60 +27,33 @@ fn default_range() -> String {
 
 pub async fn events_list(
     State(state): State<Arc<AppState>>,
-    Path(site_id_str): Path<String>,
+    SiteId(site_id): SiteId,
+    Range(range): Range,
     Query(params): Query<EventsQuery>,
-) -> Response {
-    let site_id = match Ulid::from_string(&site_id_str) {
-        Ok(id) => id,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                axum::response::Html("<p>Invalid site ID</p>".to_string()),
-            )
-                .into_response()
-        }
-    };
-
-    let days: i64 = match params.range.as_str() {
-        "7d" => 7,
-        "30d" => 30,
-        "90d" => 90,
-        "12m" => 365,
-        _ => 30,
-    };
-
+) -> Result<Response, AppError> {
     let q = EventQuery {
         site_id,
-        range: TimeRange::last_n_days(days),
+        range,
         event_name: params.name.clone(),
         filters: vec![],
         limit: 50,
     };
 
-    let result = state
-        .backend
-        .query_custom_events(&q)
-        .await
-        .unwrap_or_default();
-    let site = match state.meta.get_site(site_id).await.ok().flatten() {
-        Some(s) => s,
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                axum::response::Html("<p>Site not found</p>".to_string()),
-            )
-                .into_response()
-        }
-    };
+    let result = state.backend.query_custom_events(&q).await?;
+    let site = state
+        .meta
+        .get_site(site_id)
+        .await?
+        .ok_or(AppError::NotFound("site not found"))?;
 
-    let tmpl = state.templates.get_template("events.html").unwrap();
-    axum::response::Html(
-        tmpl.render(minijinja::context! {
+    let html = templates::render(
+        &state,
+        "events.html",
+        minijinja::context! {
             site => serde_json::to_value(&site).unwrap(),
             range => params.range,
             events => serde_json::to_value(&result.rows).unwrap(),
-        })
-        .unwrap_or_else(|e| format!("<p>Template error: {e}</p>")),
-    )
-    .into_response()
+        },
+    )?;
+    Ok(html.into_response())
 }

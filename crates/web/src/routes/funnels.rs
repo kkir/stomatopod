@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::{IntoResponse, Redirect},
+    response::{IntoResponse, Redirect, Response},
     Form,
 };
 use chrono::Utc;
@@ -11,13 +11,15 @@ use ulid::Ulid;
 
 use stomatopod_core::{
     domain::org::Funnel,
-    query::{
-        funnel::{FunnelQuery, FunnelStep},
-        pageviews::TimeRange,
-    },
+    query::funnel::{FunnelQuery, FunnelStep},
 };
 
-use crate::state::AppState;
+use crate::{
+    error::AppError,
+    extractors::{Range, SiteId},
+    state::AppState,
+    templates,
+};
 
 #[derive(Deserialize, Default)]
 pub struct FunnelListQuery {
@@ -31,81 +33,71 @@ fn default_range() -> String {
 
 pub async fn funnels_page(
     State(state): State<Arc<AppState>>,
-    Path(site_id_str): Path<String>,
+    SiteId(site_id): SiteId,
     Query(params): Query<FunnelListQuery>,
-) -> impl IntoResponse {
-    let site_id = match Ulid::from_string(&site_id_str) {
-        Ok(id) => id,
-        Err(_) => return axum::response::Html("<p>Invalid site ID</p>".into()),
-    };
+) -> Result<Response, AppError> {
+    let funnels = state.meta.list_funnels(site_id).await?;
+    let site = state
+        .meta
+        .get_site(site_id)
+        .await?
+        .ok_or(AppError::NotFound("site not found"))?;
 
-    let funnels = state.meta.list_funnels(site_id).await.unwrap_or_default();
-    let site = match state.meta.get_site(site_id).await.ok().flatten() {
-        Some(s) => s,
-        None => return axum::response::Html("<p>Site not found</p>".into()),
-    };
-
-    let tmpl = state.templates.get_template("funnels.html").unwrap();
-    axum::response::Html(
-        tmpl.render(minijinja::context! {
+    let html = templates::render(
+        &state,
+        "funnels.html",
+        minijinja::context! {
             site => serde_json::to_value(&site).unwrap(),
             funnels => serde_json::to_value(&funnels).unwrap(),
             range => params.range,
-        })
-        .unwrap_or_else(|e| format!("<p>Template error: {e}</p>")),
-    )
+        },
+    )?;
+    Ok(html.into_response())
 }
 
 pub async fn funnel_detail(
     State(state): State<Arc<AppState>>,
     Path((site_id_str, funnel_id_str)): Path<(String, String)>,
+    Range(range): Range,
     Query(params): Query<FunnelListQuery>,
-) -> impl IntoResponse {
-    let site_id = match Ulid::from_string(&site_id_str) {
-        Ok(id) => id,
-        Err(_) => return axum::response::Html("<p>Invalid site ID</p>".into()),
-    };
-    let funnel_id = match Ulid::from_string(&funnel_id_str) {
-        Ok(id) => id,
-        Err(_) => return axum::response::Html("<p>Invalid funnel ID</p>".into()),
-    };
+) -> Result<Response, AppError> {
+    let site_id =
+        Ulid::from_string(&site_id_str).map_err(|_| AppError::BadRequest("invalid site id"))?;
+    let funnel_id =
+        Ulid::from_string(&funnel_id_str).map_err(|_| AppError::BadRequest("invalid funnel id"))?;
 
-    let funnel = match state.meta.get_funnel(funnel_id).await.ok().flatten() {
-        Some(f) => f,
-        None => return axum::response::Html("<p>Funnel not found</p>".into()),
-    };
+    let funnel = state
+        .meta
+        .get_funnel(funnel_id)
+        .await?
+        .ok_or(AppError::NotFound("funnel not found"))?;
 
     let steps: Vec<FunnelStep> = serde_json::from_str(&funnel.definition).unwrap_or_default();
-    let days: i64 = match params.range.as_str() {
-        "7d" => 7,
-        "30d" => 30,
-        "90d" => 90,
-        _ => 30,
-    };
-
     let q = FunnelQuery {
         site_id,
-        range: TimeRange::last_n_days(days),
+        range,
         steps,
         window_secs: 86400,
     };
 
-    let result = state.backend.query_funnel(&q).await.unwrap_or_default();
-    let site = match state.meta.get_site(site_id).await.ok().flatten() {
-        Some(s) => s,
-        None => return axum::response::Html("<p>Site not found</p>".into()),
-    };
+    let result = state.backend.query_funnel(&q).await?;
+    let site = state
+        .meta
+        .get_site(site_id)
+        .await?
+        .ok_or(AppError::NotFound("site not found"))?;
 
-    let tmpl = state.templates.get_template("funnels.html").unwrap();
-    axum::response::Html(
-        tmpl.render(minijinja::context! {
+    let html = templates::render(
+        &state,
+        "funnels.html",
+        minijinja::context! {
             site => serde_json::to_value(&site).unwrap(),
             funnel => serde_json::to_value(&funnel).unwrap(),
             result => serde_json::to_value(&result).unwrap(),
             range => params.range,
-        })
-        .unwrap_or_else(|e| format!("<p>Template error: {e}</p>")),
-    )
+        },
+    )?;
+    Ok(html.into_response())
 }
 
 #[derive(Deserialize)]
