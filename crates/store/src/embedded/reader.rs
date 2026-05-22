@@ -216,44 +216,7 @@ impl EmbeddedReader {
 
         let df = self.ctx.sql(&sql).await.map_err(StoreError::query)?;
         let batches = df.collect().await.map_err(StoreError::query)?;
-
-        let mut rows = Vec::new();
-        let mut total_pv = 0u64;
-
-        for batch in &batches {
-            use arrow::array::{Int64Array, StringArray};
-            let val_col = batch
-                .column_by_name("value")
-                .and_then(|c| c.as_any().downcast_ref::<StringArray>());
-            let pv_col = batch
-                .column_by_name("pageviews")
-                .and_then(|c| c.as_any().downcast_ref::<Int64Array>());
-            let sess_col = batch
-                .column_by_name("sessions")
-                .and_then(|c| c.as_any().downcast_ref::<Int64Array>());
-
-            if let (Some(vals), Some(pvs), Some(sessions)) = (val_col, pv_col, sess_col) {
-                for i in 0..batch.num_rows() {
-                    let pv = pvs.value(i) as u64;
-                    total_pv += pv;
-                    rows.push(TopRow {
-                        value: vals.value(i).to_string(),
-                        pageviews: pv,
-                        sessions: sessions.value(i) as u64,
-                        pct: 0.0,
-                    });
-                }
-            }
-        }
-
-        // Compute percentages
-        if total_pv > 0 {
-            for row in &mut rows {
-                row.pct = (row.pageviews as f64 / total_pv as f64) * 100.0;
-            }
-        }
-
-        Ok(TopList { rows })
+        self.batches_to_top_list(batches)
     }
 
     pub async fn query_custom_events(&self, q: &EventQuery) -> Result<TopList, StoreError> {
