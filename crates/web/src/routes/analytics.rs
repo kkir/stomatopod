@@ -148,7 +148,11 @@ async fn top_list_response(
             .into_response();
     };
     let range = parse_range(range_label);
-    match state.backend.query_top_list(site_id, field, &range, limit).await {
+    match state
+        .backend
+        .query_top_list(site_id, field, &range, limit)
+        .await
+    {
         Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -160,7 +164,14 @@ pub async fn top_pages(
     Path(site): Path<String>,
     Query(params): Query<TopParams>,
 ) -> impl IntoResponse {
-    top_list_response(&state, &site, &params.range, params.limit, TopListField::Page).await
+    top_list_response(
+        &state,
+        &site,
+        &params.range,
+        params.limit,
+        TopListField::Page,
+    )
+    .await
 }
 
 /// GET /api/v1/sites/:site/top-referrers

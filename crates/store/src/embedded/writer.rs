@@ -257,4 +257,3 @@ pub fn events_to_record_batch(
         ],
     )?)
 }
-

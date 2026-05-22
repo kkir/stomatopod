@@ -28,7 +28,11 @@ pub(crate) struct WalInner {
 /// Open the first segment of a WAL directory, writing the 4-byte magic
 /// header. The caller wraps the returned `Mutex<WalInner>` in its own
 /// type-specific struct so on-disk formats stay distinct.
-pub(crate) fn open_segment(dir: &Path, prefix: &str, magic: &[u8; 4]) -> Result<(PathBuf, Mutex<WalInner>)> {
+pub(crate) fn open_segment(
+    dir: &Path,
+    prefix: &str,
+    magic: &[u8; 4],
+) -> Result<(PathBuf, Mutex<WalInner>)> {
     std::fs::create_dir_all(dir)?;
     let path = dir.join(format!("{prefix}-{}.bin", ulid::Ulid::new()));
     let file = OpenOptions::new().create(true).append(true).open(&path)?;

@@ -21,9 +21,7 @@ async fn first_site_id(state: &Arc<AppState>) -> Option<Ulid> {
     sites.into_iter().next().map(|s| s.id)
 }
 
-pub async fn agents_index(
-    State(state): State<Arc<AppState>>,
-) -> Result<Response, AppError> {
+pub async fn agents_index(State(state): State<Arc<AppState>>) -> Result<Response, AppError> {
     let Some(site_id) = first_site_id(&state).await else {
         return Ok(Html("<p>No sites configured yet.</p>").into_response());
     };
@@ -108,7 +106,11 @@ pub async fn agent_spans_partial(
         until: now,
         limit: 100,
     };
-    let rows = state.agent_store.query_spans(&query).await.unwrap_or_default();
+    let rows = state
+        .agent_store
+        .query_spans(&query)
+        .await
+        .unwrap_or_default();
     let html = templates::render(
         &state,
         "partials/agent_spans.html",
@@ -128,9 +130,7 @@ struct IncidentView {
     status: &'static str,
 }
 
-pub async fn incidents_page(
-    State(state): State<Arc<AppState>>,
-) -> Result<Response, AppError> {
+pub async fn incidents_page(State(state): State<Arc<AppState>>) -> Result<Response, AppError> {
     let Some(site_id) = first_site_id(&state).await else {
         return Ok(Html("<p>No sites configured.</p>").into_response());
     };

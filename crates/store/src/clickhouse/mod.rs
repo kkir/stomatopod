@@ -21,7 +21,9 @@ use stomatopod_core::{
     query::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
-        pageviews::{PageviewsQuery, PageviewsResult, TimeBucket, TimeRange, TopList, TopListField},
+        pageviews::{
+            PageviewsQuery, PageviewsResult, TimeBucket, TimeRange, TopList, TopListField,
+        },
         spans::{AgentSummary, SpanQuery, SpanRow},
     },
     traits::{AgentStore, StorageBackend},
