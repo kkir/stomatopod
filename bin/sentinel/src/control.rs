@@ -1,16 +1,30 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use parking_lot::RwLock;
+use parking_lot::Mutex;
 use serde::Deserialize;
 use tracing::{info, warn};
 
-/// State exposed to the proxy handler. `kill_until_resume = true` means
-/// the next outbound request should be short-circuited.
-#[derive(Default)]
+/// Shared kill-switch + hint state for the proxy. Three independent mutexes
+/// were collapsed into one inner struct so command application is atomic
+/// (a `Kill` immediately followed by a `Resume` no longer races against a
+/// proxy handler reading the kill reason between the two writes).
 pub struct ControlState {
-    pub kill_until_resume: parking_lot::Mutex<Option<String>>,
-    pub hint: parking_lot::Mutex<Option<String>>,
-    seen_seqs: RwLock<HashSet<u64>>,
+    inner: Mutex<Inner>,
+}
+
+#[derive(Default)]
+struct Inner {
+    kill_until_resume: Option<String>,
+    hint: Option<String>,
+    seen_seqs: HashSet<u64>,
+}
+
+impl Default for ControlState {
+    fn default() -> Self {
+        Self {
+            inner: Mutex::new(Inner::default()),
+        }
+    }
 }
 
 impl ControlState {
@@ -19,37 +33,40 @@ impl ControlState {
     }
 
     pub fn current_kill_reason(&self) -> Option<String> {
-        self.kill_until_resume.lock().clone()
+        self.inner.lock().kill_until_resume.clone()
     }
 
     pub fn take_hint(&self) -> Option<String> {
-        self.hint.lock().take()
+        self.inner.lock().hint.take()
+    }
+
+    /// Set the kill reason from the local enforcement layer (cost cap,
+    /// velocity, repetition). Server-pushed kills go through `apply`.
+    pub fn set_kill_reason(&self, reason: String) {
+        self.inner.lock().kill_until_resume = Some(reason);
     }
 
     pub fn apply(&self, env: ControlEnvelope) {
+        let mut s = self.inner.lock();
         // Dedup by seq across reconnects.
-        {
-            let mut seen = self.seen_seqs.write();
-            if !seen.insert(env.seq) {
-                return;
-            }
-            // Cap memory.
-            if seen.len() > 4096 {
-                seen.clear();
-            }
+        if !s.seen_seqs.insert(env.seq) {
+            return;
+        }
+        if s.seen_seqs.len() > 4096 {
+            s.seen_seqs.clear();
         }
         match env.command {
             ControlCommand::Kill { reason } => {
                 info!(seq = env.seq, %reason, "control: KILL");
-                *self.kill_until_resume.lock() = Some(reason);
+                s.kill_until_resume = Some(reason);
             }
             ControlCommand::Hint { message } => {
                 info!(seq = env.seq, "control: HINT");
-                *self.hint.lock() = Some(message);
+                s.hint = Some(message);
             }
             ControlCommand::Resume => {
                 info!(seq = env.seq, "control: RESUME");
-                *self.kill_until_resume.lock() = None;
+                s.kill_until_resume = None;
             }
         }
     }
@@ -58,6 +75,9 @@ impl ControlState {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ControlEnvelope {
     pub seq: u64,
+    /// Server-side agent identifier for logging/auditing on the receiving
+    /// dashboard. Carried on the wire even though the sidecar itself
+    /// doesn't dispatch on it.
     #[allow(dead_code)]
     pub agent_id: String,
     #[serde(flatten)]
