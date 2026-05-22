@@ -1,20 +1,21 @@
 use std::{
-    fs::{File, OpenOptions},
-    io::{BufWriter, Read, Write},
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use parking_lot::Mutex;
 use stomatopod_core::domain::event::Event;
-use tracing::{info, warn};
+use tracing::info;
 
-use super::buffer::EventBuffer;
+use super::{
+    buffer::EventBuffer,
+    wal_common::{append_batch, open_segment, replay_all, WalInner},
+};
 
 const MAGIC: &[u8; 4] = b"WAL!";
-const MAX_WAL_SIZE: u64 = 64 * 1024 * 1024; // 64MB
+const PREFIX: &str = "wal";
 
 pub struct Wal {
     dir: PathBuf,
@@ -23,53 +24,20 @@ pub struct Wal {
     inner: Mutex<WalInner>,
 }
 
-struct WalInner {
-    writer: BufWriter<File>,
-    path: PathBuf,
-    bytes_written: u64,
-}
-
 impl Wal {
     pub fn open(dir: &Path, fsync_interval_ms: u64) -> Result<Arc<Self>> {
-        std::fs::create_dir_all(dir)?;
-        let path = dir.join(format!("wal-{}.bin", ulid::Ulid::new()));
-        let file = OpenOptions::new().create(true).append(true).open(&path)?;
-        let mut writer = BufWriter::new(file);
-        writer.write_all(MAGIC)?;
-        writer.flush()?;
-
+        let (dir, inner) = open_segment(dir, PREFIX, MAGIC)?;
         Ok(Arc::new(Self {
-            dir: dir.to_path_buf(),
+            dir,
             fsync_interval: Duration::from_millis(fsync_interval_ms),
-            inner: Mutex::new(WalInner {
-                writer,
-                path,
-                bytes_written: 4,
-            }),
+            inner,
         }))
     }
 
-    /// Append a batch of events to the WAL. This is called by the flush worker,
+    /// Append a batch of events to the WAL. Called by the flush worker,
     /// not the hot ingest path (which writes to the in-memory buffer first).
     pub fn append(&self, events: &[Event]) -> Result<()> {
-        let payload = bincode::serialize(events)?;
-        let compressed = zstd::encode_all(payload.as_slice(), 1)?;
-        let checksum = crc32fast::hash(&compressed);
-        let len = compressed.len() as u32;
-
-        let mut inner = self.inner.lock();
-        inner.writer.write_all(&len.to_le_bytes())?;
-        inner.writer.write_all(&compressed)?;
-        inner.writer.write_all(&checksum.to_le_bytes())?;
-        inner.writer.flush()?;
-        inner.bytes_written += 4 + compressed.len() as u64 + 4;
-
-        // Rotate if oversized
-        if inner.bytes_written >= MAX_WAL_SIZE {
-            self.rotate_locked(&mut inner)?;
-        }
-
-        Ok(())
+        append_batch(&self.inner, &self.dir, PREFIX, MAGIC, events)
     }
 
     /// Sync the underlying file to disk.
@@ -81,85 +49,9 @@ impl Wal {
 
     /// Replay all WAL files on startup, loading events into the buffer.
     pub fn replay(&self, buffer: &EventBuffer) -> Result<()> {
-        let mut entries: Vec<PathBuf> = std::fs::read_dir(&self.dir)?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("bin"))
-            .collect();
-        entries.sort();
-
-        let mut total = 0usize;
-        for path in &entries {
-            match Self::replay_file(path, buffer) {
-                Ok(n) => {
-                    total += n;
-                    info!("Replayed {} events from {}", n, path.display());
-                    std::fs::remove_file(path)?;
-                }
-                Err(e) => {
-                    warn!("WAL replay error for {}: {e}", path.display());
-                }
-            }
-        }
-        info!("WAL replay complete: {} total events", total);
-        Ok(())
-    }
-
-    fn replay_file(path: &Path, buffer: &EventBuffer) -> Result<usize> {
-        let mut file = File::open(path)?;
-        let mut magic = [0u8; 4];
-        file.read_exact(&mut magic)?;
-        if &magic != MAGIC {
-            bail!("bad WAL magic in {}", path.display());
-        }
-
-        let mut total = 0;
-        loop {
-            let mut len_buf = [0u8; 4];
-            if file.read_exact(&mut len_buf).is_err() {
-                break; // clean EOF
-            }
-            let len = u32::from_le_bytes(len_buf) as usize;
-
-            let mut compressed = vec![0u8; len];
-            if file.read_exact(&mut compressed).is_err() {
-                warn!("truncated WAL record in {}", path.display());
-                break;
-            }
-
-            let mut crc_buf = [0u8; 4];
-            if file.read_exact(&mut crc_buf).is_err() {
-                warn!("missing CRC in {}", path.display());
-                break;
-            }
-            let expected_crc = u32::from_le_bytes(crc_buf);
-            let actual_crc = crc32fast::hash(&compressed);
-            if actual_crc != expected_crc {
-                warn!("CRC mismatch in {}", path.display());
-                break;
-            }
-
-            let payload = zstd::decode_all(compressed.as_slice())?;
-            let events: Vec<Event> = bincode::deserialize(&payload)?;
-            total += events.len();
-            buffer.push_batch(events);
-        }
-        Ok(total)
-    }
-
-    fn rotate_locked(&self, inner: &mut WalInner) -> Result<()> {
-        inner.writer.flush()?;
-        let new_path = self.dir.join(format!("wal-{}.bin", ulid::Ulid::new()));
-        let new_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&new_path)?;
-        let mut new_writer = BufWriter::new(new_file);
-        new_writer.write_all(MAGIC)?;
-        new_writer.flush()?;
-        inner.writer = new_writer;
-        inner.path = new_path;
-        inner.bytes_written = 4;
+        let active = self.inner.lock().path.clone();
+        let total = replay_all(&self.dir, MAGIC, buffer, &active, "events")?;
+        info!("WAL replay complete: {total} total events");
         Ok(())
     }
 

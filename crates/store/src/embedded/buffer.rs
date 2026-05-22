@@ -1,16 +1,20 @@
 use crossbeam::queue::SegQueue;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use stomatopod_core::domain::event::Event;
+use stomatopod_core::domain::{agent_span::AgentSpan, event::Event};
 
-/// Lock-free concurrent event buffer backed by a `crossbeam::SegQueue`.
-/// The Parquet writer drains this; the ingest path pushes to it.
-pub struct EventBuffer {
-    inner: SegQueue<Event>,
+/// Lock-free concurrent ingest buffer backed by a `crossbeam::SegQueue`.
+///
+/// Used by the Parquet writer (drains via `drain`) and the ingest path
+/// (pushes via `push` / `push_batch`). One instance per record type —
+/// `EventBuffer` for analytics, `SpanBuffer` for agent spans — so the span
+/// ingest path can't backpressure the analytics path.
+pub struct Buffer<T> {
+    inner: SegQueue<T>,
     len: AtomicUsize,
     capacity: usize,
 }
 
-impl EventBuffer {
+impl<T> Buffer<T> {
     pub fn new(capacity: usize) -> Self {
         Self {
             inner: SegQueue::new(),
@@ -19,25 +23,25 @@ impl EventBuffer {
         }
     }
 
-    pub fn push(&self, event: Event) {
-        self.inner.push(event);
+    pub fn push(&self, item: T) {
+        self.inner.push(item);
         self.len.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn push_batch(&self, events: Vec<Event>) {
-        let n = events.len();
-        for e in events {
-            self.inner.push(e);
+    pub fn push_batch(&self, items: Vec<T>) {
+        let n = items.len();
+        for item in items {
+            self.inner.push(item);
         }
         self.len.fetch_add(n, Ordering::Relaxed);
     }
 
-    /// Drain up to `max` events from the buffer.
-    pub fn drain(&self, max: usize) -> Vec<Event> {
+    /// Drain up to `max` items from the buffer.
+    pub fn drain(&self, max: usize) -> Vec<T> {
         let mut out = Vec::with_capacity(max);
         while out.len() < max {
             match self.inner.pop() {
-                Some(e) => out.push(e),
+                Some(item) => out.push(item),
                 None => break,
             }
         }
@@ -60,3 +64,6 @@ impl EventBuffer {
         self.len() >= (self.capacity * 9) / 10
     }
 }
+
+pub type EventBuffer = Buffer<Event>;
+pub type SpanBuffer = Buffer<AgentSpan>;

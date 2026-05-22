@@ -3,7 +3,9 @@ pub mod buffer;
 pub mod meta;
 pub mod reader;
 pub mod spans;
+pub mod util;
 pub mod wal;
+pub mod wal_common;
 pub mod writer;
 
 use std::sync::Arc;

@@ -20,6 +20,7 @@ use ulid::Ulid;
 use stomatopod_core::domain::agent_span::AgentSpan;
 
 use super::{buffer::SpanBuffer, reader::SpanReader, schema::agent_span_schema, wal::SpanWal};
+use crate::embedded::util::ulid_to_str;
 
 pub struct SpanParquetWriter {
     data_dir: PathBuf,
@@ -175,12 +176,20 @@ pub fn spans_to_record_batch(
     let mut stop_b: StringDictionaryBuilder<Int32Type> = StringDictionaryBuilder::new();
     let mut props_b = StringBuilder::with_capacity(n, n * 8);
 
+    // Scratch buffers reused across the loop so we don't allocate three
+    // `String`s per span just to format the ULIDs.
+    let mut id_buf = [0u8; 26];
+    let mut site_buf = [0u8; 26];
+    let mut parent_buf = [0u8; 26];
     for s in spans {
-        id_b.append_value(s.id.to_string());
-        site_id_b.append_value(s.site_id.to_string());
+        id_b.append_value(ulid_to_str(s.id, &mut id_buf));
+        site_id_b.append_value(ulid_to_str(s.site_id, &mut site_buf));
         agent_id_b.append_value(&s.agent_id);
         sess_b.append_value(&s.agent_session_id);
-        parent_b.append_option(s.parent_span_id.map(|u| u.to_string()).as_deref());
+        match s.parent_span_id {
+            Some(p) => parent_b.append_value(ulid_to_str(p, &mut parent_buf)),
+            None => parent_b.append_null(),
+        }
         kind_b.append_value(s.kind.as_str());
         model_b.append_value(&s.model);
         started_b.append_value(s.started_at.timestamp_micros());
