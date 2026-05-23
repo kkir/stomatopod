@@ -43,7 +43,9 @@ struct SpanIngestPayload<'a> {
 /// retried on the next flush — so an outage during an incident doesn't
 /// lose the evidence.
 pub struct SpanShipper {
-    server_url: String,
+    /// Fully-qualified `/api/v1/spans` URL, precomputed once at startup
+    /// so the flush hot path doesn't `format!` it on every batch.
+    spans_url: String,
     token: String,
     http: reqwest::Client,
     tx: mpsc::Sender<SpanRow>,
@@ -57,8 +59,9 @@ impl SpanShipper {
             .timeout(Duration::from_secs(10))
             .build()
             .expect("reqwest client");
+        let spans_url = format!("{}/api/v1/spans", server_url.trim_end_matches('/'));
         let shipper = Arc::new(Self {
-            server_url,
+            spans_url,
             token,
             http,
             tx,
@@ -115,10 +118,9 @@ async fn flush(s: &Arc<SpanShipper>, buf: &mut Vec<SpanRow>) {
 }
 
 async fn post(s: &Arc<SpanShipper>, batch: &[SpanRow]) -> anyhow::Result<()> {
-    let url = format!("{}/api/v1/spans", s.server_url.trim_end_matches('/'));
     let resp = s
         .http
-        .post(&url)
+        .post(&s.spans_url)
         .bearer_auth(&s.token)
         .json(&SpanIngestPayload { spans: batch })
         .send()

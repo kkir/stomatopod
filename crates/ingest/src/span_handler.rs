@@ -136,10 +136,9 @@ pub async fn handle_span_ingest(
     // Validate + map every row before touching the channel, so a
     // mid-batch error doesn't leave the channel in a half-accepted
     // state (which would cause client retries to create duplicates).
-    let received_at = Utc::now();
     let mut spans: Vec<AgentSpan> = Vec::with_capacity(payload.spans.len());
     for row in payload.spans {
-        match row_to_span(row, site_id, &ctx.redact_keys, received_at) {
+        match row_to_span(row, site_id, &ctx.redact_keys) {
             Ok(s) => spans.push(s),
             Err(e) => {
                 warn!("malformed span row: {e}");
@@ -159,7 +158,6 @@ fn row_to_span(
     row: SpanIngestRow,
     site_id: Ulid,
     redact_keys: &[String],
-    _received_at: DateTime<Utc>,
 ) -> anyhow::Result<AgentSpan> {
     let id = row
         .id

@@ -3,7 +3,9 @@ pub mod buffer;
 pub mod meta;
 pub mod reader;
 pub mod spans;
+pub mod util;
 pub mod wal;
+pub mod wal_common;
 pub mod writer;
 
 use std::sync::Arc;
@@ -20,7 +22,7 @@ use stomatopod_core::{
     query::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
-        pageviews::{PageviewsQuery, PageviewsResult, TimeRange, TopList},
+        pageviews::{PageviewsQuery, PageviewsResult, TimeRange, TopList, TopListField},
         spans::{AgentSummary, SpanQuery, SpanRow},
     },
     traits::{AgentStore, MetaStore, StorageBackend},
@@ -114,49 +116,16 @@ impl StorageBackend for EmbeddedBackend {
         self.reader.query_pageviews(q).await
     }
 
-    async fn query_top_pages(
+    async fn query_top_list(
         &self,
         site_id: Ulid,
+        field: TopListField,
         range: &TimeRange,
         limit: u32,
     ) -> Result<TopList, StoreError> {
-        self.reader.query_top_pages(site_id, range, limit).await
-    }
-
-    async fn query_top_referrers(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.reader.query_top_referrers(site_id, range, limit).await
-    }
-
-    async fn query_top_countries(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.reader.query_top_countries(site_id, range, limit).await
-    }
-
-    async fn query_top_browsers(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.reader.query_top_browsers(site_id, range, limit).await
-    }
-
-    async fn query_top_devices(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<TopList, StoreError> {
-        self.reader.query_top_devices(site_id, range, limit).await
+        self.reader
+            .query_top_list(site_id, field, range, limit)
+            .await
     }
 
     async fn query_custom_events(&self, q: &EventQuery) -> Result<TopList, StoreError> {

@@ -13,10 +13,18 @@ pub struct ModelPricing {
     pub cache_creation_per_mtok: f64,
 }
 
-pub static PRICING: Lazy<HashMap<&'static str, ModelPricing>> = Lazy::new(|| {
-    let mut m = HashMap::new();
+/// Pricing table plus a pre-resolved fallback. Caching the default
+/// `claude-sonnet-4-6` price here means `cost_usd` doesn't need a second
+/// hash lookup on every unknown-model call.
+pub struct PricingTable {
+    by_model: HashMap<&'static str, ModelPricing>,
+    default: ModelPricing,
+}
+
+pub static PRICING: Lazy<PricingTable> = Lazy::new(|| {
+    let mut by_model = HashMap::new();
     // Anthropic — illustrative; refresh from official pricing as needed.
-    m.insert(
+    by_model.insert(
         "claude-opus-4-7",
         ModelPricing {
             input_per_mtok: 15.0,
@@ -25,7 +33,7 @@ pub static PRICING: Lazy<HashMap<&'static str, ModelPricing>> = Lazy::new(|| {
             cache_creation_per_mtok: 18.75,
         },
     );
-    m.insert(
+    by_model.insert(
         "claude-sonnet-4-6",
         ModelPricing {
             input_per_mtok: 3.0,
@@ -34,7 +42,7 @@ pub static PRICING: Lazy<HashMap<&'static str, ModelPricing>> = Lazy::new(|| {
             cache_creation_per_mtok: 3.75,
         },
     );
-    m.insert(
+    by_model.insert(
         "claude-haiku-4-5",
         ModelPricing {
             input_per_mtok: 0.8,
@@ -44,7 +52,7 @@ pub static PRICING: Lazy<HashMap<&'static str, ModelPricing>> = Lazy::new(|| {
         },
     );
     // OpenAI — illustrative defaults.
-    m.insert(
+    by_model.insert(
         "gpt-4o",
         ModelPricing {
             input_per_mtok: 2.5,
@@ -53,7 +61,7 @@ pub static PRICING: Lazy<HashMap<&'static str, ModelPricing>> = Lazy::new(|| {
             cache_creation_per_mtok: 2.5,
         },
     );
-    m.insert(
+    by_model.insert(
         "gpt-4o-mini",
         ModelPricing {
             input_per_mtok: 0.15,
@@ -62,7 +70,10 @@ pub static PRICING: Lazy<HashMap<&'static str, ModelPricing>> = Lazy::new(|| {
             cache_creation_per_mtok: 0.15,
         },
     );
-    m
+    let default = *by_model
+        .get("claude-sonnet-4-6")
+        .expect("default pricing missing at module init");
+    PricingTable { by_model, default }
 });
 
 /// Compute the cost in USD given a token breakdown. Falls back to a
@@ -75,11 +86,11 @@ pub fn cost_usd(
     cache_read_tokens: u32,
     cache_creation_tokens: u32,
 ) -> f64 {
-    let p = PRICING.get(model).copied().unwrap_or_else(|| {
-        *PRICING
-            .get("claude-sonnet-4-6")
-            .expect("default pricing missing")
-    });
+    let p = PRICING
+        .by_model
+        .get(model)
+        .copied()
+        .unwrap_or(PRICING.default);
     let mtok = 1_000_000.0;
     (input_tokens as f64 / mtok) * p.input_per_mtok
         + (output_tokens as f64 / mtok) * p.output_per_mtok

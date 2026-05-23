@@ -126,7 +126,14 @@ impl PolicyEngine {
             }
         }
 
-        // Cost cap per session.
+        // Cost cap per session. Bounded so a long-lived sidecar that sees
+        // millions of distinct session ids doesn't grow without limit —
+        // when we exceed `MAX_SESSIONS` we drop all session-cost state
+        // (callers see this as a one-time reset of the cap window).
+        const MAX_SESSIONS: usize = 10_000;
+        if s.session_cost.len() >= MAX_SESSIONS && !s.session_cost.contains_key(session_id) {
+            s.session_cost.clear();
+        }
         let entry = s.session_cost.entry(session_id.to_string()).or_insert(0.0);
         *entry += cost_usd;
         if let Some(cap) = self.cfg.cost_cap_usd {
@@ -135,17 +142,6 @@ impl PolicyEngine {
             }
         }
         None
-    }
-
-    /// Total cost accumulated for a session so far.
-    #[allow(dead_code)]
-    pub fn session_cost(&self, session_id: &str) -> f64 {
-        self.state
-            .lock()
-            .session_cost
-            .get(session_id)
-            .copied()
-            .unwrap_or(0.0)
     }
 }
 

@@ -386,12 +386,13 @@ fn emit_span(
         match trip {
             Trip::CostThreshold { usd } => {
                 warn!(usd, "local cost cap trip; next request will be killed");
-                *s.control.kill_until_resume.lock() = Some(format!("cost cap exceeded: ${usd:.2}"));
+                s.control
+                    .set_kill_reason(format!("cost cap exceeded: ${usd:.2}"));
             }
             Trip::TokenVelocity { tokens_per_sec } => {
                 warn!(tokens_per_sec, "local velocity trip");
-                *s.control.kill_until_resume.lock() =
-                    Some(format!("token velocity {tokens_per_sec:.0}/s exceeded"));
+                s.control
+                    .set_kill_reason(format!("token velocity {tokens_per_sec:.0}/s exceeded"));
             }
             _ => {}
         }

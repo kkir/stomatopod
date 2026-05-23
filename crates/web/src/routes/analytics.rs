@@ -11,7 +11,7 @@ use ulid::Ulid;
 use stomatopod_core::query::{
     events::EventQuery,
     funnel::{FunnelQuery, FunnelStep},
-    pageviews::{Granularity, PageviewsQuery, TimeRange},
+    pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},
 };
 
 use crate::state::AppState;
@@ -19,12 +19,7 @@ use crate::state::AppState;
 // ---- Shared helpers ----
 
 fn parse_range(s: &str) -> TimeRange {
-    match s {
-        "7d" => TimeRange::last_n_days(7),
-        "30d" => TimeRange::last_n_days(30),
-        "90d" => TimeRange::last_n_days(90),
-        _ => TimeRange::last_n_days(30),
-    }
+    TimeRange::from_label(s)
 }
 
 /// Resolve `{site}` path segment: try ULID first, then domain lookup.
@@ -138,28 +133,45 @@ pub async fn pageviews(
     }
 }
 
-/// GET /api/v1/sites/:site/top-pages
-pub async fn top_pages(
-    State(state): State<Arc<AppState>>,
-    Path(site): Path<String>,
-    Query(params): Query<TopParams>,
-) -> impl IntoResponse {
-    let Some(site_id) = resolve_site_id(&state, &site).await else {
+async fn top_list_response(
+    state: &AppState,
+    site: &str,
+    range_label: &str,
+    limit: u32,
+    field: TopListField,
+) -> axum::response::Response {
+    let Some(site_id) = resolve_site_id(state, site).await else {
         return (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "site not found"})),
         )
             .into_response();
     };
-    let range = parse_range(&params.range);
+    let range = parse_range(range_label);
     match state
         .backend
-        .query_top_pages(site_id, &range, params.limit)
+        .query_top_list(site_id, field, &range, limit)
         .await
     {
         Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
+}
+
+/// GET /api/v1/sites/:site/top-pages
+pub async fn top_pages(
+    State(state): State<Arc<AppState>>,
+    Path(site): Path<String>,
+    Query(params): Query<TopParams>,
+) -> impl IntoResponse {
+    top_list_response(
+        &state,
+        &site,
+        &params.range,
+        params.limit,
+        TopListField::Page,
+    )
+    .await
 }
 
 /// GET /api/v1/sites/:site/top-referrers
@@ -168,22 +180,14 @@ pub async fn top_referrers(
     Path(site): Path<String>,
     Query(params): Query<TopParams>,
 ) -> impl IntoResponse {
-    let Some(site_id) = resolve_site_id(&state, &site).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "site not found"})),
-        )
-            .into_response();
-    };
-    let range = parse_range(&params.range);
-    match state
-        .backend
-        .query_top_referrers(site_id, &range, params.limit)
-        .await
-    {
-        Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    top_list_response(
+        &state,
+        &site,
+        &params.range,
+        params.limit,
+        TopListField::Referrer,
+    )
+    .await
 }
 
 /// GET /api/v1/sites/:site/events

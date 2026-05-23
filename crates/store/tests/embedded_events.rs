@@ -6,7 +6,7 @@ use ulid::Ulid;
 use stomatopod_core::{
     config::EmbeddedConfig,
     domain::event::{DeviceType, Event, EventKind},
-    query::pageviews::{Granularity, PageviewsQuery, TimeRange},
+    query::pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},
     traits::StorageBackend,
 };
 use stomatopod_store::embedded::EmbeddedBackend;
@@ -107,8 +107,9 @@ async fn pageview_round_trip_through_parquet() {
     );
 
     let top = backend
-        .query_top_pages(
+        .query_top_list(
             site_id,
+            TopListField::Page,
             &TimeRange {
                 start: now - chrono::Duration::minutes(5),
                 end: now + chrono::Duration::minutes(5),
