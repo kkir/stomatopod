@@ -1,0 +1,90 @@
+[tools]
+node = "22"
+rust = "stable"
+
+[tasks.setup]
+description = "Install root and E2E Node dependencies"
+run = """
+npm ci
+npm --prefix tests/e2e ci
+"""
+
+[tasks."config:init"]
+description = "Create stomatopod.toml from example if missing"
+run = """
+if [ -f stomatopod.toml ]; then
+  echo "stomatopod.toml already exists"
+  exit 0
+fi
+cp stomatopod.example.toml stomatopod.toml
+echo "Created stomatopod.toml from stomatopod.example.toml"
+echo "Set auth.secret_key in stomatopod.toml or export STOMATOPOD_AUTH__SECRET_KEY before running dev"
+"""
+
+[tasks."config:check"]
+description = "Fail fast if auth.secret_key is not configured"
+run = """
+if [ -n "${STOMATOPOD_AUTH__SECRET_KEY:-}" ]; then
+  exit 0
+fi
+if [ ! -f stomatopod.toml ]; then
+  echo "Missing stomatopod.toml. Run: mise run config:init"
+  exit 1
+fi
+if grep -Eq '^[[:space:]]*secret_key[[:space:]]*=[[:space:]]*"[^"]+"' stomatopod.toml; then
+  exit 0
+fi
+echo "Missing auth.secret_key. Set it in stomatopod.toml or export STOMATOPOD_AUTH__SECRET_KEY"
+exit 1
+"""
+
+[tasks.assets]
+description = "Build marketing assets and vendor anime.js"
+run = """
+if [ ! -d node_modules ]; then
+  npm ci
+fi
+npm run build:assets
+npm run vendor:anime
+"""
+
+[tasks."assets:watch"]
+description = "Watch and rebuild Tailwind assets"
+run = "npm run watch:assets"
+
+[tasks.dev]
+description = "Run local development server"
+depends = ["assets", "config:check"]
+run = "cargo run --bin stomatopod -- --config stomatopod.toml serve"
+
+[tasks.fmt]
+description = "Check Rust formatting"
+run = "cargo fmt --all -- --check"
+
+[tasks.lint]
+description = "Run clippy with warnings denied"
+depends = ["assets"]
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks.test]
+description = "Run all Rust tests"
+depends = ["assets"]
+run = "cargo test --all --all-features"
+
+[tasks.check]
+description = "Run formatting, lint, and tests"
+depends = ["fmt", "lint", "test"]
+run = "echo 'All checks complete'"
+
+[tasks."e2e:install"]
+description = "Install Playwright dependencies and Chromium browser"
+run = """
+npm --prefix tests/e2e ci
+cd tests/e2e
+npx playwright install chromium
+"""
+
+[tasks.e2e]
+description = "Run Playwright end-to-end tests"
+depends = ["assets", "e2e:install"]
+run = "npm --prefix tests/e2e test"
