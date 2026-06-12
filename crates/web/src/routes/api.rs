@@ -28,14 +28,6 @@ pub async fn handle_ingest(
 }
 
 static TRACKER: &str = include_str!("../../../../assets/tracker.js");
-/// Compiled marketing CSS (Tailwind output). Embedded at compile time and
-/// served from a hash-busted URL by [`crate::routes::marketing`].
-pub static MARKETING_CSS: &str = include_str!("../../../../assets/dist/marketing.css");
-/// Vendored anime.js bundle, served from a hash-busted URL.
-pub static ANIME_JS: &str = include_str!("../../../../assets/vendor/anime.min.js");
-
-// Returning the `&'static str` body directly lets axum wrap the bytes in
-// `Bytes::from_static` rather than allocating a fresh `String` per request.
 
 pub async fn tracker_js() -> impl IntoResponse {
     (
@@ -48,30 +40,5 @@ pub async fn tracker_js() -> impl IntoResponse {
             (header::CACHE_CONTROL, "public, max-age=86400, immutable"),
         ],
         TRACKER,
-    )
-}
-
-pub async fn marketing_css() -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
-            (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
-        ],
-        MARKETING_CSS,
-    )
-}
-
-pub async fn anime_js() -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        [
-            (
-                header::CONTENT_TYPE,
-                "application/javascript; charset=utf-8",
-            ),
-            (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
-        ],
-        ANIME_JS,
     )
 }

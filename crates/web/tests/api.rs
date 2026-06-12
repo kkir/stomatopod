@@ -86,46 +86,6 @@ fn build_templates() -> Environment<'static> {
         include_str!("../templates/partials/agent_spans.html"),
     )
     .unwrap();
-    env.add_template(
-        "marketing/base.html",
-        include_str!("../templates/marketing/base.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "marketing/home.html",
-        include_str!("../templates/marketing/home.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "marketing/web_analytics.html",
-        include_str!("../templates/marketing/web_analytics.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "marketing/ai_firewall.html",
-        include_str!("../templates/marketing/ai_firewall.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "marketing/for_saas.html",
-        include_str!("../templates/marketing/for_saas.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "marketing/for_agencies.html",
-        include_str!("../templates/marketing/for_agencies.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "marketing/for_ai_teams.html",
-        include_str!("../templates/marketing/for_ai_teams.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "marketing/for_regulated.html",
-        include_str!("../templates/marketing/for_regulated.html"),
-    )
-    .unwrap();
     env
 }
 
@@ -170,8 +130,6 @@ async fn setup() -> TestCtx {
         templates: build_templates(),
         config,
         tracker_hash: "testhash".into(),
-        marketing_css_hash: "testcss".into(),
-        anime_js_hash: "testanime".into(),
         ingest_tx,
         span_ingest_tx,
         site_cache: Arc::new(DashMap::new()),
@@ -977,7 +935,7 @@ async fn login_with_unknown_email_shows_error() {
 }
 
 #[tokio::test]
-async fn logout_clears_cookie_and_redirects_to_marketing_home() {
+async fn logout_clears_cookie_and_redirects_to_login() {
     let ctx = setup().await;
     let req = Request::builder()
         .method("POST")
@@ -992,7 +950,7 @@ async fn logout_clears_cookie_and_redirects_to_marketing_home() {
         .get("location")
         .and_then(|v: &axum::http::HeaderValue| v.to_str().ok())
         .unwrap_or("");
-    assert_eq!(location, "/");
+    assert_eq!(location, "/login");
 
     let set_cookie = resp
         .headers()

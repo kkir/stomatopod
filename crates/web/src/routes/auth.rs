@@ -75,5 +75,5 @@ pub async fn logout(jar: CookieJar) -> impl IntoResponse {
         .same_site(SameSite::Lax)
         .max_age(Duration::seconds(0))
         .build();
-    (jar.add(cookie), Redirect::to("/"))
+    (jar.add(cookie), Redirect::to("/login"))
 }
