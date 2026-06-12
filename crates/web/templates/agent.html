@@ -4,16 +4,16 @@
 <div class="section-header" data-site-id="{{ site_id }}" data-agent-id="{{ agent_id }}" id="agent-header">
   <div>
     <h2>Agent <code>{{ agent_id }}</code></h2>
-    <p style="color: var(--muted); margin-top: 4px">Site <code>{{ site_id }}</code></p>
+    <p class="page-sub">Site <code>{{ site_id }}</code></p>
   </div>
-  <div style="display:flex; gap: 8px;">
-    <button id="kill-btn" class="btn" style="background: var(--red); color: #fff">Kill agent</button>
+  <div class="btn-row">
+    <button id="kill-btn" class="btn btn-danger">Kill agent</button>
     <button id="hint-btn" class="btn btn-ghost">Send hint…</button>
-    <span id="kill-status" style="color: var(--muted); align-self:center"></span>
+    <span id="kill-status" class="muted"></span>
   </div>
 </div>
 
-<div class="stat-grid" style="margin-bottom: 1.5rem">
+<div class="stat-grid mb-3">
   <div class="card stat">
     <div class="label">Spans (24h)</div>
     <div class="value">{{ total_spans }}</div>
@@ -36,14 +36,14 @@
      hx-get="/app/agents/{{ agent_id }}/spans?site_id={{ site_id }}"
      hx-trigger="load, every 2s"
      hx-swap="innerHTML">
-  <p style="color: var(--muted)">Loading spans…</p>
+  <p class="muted">Loading spans…</p>
 </div>
 
-<dialog id="hint-modal" style="background: var(--surface); color: var(--text); border:1px solid var(--border); border-radius:8px; padding:1.25rem; min-width: 360px">
+<dialog id="hint-modal">
   <h2>Send hint</h2>
-  <form id="hint-form" style="margin-top: 1rem; display:flex; flex-direction:column; gap: 8px">
-    <textarea name="message" rows="4" required style="background: var(--bg); color: var(--text); border:1px solid var(--border); padding: 8px; border-radius: 6px; font-family: inherit"></textarea>
-    <div style="display:flex; gap: 8px; justify-content: flex-end">
+  <form id="hint-form">
+    <textarea name="message" rows="4" required></textarea>
+    <div class="dialog-actions">
       <button type="button" id="hint-cancel" class="btn btn-ghost">Cancel</button>
       <button type="submit" class="btn btn-primary">Send</button>
     </div>

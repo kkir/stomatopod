@@ -1,45 +1,43 @@
 {% extends "base.html" %}
 {% block title %}Sites — Stomatopod{% endblock %}
 {% block content %}
-<div class="section-header" style="margin-bottom:1.5rem">
-  <h1 style="font-size:20px;font-weight:700">Your Sites</h1>
-  <button class="btn btn-primary" onclick="document.getElementById('add-site').style.display='block'">+ Add Site</button>
+<div class="page-head">
+  <h1 class="page-title">Your Sites</h1>
 </div>
 
-<div id="add-site" style="display:none;margin-bottom:1.5rem">
+<details class="reveal mb-3">
+  <summary class="btn btn-primary">+ Add Site</summary>
   <div class="card">
-    <h2 style="margin-bottom:1rem">Add a new site</h2>
-    <form method="post" action="/app/sites" style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end">
-      <div>
-        <label style="display:block;font-size:12px;color:#8892a4;margin-bottom:4px">Domain</label>
-        <input name="domain" placeholder="example.com" required>
+    <h2 class="mb-2">Add a new site</h2>
+    <form method="post" action="/app/sites" class="form-row">
+      <div class="field">
+        <label for="site-domain">Domain</label>
+        <input id="site-domain" name="domain" placeholder="example.com" required>
       </div>
-      <div>
-        <label style="display:block;font-size:12px;color:#8892a4;margin-bottom:4px">Name</label>
-        <input name="name" placeholder="My Site" required>
+      <div class="field">
+        <label for="site-name">Name</label>
+        <input id="site-name" name="name" placeholder="My Site" required>
       </div>
       <button type="submit" class="btn btn-primary">Create</button>
     </form>
   </div>
-</div>
+</details>
 
 {% if sites %}
-<div style="display:grid;gap:.75rem">
+<div class="list">
   {% for site in sites %}
-  <a href="/app/sites/{{ site.id }}" style="display:block;text-decoration:none">
-    <div class="card" style="display:flex;justify-content:space-between;align-items:center">
-      <div>
-        <div style="font-weight:600">{{ site.name }}</div>
-        <div style="color:#8892a4;font-size:12px">{{ site.domain }}</div>
-      </div>
-      <span style="color:#8892a4;font-size:12px">→</span>
+  <a href="/app/sites/{{ site.id }}" class="card card-link">
+    <div>
+      <div class="item-title">{{ site.name }}</div>
+      <div class="item-sub">{{ site.domain }}</div>
     </div>
+    <span class="item-arrow">→</span>
   </a>
   {% endfor %}
 </div>
 {% else %}
-<div class="card" style="text-align:center;padding:3rem">
-  <p style="color:#8892a4;margin-bottom:1rem">No sites yet. Add your first site to get started.</p>
+<div class="card empty">
+  <p>No sites yet. Add your first site to get started.</p>
 </div>
 {% endif %}
 {% endblock %}

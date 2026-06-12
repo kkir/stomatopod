@@ -27,10 +27,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .layer(ingest_cors());
 
     // Redirect / to /login — marketing site is out of scope for self-hosted.
-    let root_redirect = Router::new().route(
-        "/",
-        get(|| async { axum::response::Redirect::to("/login") }),
-    );
+    // The stylesheet is public: the login page needs it before auth.
+    let root_redirect = Router::new()
+        .route(
+            "/",
+            get(|| async { axum::response::Redirect::to("/login") }),
+        )
+        .route("/app.css", get(api::dashboard_css));
 
     // Sentinel span ingest. Bearer-auth'd via sentinel_tokens (handler
     // checks the header itself; no middleware needed). No CORS since

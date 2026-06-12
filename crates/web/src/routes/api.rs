@@ -42,3 +42,18 @@ pub async fn tracker_js() -> impl IntoResponse {
         TRACKER,
     )
 }
+
+static DASHBOARD_CSS: &str = include_str!("../../../../assets/dashboard.css");
+
+/// Shared dashboard stylesheet. Short max-age (vs the tracker's immutable
+/// day) so a binary upgrade doesn't leave browsers on stale styles for long.
+pub async fn dashboard_css() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (header::CACHE_CONTROL, "public, max-age=600"),
+        ],
+        DASHBOARD_CSS,
+    )
+}
