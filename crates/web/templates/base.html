@@ -26,9 +26,9 @@
             <nav class="side-nav">
                 <span class="side-label">Analytics</span>
                 <a href="/app/sites">Sites</a>
-                <span class="side-label">AI Firewall</span>
+                <!--<span class="side-label">AI Firewall</span>
                 <a href="/app/agents">Agents</a>
-                <a href="/app/incidents">Incidents</a>
+                <a href="/app/incidents">Incidents</a>-->
             </nav>
             <form action="/logout" method="post" class="side-foot">
                 <button type="submit" class="btn btn-ghost">Logout</button>
@@ -46,7 +46,8 @@
                     const href = a.getAttribute("href");
                     if (
                         location.pathname.startsWith(href) &&
-                        (!best || href.length > best.getAttribute("href").length)
+                        (!best ||
+                            href.length > best.getAttribute("href").length)
                     ) {
                         best = a;
                     }
