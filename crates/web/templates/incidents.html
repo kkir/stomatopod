@@ -1,9 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Incidents — Stomatopod{% endblock %}
 {% block content %}
-<div class="section-header">
-  <h2>Incidents</h2>
-  <a href="/app/agents" class="btn btn-ghost">Back to agents</a>
+<div class="page-head">
+  <h1 class="page-title">Incidents</h1>
 </div>
 <div class="card">
   {% if incidents|length == 0 %}

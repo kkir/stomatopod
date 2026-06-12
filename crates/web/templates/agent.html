@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Agent {{ agent_id }} — Stomatopod{% endblock %}
 {% block content %}
-<div class="section-header" data-site-id="{{ site_id }}" data-agent-id="{{ agent_id }}" id="agent-header">
+<div class="page-head" data-site-id="{{ site_id }}" data-agent-id="{{ agent_id }}" id="agent-header">
   <div>
-    <h2>Agent <code>{{ agent_id }}</code></h2>
+    <h1 class="page-title">Agent <code>{{ agent_id }}</code></h1>
     <p class="page-sub">Site <code>{{ site_id }}</code></p>
   </div>
   <div class="btn-row">

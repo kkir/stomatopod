@@ -1,9 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Agents — Stomatopod{% endblock %}
 {% block content %}
-<div class="section-header">
-  <h2>Sentinel Agents</h2>
-  <a href="/app/incidents" class="btn btn-ghost">Incidents</a>
+<div class="page-head">
+  <h1 class="page-title">Sentinel Agents</h1>
 </div>
 <div class="card">
   {% if summaries|length == 0 %}

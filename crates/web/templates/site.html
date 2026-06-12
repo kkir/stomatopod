@@ -4,7 +4,9 @@
 
 <div class="page-head">
     <div>
-        <h1 class="page-title">{{ site.name }}</h1>
+        <h1 class="page-title" style="view-transition-name: s-{{ site.id }}">
+            {{ site.name }}
+        </h1>
         <p class="page-sub">{{ site.domain }}</p>
     </div>
     <div class="range-tabs">
@@ -21,26 +23,23 @@
     <a href="/app/sites/{{ site.id }}/funnels?range={{ range }}">Funnels</a>
 </div>
 
-<!-- Stats summary -->
-<div class="stat-grid mb-2">
-    <div class="card stat">
-        <div class="label">Pageviews</div>
-        <div class="value">{{ total_pageviews }}</div>
+<!-- Hero: stats summary + traffic chart in one panel -->
+<div class="card hero mb-2">
+    <div class="hero-stats">
+        <div class="stat">
+            <div class="label">Pageviews</div>
+            <div class="value">{{ total_pageviews }}</div>
+        </div>
+        <div class="stat">
+            <div class="label">Sessions</div>
+            <div class="value">{{ total_sessions }}</div>
+        </div>
+        <div class="stat">
+            <div class="label">Bounce Rate</div>
+            <div class="value">{{ bounce_rate }}</div>
+        </div>
     </div>
-    <div class="card stat">
-        <div class="label">Sessions</div>
-        <div class="value">{{ total_sessions }}</div>
-    </div>
-    <div class="card stat">
-        <div class="label">Bounce Rate</div>
-        <div class="value">{{ bounce_rate }}</div>
-    </div>
-</div>
-
-<!-- SVG Line Chart (server-rendered) -->
-{% if buckets %}
-<div class="card mb-2">
-    <div class="card-caption">Pageviews over time</div>
+    {% if buckets %}
     {% set max_pv = buckets | map(attribute="pageviews") | max | default(1) %}
     <svg viewBox="0 0 800 120" preserveAspectRatio="none" class="chart">
         <defs>
@@ -74,8 +73,8 @@
         />
         {% endif %}
     </svg>
+    {% endif %}
 </div>
-{% endif %}
 
 <!-- Top tables grid -->
 <div class="grid-2">

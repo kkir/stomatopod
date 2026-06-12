@@ -28,7 +28,7 @@
   {% for site in sites %}
   <a href="/app/sites/{{ site.id }}" class="card card-link">
     <div>
-      <div class="item-title">{{ site.name }}</div>
+      <div class="item-title" style="view-transition-name: s-{{ site.id }}">{{ site.name }}</div>
       <div class="item-sub">{{ site.domain }}</div>
     </div>
     <span class="item-arrow">→</span>

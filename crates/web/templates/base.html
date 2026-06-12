@@ -13,22 +13,46 @@
         />
         <link rel="stylesheet" href="/app.css" />
         <script
-            src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js"
+            src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0-beta4/dist/htmx.min.js"
             defer
         ></script>
     </head>
-    <body>
-        <nav class="top">
+    <body class="app">
+        <aside class="side">
             <a href="/" class="logo"
                 ><span class="logo-mark" aria-hidden="true"></span>
                 Stomatopod</a
             >
-            <div class="spacer"></div>
-            <a href="/app/sites">Sites</a>
-            <form action="/logout" method="post">
+            <nav class="side-nav">
+                <span class="side-label">Analytics</span>
+                <a href="/app/sites">Sites</a>
+                <span class="side-label">AI Firewall</span>
+                <a href="/app/agents">Agents</a>
+                <a href="/app/incidents">Incidents</a>
+            </nav>
+            <form action="/logout" method="post" class="side-foot">
                 <button type="submit" class="btn btn-ghost">Logout</button>
             </form>
-        </nav>
-        <div class="container">{% block content %}{% endblock %}</div>
+        </aside>
+        <main class="main">
+            <div class="container">{% block content %}{% endblock %}</div>
+        </main>
+        <script>
+            // Highlight the sidebar link owning the current path. Longest
+            // match wins so /app/incidents doesn't light up /app alone.
+            (() => {
+                let best = null;
+                for (const a of document.querySelectorAll(".side-nav a")) {
+                    const href = a.getAttribute("href");
+                    if (
+                        location.pathname.startsWith(href) &&
+                        (!best || href.length > best.getAttribute("href").length)
+                    ) {
+                        best = a;
+                    }
+                }
+                if (best) best.setAttribute("aria-current", "page");
+            })();
+        </script>
     </body>
 </html>
