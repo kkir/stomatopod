@@ -43,6 +43,17 @@
     <div class="card-caption">Pageviews over time</div>
     {% set max_pv = buckets | map(attribute="pageviews") | max | default(1) %}
     <svg viewBox="0 0 800 120" preserveAspectRatio="none" class="chart">
+        <defs>
+            <linearGradient id="chart-line" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#5eead4" />
+                <stop offset="55%" stop-color="#22d3ee" />
+                <stop offset="100%" stop-color="#818cf8" />
+            </linearGradient>
+            <linearGradient id="chart-area" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="rgba(45, 212, 191, 0.22)" />
+                <stop offset="100%" stop-color="rgba(45, 212, 191, 0)" />
+            </linearGradient>
+        </defs>
         {% set n = buckets | length %}
         {% if n > 1 %}
         {% set ns = namespace(pts="") %}
@@ -52,11 +63,12 @@
         {% if loop.index0 > 0 %}{% set ns.pts = ns.pts ~ " " %}{% endif %}
         {% set ns.pts = ns.pts ~ x ~ "," ~ y %}
         {% endfor %}
+        <polygon points="0,120 {{ ns.pts }} 800,120" fill="url(#chart-area)" />
         <polyline
             points="{{ ns.pts }}"
             fill="none"
-            stroke="#6366f1"
-            stroke-width="2"
+            stroke="url(#chart-line)"
+            stroke-width="2.5"
             stroke-linejoin="round"
             stroke-linecap="round"
         />
