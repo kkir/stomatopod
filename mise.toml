@@ -1,4 +1,5 @@
 [tools]
+"cargo:cargo-watch" = "latest"
 rust = "stable"
 
 [tasks."config:init"]
@@ -34,6 +35,10 @@ exit 1
 description = "Run local development server"
 depends = ["config:check"]
 run = "cargo run --bin stomatopod -- --config stomatopod.toml serve"
+
+[tasks."dev:watch"]
+description = "Run local development server with file watching"
+run = "cargo watch -x 'run --bin stomatopod -- --config stomatopod.toml serve'"
 
 [tasks.fmt]
 description = "Check Rust formatting"
