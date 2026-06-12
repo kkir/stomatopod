@@ -43,6 +43,11 @@ fn build_templates() -> Environment<'static> {
         .unwrap();
     env.add_template("site.html", include_str!("../templates/site.html"))
         .unwrap();
+    env.add_template(
+        "site_settings.html",
+        include_str!("../templates/site_settings.html"),
+    )
+    .unwrap();
     env.add_template("events.html", include_str!("../templates/events.html"))
         .unwrap();
     env.add_template("funnels.html", include_str!("../templates/funnels.html"))
@@ -964,6 +969,80 @@ async fn logout_clears_cookie_and_redirects_to_login() {
 }
 
 // ---- Dashboard requires auth ----
+
+#[tokio::test]
+async fn authenticated_site_settings_page_renders_controls() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let user_id = Ulid::new().to_string();
+    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
+    let req = Request::builder()
+        .uri(format!("/app/sites/{}/settings", site.id))
+        .header("cookie", cookie)
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_bytes(resp).await;
+    let html = std::str::from_utf8(&body).unwrap();
+
+    assert!(html.contains("Site Settings"));
+    assert!(
+        html.contains(r#"action="/app/sites/"#),
+        "settings form missing"
+    );
+    assert!(html.contains(r#"<select id="site-timezone" name="timezone""#));
+    assert!(html.contains(r#"class="switch-track""#));
+    assert!(html.contains("Public Key"));
+    assert!(html.contains(r#"class="js-local-time""#));
+    assert!(html.contains("ago") || html.contains("just now"));
+    assert!(html.contains(">Overview</a>"));
+    assert!(html.contains(">Settings</a>"));
+}
+
+#[tokio::test]
+async fn post_site_update_changes_site_metadata() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let user_id = Ulid::new().to_string();
+    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/app/sites/{}", site.id))
+        .header("cookie", cookie)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(
+            "name=Updated+Site&domain=updated.example.com&timezone=America%2FChicago",
+        ))
+        .unwrap();
+
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let location = resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(location, format!("/app/sites/{}/settings", site.id));
+
+    let updated = ctx.backend.meta.get_site(site.id).await.unwrap().unwrap();
+    assert_eq!(updated.name, "Updated Site");
+    assert_eq!(updated.domain, "updated.example.com");
+    assert_eq!(updated.timezone, "America/Chicago");
+    assert!(
+        !updated.is_active,
+        "unchecked checkbox should deactivate site"
+    );
+}
 
 #[tokio::test]
 async fn unauthenticated_dashboard_redirects_to_login() {

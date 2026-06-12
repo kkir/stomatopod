@@ -961,6 +961,58 @@ textarea {
     }
 }
 
+.switch-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-height: 38px;
+}
+
+.switch {
+    position: relative;
+    width: 42px;
+    height: 24px;
+
+    & input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+    }
+}
+
+.switch-track {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--line) 80%, #000);
+    border: 1px solid var(--line);
+    transition: background 140ms, border-color 140ms;
+    position: relative;
+
+    &::after {
+        content: "";
+        position: absolute;
+        left: 2px;
+        top: 2px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #dbe7ec;
+        transition: transform 140ms ease;
+    }
+}
+
+.switch input:checked + .switch-track {
+    background: color-mix(in srgb, var(--teal) 60%, #0b1117);
+    border-color: color-mix(in srgb, var(--teal) 70%, var(--line));
+
+    &::after {
+        transform: translateX(18px);
+        background: #e8fffb;
+    }
+}
+
 /* Native <details> as a no-JS reveal panel. */
 details.reveal {
     & > summary {

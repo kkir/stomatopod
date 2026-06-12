@@ -147,6 +147,13 @@ impl MetaStore for EmbeddedBackend {
         self.meta.create_site(site).await
     }
 
+    async fn update_site(
+        &self,
+        site: &stomatopod_core::domain::site::Site,
+    ) -> Result<(), StoreError> {
+        self.meta.update_site(site).await
+    }
+
     async fn get_site(
         &self,
         id: Ulid,

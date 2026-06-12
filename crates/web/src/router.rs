@@ -73,7 +73,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/app/sites",
             get(sites::sites_list).post(sites::create_site),
         )
-        .route("/app/sites/:site_id", get(dashboard::site_overview))
+        .route(
+            "/app/sites/:site_id",
+            get(dashboard::site_overview).post(sites::update_site),
+        )
+        .route("/app/sites/:site_id/settings", get(sites::site_settings))
         .route("/app/sites/:site_id/events", get(events::events_list))
         .route(
             "/app/sites/:site_id/funnels",

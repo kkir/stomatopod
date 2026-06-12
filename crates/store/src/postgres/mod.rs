@@ -342,6 +342,26 @@ impl MetaStore for PostgresBackend {
         Ok(())
     }
 
+    async fn update_site(&self, site: &Site) -> Result<(), StoreError> {
+        sqlx::query(
+            "UPDATE sites
+             SET org_id = $2, domain = $3, name = $4, timezone = $5, public_key = $6, created_at = $7, is_active = $8
+             WHERE id = $1",
+        )
+        .bind(site.id.to_string())
+        .bind(site.org_id.to_string())
+        .bind(&site.domain)
+        .bind(&site.name)
+        .bind(&site.timezone)
+        .bind(&site.public_key)
+        .bind(site.created_at)
+        .bind(site.is_active)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        Ok(())
+    }
+
     async fn get_site(&self, id: Ulid) -> Result<Option<Site>, StoreError> {
         let row = sqlx::query(
             "SELECT id, org_id, domain, name, timezone, public_key, created_at, is_active \

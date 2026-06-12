@@ -59,6 +59,7 @@ pub trait StorageBackend: Send + Sync + 'static {
 pub trait MetaStore: Send + Sync + 'static {
     // ---- Sites ----
     async fn create_site(&self, site: &Site) -> Result<(), StoreError>;
+    async fn update_site(&self, site: &Site) -> Result<(), StoreError>;
     async fn get_site(&self, id: Ulid) -> Result<Option<Site>, StoreError>;
     async fn get_site_by_key(&self, public_key: &str) -> Result<Option<Site>, StoreError>;
     async fn get_site_by_domain(&self, domain: &str) -> Result<Option<Site>, StoreError>;

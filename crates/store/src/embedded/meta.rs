@@ -372,6 +372,29 @@ impl MetaStore for SqliteMeta {
         })
     }
 
+    async fn update_site(&self, site: &Site) -> Result<(), StoreError> {
+        let site = site.clone();
+        db!(self.conn, |conn: &Connection| {
+            conn.execute(
+                "UPDATE sites
+                 SET org_id = ?2, domain = ?3, name = ?4, timezone = ?5, public_key = ?6, created_at = ?7, is_active = ?8
+                 WHERE id = ?1",
+                params![
+                    site.id.to_string(),
+                    site.org_id.to_string(),
+                    site.domain,
+                    site.name,
+                    site.timezone,
+                    site.public_key,
+                    site.created_at.to_rfc3339(),
+                    site.is_active as i32,
+                ],
+            )
+            .map(|_| ())
+            .map_err(StoreError::db)
+        })
+    }
+
     async fn get_site(&self, id: Ulid) -> Result<Option<Site>, StoreError> {
         db!(self.conn, |conn: &Connection| {
             conn.query_row(
