@@ -1,13 +1,16 @@
-{% extends "base.html" %}
-{% block title %}Events — {{ site.name }}{% endblock %}
-{% block content %}
+{% extends "base.html" %} {% block title %}Events — {{ site.name }}{% endblock
+%} {% block content %}
 <div class="page-head">
-  <h1 class="page-title" style="view-transition-name: s-{{ site.id }}">{{ site.name }}</h1>
+  <h1 class="page-title" style="view-transition-name: s-{{ site.id }}">
+    {{ site.name }}
+  </h1>
 </div>
 
 <div class="tabs">
   <a href="/app/sites/{{ site.id }}?range={{ range }}">Overview</a>
-  <a href="/app/sites/{{ site.id }}/events?range={{ range }}" class="active">Events</a>
+  <a href="/app/sites/{{ site.id }}/events?range={{ range }}" class="active"
+    >Events</a
+  >
   <a href="/app/sites/{{ site.id }}/funnels?range={{ range }}">Funnels</a>
   <a href="/app/sites/{{ site.id }}/settings?range={{ range }}">Settings</a>
 </div>
@@ -17,16 +20,31 @@
     <h2>Custom Events</h2>
     <div class="range-tabs">
       <a href="?range=7d" class="{% if range == '7d' %}active{% endif %}">7d</a>
-      <a href="?range=30d" class="{% if range == '30d' or not range %}active{% endif %}">30d</a>
-      <a href="?range=90d" class="{% if range == '90d' %}active{% endif %}">90d</a>
+      <a
+        href="?range=30d"
+        class="{% if range == '30d' or not range %}active{% endif %}"
+        >30d</a
+      >
+      <a href="?range=90d" class="{% if range == '90d' %}active{% endif %}"
+        >90d</a
+      >
     </div>
   </div>
   <table>
-    <thead><tr><th>Event</th><th>Total</th><th>Sessions</th><th>%</th></tr></thead>
+    <thead>
+      <tr>
+        <th>Event</th>
+        <th>Total</th>
+        <th>Sessions</th>
+        <th>%</th>
+      </tr>
+    </thead>
     <tbody>
       {% for row in events %}
       <tr>
-        <td><a href="?range={{ range }}&name={{ row.value }}">{{ row.value }}</a></td>
+        <td>
+          <a href="?range={{ range }}&name={{ row.value }}">{{ row.value }}</a>
+        </td>
         <td>{{ row.pageviews }}</td>
         <td>{{ row.sessions }}</td>
         <td>
@@ -37,9 +55,12 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="4" class="empty-cell">
-        No custom events yet. Send events using <code>window.stomatopod('event', 'name', {})</code>
-      </td></tr>
+      <tr>
+        <td colspan="4" class="empty-cell">
+          No custom events yet. Send events using
+          <code>window.stomatopod('event', 'name', {})</code>
+        </td>
+      </tr>
       {% endfor %}
     </tbody>
   </table>

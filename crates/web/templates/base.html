@@ -1,59 +1,57 @@
 <!doctype html>
 <html lang="en">
-    <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>{% block title %}Stomatopod Analytics{% endblock %}</title>
-        <meta name="theme-color" content="#04080b" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-        <link
-            href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap"
-            rel="stylesheet"
-        />
-        <link rel="stylesheet" href="/app.css" />
-        <script
-            src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0-beta4/dist/htmx.min.js"
-            defer
-        ></script>
-    </head>
-    <body class="app">
-        <aside class="side">
-            <a href="/" class="logo"
-                ><span class="logo-mark" aria-hidden="true"></span>
-                Stomatopod</a
-            >
-            <nav class="side-nav">
-                <span class="side-label">Analytics</span>
-                <a href="/app/sites">Sites</a>
-                <!--<span class="side-label">AI Firewall</span>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Stomatopod Analytics{% endblock %}</title>
+    <meta name="theme-color" content="#04080b" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/app.css" />
+    <script
+      src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0-beta4/dist/htmx.min.js"
+      defer
+    ></script>
+  </head>
+  <body class="app">
+    <aside class="side">
+      <a href="/" class="logo"
+        ><span class="logo-mark" aria-hidden="true"></span> Stomatopod</a
+      >
+      <nav class="side-nav">
+        <span class="side-label">Analytics</span>
+        <a href="/app/sites">Sites</a>
+        <!--<span class="side-label">AI Firewall</span>
                 <a href="/app/agents">Agents</a>
                 <a href="/app/incidents">Incidents</a>-->
-            </nav>
-            <form action="/logout" method="post" class="side-foot">
-                <button type="submit" class="btn btn-ghost">Logout</button>
-            </form>
-        </aside>
-        <main class="main">
-            <div class="container">{% block content %}{% endblock %}</div>
-        </main>
-        <script>
-            // Highlight the sidebar link owning the current path. Longest
-            // match wins so /app/incidents doesn't light up /app alone.
-            (() => {
-                let best = null;
-                for (const a of document.querySelectorAll(".side-nav a")) {
-                    const href = a.getAttribute("href");
-                    if (
-                        location.pathname.startsWith(href) &&
-                        (!best ||
-                            href.length > best.getAttribute("href").length)
-                    ) {
-                        best = a;
-                    }
-                }
-                if (best) best.setAttribute("aria-current", "page");
-            })();
-        </script>
-    </body>
+      </nav>
+      <form action="/logout" method="post" class="side-foot">
+        <button type="submit" class="btn btn-ghost">Logout</button>
+      </form>
+    </aside>
+    <main class="main">
+      <div class="container">{% block content %}{% endblock %}</div>
+    </main>
+    <script>
+      // Highlight the sidebar link owning the current path. Longest
+      // match wins so /app/incidents doesn't light up /app alone.
+      (() => {
+        let best = null;
+        for (const a of document.querySelectorAll(".side-nav a")) {
+          const href = a.getAttribute("href");
+          if (
+            location.pathname.startsWith(href) &&
+            (!best || href.length > best.getAttribute("href").length)
+          ) {
+            best = a;
+          }
+        }
+        if (best) best.setAttribute("aria-current", "page");
+      })();
+    </script>
+  </body>
 </html>

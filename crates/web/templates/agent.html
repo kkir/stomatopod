@@ -1,7 +1,11 @@
-{% extends "base.html" %}
-{% block title %}Agent {{ agent_id }} — Stomatopod{% endblock %}
-{% block content %}
-<div class="page-head" data-site-id="{{ site_id }}" data-agent-id="{{ agent_id }}" id="agent-header">
+{% extends "base.html" %} {% block title %}Agent {{ agent_id }} — Stomatopod{%
+endblock %} {% block content %}
+<div
+  class="page-head"
+  data-site-id="{{ site_id }}"
+  data-agent-id="{{ agent_id }}"
+  id="agent-header"
+>
   <div>
     <h1 class="page-title">Agent <code>{{ agent_id }}</code></h1>
     <p class="page-sub">Site <code>{{ site_id }}</code></p>
@@ -32,10 +36,12 @@
   </div>
 </div>
 
-<div class="card"
-     hx-get="/app/agents/{{ agent_id }}/spans?site_id={{ site_id }}"
-     hx-trigger="load, every 2s"
-     hx-swap="innerHTML">
+<div
+  class="card"
+  hx-get="/app/agents/{{ agent_id }}/spans?site_id={{ site_id }}"
+  hx-trigger="load, every 2s"
+  hx-swap="innerHTML"
+>
   <p class="muted">Loading spans…</p>
 </div>
 
@@ -44,50 +50,58 @@
   <form id="hint-form">
     <textarea name="message" rows="4" required></textarea>
     <div class="dialog-actions">
-      <button type="button" id="hint-cancel" class="btn btn-ghost">Cancel</button>
+      <button type="button" id="hint-cancel" class="btn btn-ghost">
+        Cancel
+      </button>
       <button type="submit" class="btn btn-primary">Send</button>
     </div>
   </form>
 </dialog>
 <script>
-// Read ids from data-* attributes so we never interpolate user-supplied
-// strings inside a JSON-in-HTML-attribute context.
-(function () {
-  const hdr = document.getElementById('agent-header');
-  const siteId = hdr.dataset.siteId;
-  const agentId = hdr.dataset.agentId;
-  const modal = document.getElementById('hint-modal');
+  // Read ids from data-* attributes so we never interpolate user-supplied
+  // strings inside a JSON-in-HTML-attribute context.
+  (function () {
+    const hdr = document.getElementById("agent-header");
+    const siteId = hdr.dataset.siteId;
+    const agentId = hdr.dataset.agentId;
+    const modal = document.getElementById("hint-modal");
 
-  async function postControl(body) {
-    await fetch('/api/v1/sentinel/control', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-      credentials: 'same-origin',
-    });
-  }
+    async function postControl(body) {
+      await fetch("/api/v1/sentinel/control", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        credentials: "same-origin",
+      });
+    }
 
-  document.getElementById('kill-btn').addEventListener('click', async () => {
-    await postControl({
-      site_id: siteId,
-      agent_id: agentId,
-      command: 'kill',
-      reason: 'manual kill from dashboard',
+    document.getElementById("kill-btn").addEventListener("click", async () => {
+      await postControl({
+        site_id: siteId,
+        agent_id: agentId,
+        command: "kill",
+        reason: "manual kill from dashboard",
+      });
+      document.getElementById("kill-status").textContent = "Kill sent";
     });
-    document.getElementById('kill-status').textContent = 'Kill sent';
-  });
-  document.getElementById('hint-btn').addEventListener('click', () => modal.showModal());
-  document.getElementById('hint-cancel').addEventListener('click', () => modal.close());
-  document.getElementById('hint-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    await postControl({
-      site_id: siteId,
-      agent_id: agentId,
-      command: 'hint',
-      message: e.target.message.value,
-    });
-    modal.close();
-  });
-})();
+    document
+      .getElementById("hint-btn")
+      .addEventListener("click", () => modal.showModal());
+    document
+      .getElementById("hint-cancel")
+      .addEventListener("click", () => modal.close());
+    document
+      .getElementById("hint-form")
+      .addEventListener("submit", async (e) => {
+        e.preventDefault();
+        await postControl({
+          site_id: siteId,
+          agent_id: agentId,
+          command: "hint",
+          message: e.target.message.value,
+        });
+        modal.close();
+      });
+  })();
 </script>
 {% endblock %}

@@ -1,182 +1,211 @@
-{% extends "base.html" %}
-{% block title %}{{ site.name }} — Stomatopod{% endblock %}
-{% block content %}
+{% extends "base.html" %} {% block title %}{{ site.name }} — Stomatopod{%
+endblock %} {% block content %}
 
 <div class="page-head">
-    <div>
-        <h1 class="page-title" style="view-transition-name: s-{{ site.id }}">
-            {{ site.name }}
-        </h1>
-        <p class="page-sub">{{ site.domain }}</p>
-    </div>
-    <div class="range-tabs">
-        <a href="?range=7d" class="{% if range == '7d' %}active{% endif %}">7d</a>
-        <a href="?range=30d" class="{% if range == '30d' or not range %}active{% endif %}">30d</a>
-        <a href="?range=90d" class="{% if range == '90d' %}active{% endif %}">90d</a>
-        <a href="?range=12m" class="{% if range == '12m' %}active{% endif %}">12m</a>
-    </div>
+  <div>
+    <h1 class="page-title" style="view-transition-name: s-{{ site.id }}">
+      {{ site.name }}
+    </h1>
+    <p class="page-sub">{{ site.domain }}</p>
+  </div>
+  <div class="range-tabs">
+    <a href="?range=7d" class="{% if range == '7d' %}active{% endif %}">7d</a>
+    <a
+      href="?range=30d"
+      class="{% if range == '30d' or not range %}active{% endif %}"
+      >30d</a
+    >
+    <a href="?range=90d" class="{% if range == '90d' %}active{% endif %}"
+      >90d</a
+    >
+    <a href="?range=12m" class="{% if range == '12m' %}active{% endif %}"
+      >12m</a
+    >
+  </div>
 </div>
 
 <div class="tabs">
-    <a href="/app/sites/{{ site.id }}?range={{ range }}" class="active">Overview</a>
-    <a href="/app/sites/{{ site.id }}/events?range={{ range }}">Events</a>
-    <a href="/app/sites/{{ site.id }}/funnels?range={{ range }}">Funnels</a>
-    <a href="/app/sites/{{ site.id }}/settings?range={{ range }}">Settings</a>
+  <a href="/app/sites/{{ site.id }}?range={{ range }}" class="active"
+    >Overview</a
+  >
+  <a href="/app/sites/{{ site.id }}/events?range={{ range }}">Events</a>
+  <a href="/app/sites/{{ site.id }}/funnels?range={{ range }}">Funnels</a>
+  <a href="/app/sites/{{ site.id }}/settings?range={{ range }}">Settings</a>
 </div>
 
 <!-- Hero: stats summary + traffic chart in one panel -->
 <div class="card hero mb-2">
-    <div class="hero-stats">
-        <div class="stat">
-            <div class="label">Pageviews</div>
-            <div class="value">{{ total_pageviews }}</div>
-        </div>
-        <div class="stat">
-            <div class="label">Sessions</div>
-            <div class="value">{{ total_sessions }}</div>
-        </div>
-        <div class="stat">
-            <div class="label">Bounce Rate</div>
-            <div class="value">{{ bounce_rate }}</div>
-        </div>
+  <div class="hero-stats">
+    <div class="stat">
+      <div class="label">Pageviews</div>
+      <div class="value">{{ total_pageviews }}</div>
     </div>
-    {% if buckets %}
-    {% set max_pv = buckets | map(attribute="pageviews") | max | default(1) %}
-    <svg viewBox="0 0 800 120" preserveAspectRatio="none" class="chart">
-        <defs>
-            <linearGradient id="chart-line" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stop-color="#5eead4" />
-                <stop offset="55%" stop-color="#22d3ee" />
-                <stop offset="100%" stop-color="#818cf8" />
-            </linearGradient>
-            <linearGradient id="chart-area" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="rgba(45, 212, 191, 0.22)" />
-                <stop offset="100%" stop-color="rgba(45, 212, 191, 0)" />
-            </linearGradient>
-        </defs>
-        {% set n = buckets | length %}
-        {% if n > 1 %}
-        {% set ns = namespace(pts="") %}
-        {% for b in buckets %}
-        {% set x = (loop.index0 / (n - 1)) * 800 %}
-        {% set y = 120 - (b.pageviews / max_pv) * 110 %}
-        {% if loop.index0 > 0 %}{% set ns.pts = ns.pts ~ " " %}{% endif %}
-        {% set ns.pts = ns.pts ~ x ~ "," ~ y %}
-        {% endfor %}
-        <polygon points="0,120 {{ ns.pts }} 800,120" fill="url(#chart-area)" />
-        <polyline
-            points="{{ ns.pts }}"
-            fill="none"
-            stroke="url(#chart-line)"
-            stroke-width="2.5"
-            stroke-linejoin="round"
-            stroke-linecap="round"
-        />
-        {% endif %}
-    </svg>
+    <div class="stat">
+      <div class="label">Sessions</div>
+      <div class="value">{{ total_sessions }}</div>
+    </div>
+    <div class="stat">
+      <div class="label">Bounce Rate</div>
+      <div class="value">{{ bounce_rate }}</div>
+    </div>
+  </div>
+  {% if buckets %} {% set max_pv = buckets | map(attribute="pageviews") | max |
+  default(1) %}
+  <svg viewBox="0 0 800 120" preserveAspectRatio="none" class="chart">
+    <defs>
+      <linearGradient id="chart-line" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="#5eead4" />
+        <stop offset="55%" stop-color="#22d3ee" />
+        <stop offset="100%" stop-color="#818cf8" />
+      </linearGradient>
+      <linearGradient id="chart-area" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="rgba(45, 212, 191, 0.22)" />
+        <stop offset="100%" stop-color="rgba(45, 212, 191, 0)" />
+      </linearGradient>
+    </defs>
+    {% set n = buckets | length %} {% if n > 1 %} {% set ns = namespace(pts="")
+    %} {% for b in buckets %} {% set x = (loop.index0 / (n - 1)) * 800 %} {% set
+    y = 120 - (b.pageviews / max_pv) * 110 %} {% if loop.index0 > 0 %}{% set
+    ns.pts = ns.pts ~ " " %}{% endif %} {% set ns.pts = ns.pts ~ x ~ "," ~ y %}
+    {% endfor %}
+    <polygon points="0,120 {{ ns.pts }} 800,120" fill="url(#chart-area)" />
+    <polyline
+      points="{{ ns.pts }}"
+      fill="none"
+      stroke="url(#chart-line)"
+      stroke-width="2.5"
+      stroke-linejoin="round"
+      stroke-linecap="round"
+    />
     {% endif %}
+  </svg>
+  {% endif %}
 </div>
 
 <!-- Top tables grid -->
 <div class="grid-2">
-    <div class="card">
-        <div class="section-header"><h2>Top Pages</h2></div>
-        <table>
-            <thead>
-                <tr><th>Page</th><th>Views</th><th>%</th></tr>
-            </thead>
-            <tbody>
-                {% for row in top_pages %}
-                <tr>
-                    <td class="cell-truncate">{{ row.value }}</td>
-                    <td>{{ row.pageviews }}</td>
-                    <td>
-                        <div class="bar-cell">
-                            <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
-                            {{ "%.1f" | format(row.pct) }}%
-                        </div>
-                    </td>
-                </tr>
-                {% else %}
-                <tr><td colspan="3" class="empty-cell">No data</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+  <div class="card">
+    <div class="section-header"><h2>Top Pages</h2></div>
+    <table>
+      <thead>
+        <tr>
+          <th>Page</th>
+          <th>Views</th>
+          <th>%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in top_pages %}
+        <tr>
+          <td class="cell-truncate">{{ row.value }}</td>
+          <td>{{ row.pageviews }}</td>
+          <td>
+            <div class="bar-cell">
+              <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
+              {{ "%.1f" | format(row.pct) }}%
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="3" class="empty-cell">No data</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 
-    <div class="card">
-        <div class="section-header"><h2>Top Referrers</h2></div>
-        <table>
-            <thead>
-                <tr><th>Source</th><th>Visitors</th><th>%</th></tr>
-            </thead>
-            <tbody>
-                {% for row in top_referrers %}
-                <tr>
-                    <td>{{ row.value }}</td>
-                    <td>{{ row.sessions }}</td>
-                    <td>
-                        <div class="bar-cell">
-                            <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
-                            {{ "%.1f" | format(row.pct) }}%
-                        </div>
-                    </td>
-                </tr>
-                {% else %}
-                <tr><td colspan="3" class="empty-cell">No data</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+  <div class="card">
+    <div class="section-header"><h2>Top Referrers</h2></div>
+    <table>
+      <thead>
+        <tr>
+          <th>Source</th>
+          <th>Visitors</th>
+          <th>%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in top_referrers %}
+        <tr>
+          <td>{{ row.value }}</td>
+          <td>{{ row.sessions }}</td>
+          <td>
+            <div class="bar-cell">
+              <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
+              {{ "%.1f" | format(row.pct) }}%
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="3" class="empty-cell">No data</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 
-    <div class="card">
-        <div class="section-header"><h2>Countries</h2></div>
-        <table>
-            <thead>
-                <tr><th>Country</th><th>Visitors</th><th>%</th></tr>
-            </thead>
-            <tbody>
-                {% for row in top_countries %}
-                <tr>
-                    <td>{{ row.value }}</td>
-                    <td>{{ row.sessions }}</td>
-                    <td>
-                        <div class="bar-cell">
-                            <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
-                            {{ "%.1f" | format(row.pct) }}%
-                        </div>
-                    </td>
-                </tr>
-                {% else %}
-                <tr><td colspan="3" class="empty-cell">No data</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+  <div class="card">
+    <div class="section-header"><h2>Countries</h2></div>
+    <table>
+      <thead>
+        <tr>
+          <th>Country</th>
+          <th>Visitors</th>
+          <th>%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in top_countries %}
+        <tr>
+          <td>{{ row.value }}</td>
+          <td>{{ row.sessions }}</td>
+          <td>
+            <div class="bar-cell">
+              <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
+              {{ "%.1f" | format(row.pct) }}%
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="3" class="empty-cell">No data</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 
-    <div class="card">
-        <div class="section-header"><h2>Browsers &amp; Devices</h2></div>
-        <table>
-            <thead>
-                <tr><th>Browser</th><th>Visitors</th><th>%</th></tr>
-            </thead>
-            <tbody>
-                {% for row in top_browsers %}
-                <tr>
-                    <td>{{ row.value }}</td>
-                    <td>{{ row.sessions }}</td>
-                    <td>
-                        <div class="bar-cell">
-                            <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
-                            {{ "%.1f" | format(row.pct) }}%
-                        </div>
-                    </td>
-                </tr>
-                {% else %}
-                <tr><td colspan="3" class="empty-cell">No data</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+  <div class="card">
+    <div class="section-header"><h2>Browsers &amp; Devices</h2></div>
+    <table>
+      <thead>
+        <tr>
+          <th>Browser</th>
+          <th>Visitors</th>
+          <th>%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in top_browsers %}
+        <tr>
+          <td>{{ row.value }}</td>
+          <td>{{ row.sessions }}</td>
+          <td>
+            <div class="bar-cell">
+              <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
+              {{ "%.1f" | format(row.pct) }}%
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="3" class="empty-cell">No data</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}
