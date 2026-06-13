@@ -1,9 +1,8 @@
-{% extends "base.html" %} {% block title %}Settings — {{ site.name }}{% endblock
-%} {% block content %}
+{% extends "base.html" %}
+{% block title %}Settings — {{ site.name }}{% endblock %}
+{% block content %}
 <div class="page-head">
-  <h1 class="page-title" style="view-transition-name: s-{{ site.id }}">
-    {{ site.name }}
-  </h1>
+  <h1 class="page-title" style="view-transition-name: s-{{ site.id }}">{{ site.name }}</h1>
   <p class="page-sub">{{ site.domain }}</p>
 </div>
 
@@ -11,9 +10,7 @@
   <a href="/app/sites/{{ site.id }}?range={{ range }}">Overview</a>
   <a href="/app/sites/{{ site.id }}/events?range={{ range }}">Events</a>
   <a href="/app/sites/{{ site.id }}/funnels?range={{ range }}">Funnels</a>
-  <a href="/app/sites/{{ site.id }}/settings?range={{ range }}" class="active"
-    >Settings</a
-  >
+  <a href="/app/sites/{{ site.id }}/settings?range={{ range }}" class="active">Settings</a>
 </div>
 
 <div class="card">
@@ -21,49 +18,23 @@
   <form method="post" action="/app/sites/{{ site.id }}" class="form-row">
     <div class="field">
       <label for="site-name">Name</label>
-      <input id="site-name" name="name" value="{{ site.name }}" required />
+      <input id="site-name" name="name" value="{{ site.name }}" required>
     </div>
     <div class="field">
       <label for="site-domain">Domain</label>
-      <input
-        id="site-domain"
-        name="domain"
-        value="{{ site.domain }}"
-        required
-      />
+      <input id="site-domain" name="domain" value="{{ site.domain }}" required>
     </div>
     <div class="field">
       <label for="site-timezone">Timezone</label>
       <select id="site-timezone" name="timezone" required>
         {% for tz in timezones %}
-        <option
-          value="{{ tz }}"
-          {%
-          if
-          tz=""
-          ="site.timezone"
-          %}selected{%
-          endif
-          %}
-        >
-          {{ tz }}
-        </option>
+        <option value="{{ tz }}" {% if tz == site.timezone %}selected{% endif %}>{{ tz }}</option>
         {% endfor %}
       </select>
     </div>
     <div class="switch-row">
       <label class="switch" for="site-active">
-        <input
-          id="site-active"
-          type="checkbox"
-          name="is_active"
-          {%
-          if
-          site.is_active
-          %}checked{%
-          endif
-          %}
-        />
+        <input id="site-active" type="checkbox" name="is_active" {% if site.is_active %}checked{% endif %}>
         <span class="switch-track"></span>
       </label>
       <label for="site-active">Active</label>
@@ -73,27 +44,13 @@
 
   <table>
     <tbody>
-      <tr>
-        <th>ID</th>
-        <td class="cell-truncate">{{ site.id }}</td>
-      </tr>
-      <tr>
-        <th>Org ID</th>
-        <td class="cell-truncate">{{ site.org_id }}</td>
-      </tr>
-      <tr>
-        <th>Public Key</th>
-        <td class="cell-truncate">{{ site.public_key }}</td>
-      </tr>
+      <tr><th>ID</th><td class="cell-truncate">{{ site.id }}</td></tr>
+      <tr><th>Org ID</th><td class="cell-truncate">{{ site.org_id }}</td></tr>
+      <tr><th>Public Key</th><td class="cell-truncate">{{ site.public_key }}</td></tr>
       <tr>
         <th>Created</th>
         <td>
-          <time
-            class="js-local-time"
-            datetime="{{ site.created_at }}"
-            title="{{ site.created_at }}"
-            >{{ created_ago }}</time
-          >
+          <time class="js-local-time" datetime="{{ site.created_at }}" title="{{ site.created_at }}">{{ created_ago }}</time>
         </td>
       </tr>
     </tbody>
@@ -101,14 +58,14 @@
 </div>
 
 <script>
-  (() => {
-    for (const el of document.querySelectorAll(".js-local-time")) {
-      const iso = el.getAttribute("datetime");
-      if (!iso) continue;
-      const dt = new Date(iso);
-      if (Number.isNaN(dt.getTime())) continue;
-      el.title = dt.toLocaleString();
-    }
-  })();
+(() => {
+  for (const el of document.querySelectorAll(".js-local-time")) {
+    const iso = el.getAttribute("datetime");
+    if (!iso) continue;
+    const dt = new Date(iso);
+    if (Number.isNaN(dt.getTime())) continue;
+    el.title = dt.toLocaleString();
+  }
+})();
 </script>
 {% endblock %}
