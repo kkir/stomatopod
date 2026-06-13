@@ -42,7 +42,7 @@ pub async fn events_list(
 
     let html = templates::render(
         &state,
-        "events.html",
+        "events.jinja",
         minijinja::context! {
             site => serde_json::to_value(&site).unwrap(),
             range => label,

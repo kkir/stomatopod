@@ -24,7 +24,7 @@ pub async fn index(State(state): State<Arc<AppState>>) -> Result<Response, AppEr
     if sites.is_empty() {
         return Ok(templates::render(
             &state,
-            "index.html",
+            "index.jinja",
             minijinja::context! { sites => [] as [i32; 0] },
         )?
         .into_response());
@@ -55,7 +55,7 @@ pub async fn site_overview(
 
     let html = templates::render(
         &state,
-        "site.html",
+        "site.jinja",
         minijinja::context! {
             site => serde_json::to_value(&site).unwrap(),
             range => label,

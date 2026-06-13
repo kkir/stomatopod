@@ -65,7 +65,7 @@ pub async fn sites_list(State(state): State<Arc<AppState>>) -> impl IntoResponse
     let org_id = orgs.first().map(|o| o.id).unwrap_or_default();
     let sites = state.meta.list_sites(org_id).await.unwrap_or_default();
 
-    let tmpl = state.templates.get_template("index.html").unwrap();
+    let tmpl = state.templates.get_template("index.jinja").unwrap();
     axum::response::Html(
         tmpl.render(minijinja::context! {
             sites => serde_json::to_value(&sites).unwrap(),
@@ -115,7 +115,7 @@ pub async fn site_settings(
     let created_ago = relative_time(site.created_at);
     let html = templates::render(
         &state,
-        "site_settings.html",
+        "site_settings.jinja",
         minijinja::context! {
             site => serde_json::to_value(&site).unwrap(),
             range => label,

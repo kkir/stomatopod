@@ -37,7 +37,7 @@ pub async fn agents_index(State(state): State<Arc<AppState>>) -> Result<Response
         .unwrap_or_default();
     let html = templates::render(
         &state,
-        "agents.html",
+        "agents.jinja",
         context! {
             summaries => serde_json::to_value(&summaries).unwrap(),
         },
@@ -72,7 +72,7 @@ pub async fn agent_detail(
     };
     let html = templates::render(
         &state,
-        "agent.html",
+        "agent.jinja",
         context! {
             site_id => site_id.to_string(),
             agent_id => agent_id,
@@ -113,7 +113,7 @@ pub async fn agent_spans_partial(
         .unwrap_or_default();
     let html = templates::render(
         &state,
-        "partials/agent_spans.html",
+        "partials/agent_spans.jinja",
         context! { rows => serde_json::to_value(&rows).unwrap() },
     )?;
     Ok(html.into_response())
@@ -146,7 +146,7 @@ pub async fn incidents_page(State(state): State<Arc<AppState>>) -> Result<Respon
         .collect();
     let html = templates::render(
         &state,
-        "incidents.html",
+        "incidents.jinja",
         context! { incidents => serde_json::to_value(&view).unwrap() },
     )?;
     Ok(html.into_response())

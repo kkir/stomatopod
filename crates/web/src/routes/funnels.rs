@@ -35,7 +35,7 @@ pub async fn funnels_page(
 
     let html = templates::render(
         &state,
-        "funnels.html",
+        "funnels.jinja",
         minijinja::context! {
             site => serde_json::to_value(&site).unwrap(),
             funnels => serde_json::to_value(&funnels).unwrap(),
@@ -78,7 +78,7 @@ pub async fn funnel_detail(
 
     let html = templates::render(
         &state,
-        "funnels.html",
+        "funnels.jinja",
         minijinja::context! {
             site => serde_json::to_value(&site).unwrap(),
             funnel => serde_json::to_value(&funnel).unwrap(),

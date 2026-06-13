@@ -32,7 +32,7 @@ pub async fn login_page(
     {
         return Ok(Redirect::to("/app").into_response());
     }
-    Ok(templates::render(&state, "login.html", minijinja::context! {})?.into_response())
+    Ok(templates::render(&state, "login.jinja", minijinja::context! {})?.into_response())
 }
 
 pub async fn login_submit(
@@ -45,7 +45,7 @@ pub async fn login_submit(
     let render_invalid = |state: &AppState| -> Result<Response, AppError> {
         Ok(templates::render(
             state,
-            "login.html",
+            "login.jinja",
             minijinja::context! { error => "Invalid credentials" },
         )?
         .into_response())

@@ -29,66 +29,66 @@ use stomatopod_web::{middleware::auth::sign_session, router::build_router, state
 fn build_templates() -> Environment<'static> {
     let mut env = Environment::new();
     env.set_auto_escape_callback(|name| {
-        if name.ends_with(".html") {
+        if name.ends_with(".jinja") {
             minijinja::AutoEscape::Html
         } else {
             minijinja::AutoEscape::None
         }
     });
-    env.add_template("base.html", include_str!("../templates/base.html"))
+    env.add_template("base.jinja", include_str!("../templates/base.jinja"))
         .unwrap();
-    env.add_template("login.html", include_str!("../templates/login.html"))
+    env.add_template("login.jinja", include_str!("../templates/login.jinja"))
         .unwrap();
-    env.add_template("index.html", include_str!("../templates/index.html"))
+    env.add_template("index.jinja", include_str!("../templates/index.jinja"))
         .unwrap();
-    env.add_template("site.html", include_str!("../templates/site.html"))
+    env.add_template("site.jinja", include_str!("../templates/site.jinja"))
         .unwrap();
     env.add_template(
-        "site_settings.html",
-        include_str!("../templates/site_settings.html"),
+        "site_settings.jinja",
+        include_str!("../templates/site_settings.jinja"),
     )
     .unwrap();
-    env.add_template("events.html", include_str!("../templates/events.html"))
+    env.add_template("events.jinja", include_str!("../templates/events.jinja"))
         .unwrap();
-    env.add_template("funnels.html", include_str!("../templates/funnels.html"))
+    env.add_template("funnels.jinja", include_str!("../templates/funnels.jinja"))
         .unwrap();
     env.add_template(
-        "partials/top_pages.html",
-        include_str!("../templates/partials/top_pages.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "partials/top_referrers.html",
-        include_str!("../templates/partials/top_referrers.html"),
+        "partials/top_pages.jinja",
+        include_str!("../templates/partials/top_pages.jinja"),
     )
     .unwrap();
     env.add_template(
-        "partials/top_countries.html",
-        include_str!("../templates/partials/top_countries.html"),
+        "partials/top_referrers.jinja",
+        include_str!("../templates/partials/top_referrers.jinja"),
     )
     .unwrap();
     env.add_template(
-        "partials/top_browsers.html",
-        include_str!("../templates/partials/top_browsers.html"),
+        "partials/top_countries.jinja",
+        include_str!("../templates/partials/top_countries.jinja"),
     )
     .unwrap();
     env.add_template(
-        "partials/top_devices.html",
-        include_str!("../templates/partials/top_devices.html"),
+        "partials/top_browsers.jinja",
+        include_str!("../templates/partials/top_browsers.jinja"),
     )
     .unwrap();
-    env.add_template("agents.html", include_str!("../templates/agents.html"))
+    env.add_template(
+        "partials/top_devices.jinja",
+        include_str!("../templates/partials/top_devices.jinja"),
+    )
+    .unwrap();
+    env.add_template("agents.jinja", include_str!("../templates/agents.jinja"))
         .unwrap();
-    env.add_template("agent.html", include_str!("../templates/agent.html"))
+    env.add_template("agent.jinja", include_str!("../templates/agent.jinja"))
         .unwrap();
     env.add_template(
-        "incidents.html",
-        include_str!("../templates/incidents.html"),
+        "incidents.jinja",
+        include_str!("../templates/incidents.jinja"),
     )
     .unwrap();
     env.add_template(
-        "partials/agent_spans.html",
-        include_str!("../templates/partials/agent_spans.html"),
+        "partials/agent_spans.jinja",
+        include_str!("../templates/partials/agent_spans.jinja"),
     )
     .unwrap();
     env

@@ -112,7 +112,7 @@ test("logged-in user can access the sites list page", async ({ page }) => {
   // Navigate to sites; requires an authenticated session cookie.
   await page.goto("/app/sites");
   await expect(page).not.toHaveURL(/\/login/);
-  // The page title comes from base.html
+  // The page title comes from base.jinja
   await expect(page).toHaveTitle(/stomatopod/i);
 });
 

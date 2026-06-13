@@ -194,7 +194,7 @@ fn load_config(path: &str) -> Result<Config> {
 fn build_templates() -> Result<JinjaEnv<'static>> {
     let mut env = JinjaEnv::new();
     env.set_auto_escape_callback(|name| {
-        if name.ends_with(".html") {
+        if name.ends_with(".jinja") {
             minijinja::AutoEscape::Html
         } else {
             minijinja::AutoEscape::None
@@ -203,68 +203,68 @@ fn build_templates() -> Result<JinjaEnv<'static>> {
 
     // Embed templates at compile time
     env.add_template(
-        "base.html",
-        include_str!("../../../crates/web/templates/base.html"),
+        "base.jinja",
+        include_str!("../../../crates/web/templates/base.jinja"),
     )?;
     env.add_template(
-        "login.html",
-        include_str!("../../../crates/web/templates/login.html"),
+        "login.jinja",
+        include_str!("../../../crates/web/templates/login.jinja"),
     )?;
     env.add_template(
-        "index.html",
-        include_str!("../../../crates/web/templates/index.html"),
+        "index.jinja",
+        include_str!("../../../crates/web/templates/index.jinja"),
     )?;
     env.add_template(
-        "site.html",
-        include_str!("../../../crates/web/templates/site.html"),
+        "site.jinja",
+        include_str!("../../../crates/web/templates/site.jinja"),
     )?;
     env.add_template(
-        "site_settings.html",
-        include_str!("../../../crates/web/templates/site_settings.html"),
+        "site_settings.jinja",
+        include_str!("../../../crates/web/templates/site_settings.jinja"),
     )?;
     env.add_template(
-        "events.html",
-        include_str!("../../../crates/web/templates/events.html"),
+        "events.jinja",
+        include_str!("../../../crates/web/templates/events.jinja"),
     )?;
     env.add_template(
-        "funnels.html",
-        include_str!("../../../crates/web/templates/funnels.html"),
+        "funnels.jinja",
+        include_str!("../../../crates/web/templates/funnels.jinja"),
     )?;
     env.add_template(
-        "partials/top_pages.html",
-        include_str!("../../../crates/web/templates/partials/top_pages.html"),
+        "partials/top_pages.jinja",
+        include_str!("../../../crates/web/templates/partials/top_pages.jinja"),
     )?;
     env.add_template(
-        "partials/top_referrers.html",
-        include_str!("../../../crates/web/templates/partials/top_referrers.html"),
+        "partials/top_referrers.jinja",
+        include_str!("../../../crates/web/templates/partials/top_referrers.jinja"),
     )?;
     env.add_template(
-        "partials/top_countries.html",
-        include_str!("../../../crates/web/templates/partials/top_countries.html"),
+        "partials/top_countries.jinja",
+        include_str!("../../../crates/web/templates/partials/top_countries.jinja"),
     )?;
     env.add_template(
-        "partials/top_browsers.html",
-        include_str!("../../../crates/web/templates/partials/top_browsers.html"),
+        "partials/top_browsers.jinja",
+        include_str!("../../../crates/web/templates/partials/top_browsers.jinja"),
     )?;
     env.add_template(
-        "partials/top_devices.html",
-        include_str!("../../../crates/web/templates/partials/top_devices.html"),
+        "partials/top_devices.jinja",
+        include_str!("../../../crates/web/templates/partials/top_devices.jinja"),
     )?;
     env.add_template(
-        "agents.html",
-        include_str!("../../../crates/web/templates/agents.html"),
+        "agents.jinja",
+        include_str!("../../../crates/web/templates/agents.jinja"),
     )?;
     env.add_template(
-        "agent.html",
-        include_str!("../../../crates/web/templates/agent.html"),
+        "agent.jinja",
+        include_str!("../../../crates/web/templates/agent.jinja"),
     )?;
     env.add_template(
-        "incidents.html",
-        include_str!("../../../crates/web/templates/incidents.html"),
+        "incidents.jinja",
+        include_str!("../../../crates/web/templates/incidents.jinja"),
     )?;
     env.add_template(
-        "partials/agent_spans.html",
-        include_str!("../../../crates/web/templates/partials/agent_spans.html"),
+        "partials/agent_spans.jinja",
+        include_str!("../../../crates/web/templates/partials/agent_spans.jinja"),
     )?;
 
     Ok(env)
