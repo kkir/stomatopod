@@ -20,8 +20,10 @@ test("invalid credentials show an error message", async ({ page }) => {
   await page.fill('input[name="password"]', "definitely-wrong-password");
   await page.click('button[type="submit"]');
 
-  await expect(page.locator(".error")).toBeVisible();
-  await expect(page.locator(".error")).toContainText(/invalid credentials/i);
+  await expect(page.locator(".form-error")).toBeVisible();
+  await expect(page.locator(".form-error")).toContainText(
+    /invalid credentials/i,
+  );
   // Should stay on the login page.
   await expect(page).toHaveURL(/\/login/);
 });
