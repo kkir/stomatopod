@@ -29,101 +29,66 @@ use stomatopod_web::{middleware::auth::sign_session, router::build_router, state
 fn build_templates() -> Environment<'static> {
     let mut env = Environment::new();
     env.set_auto_escape_callback(|name| {
-        if name.ends_with(".html") {
+        if name.ends_with(".jinja") {
             minijinja::AutoEscape::Html
         } else {
             minijinja::AutoEscape::None
         }
     });
-    env.add_template("base.html", include_str!("../templates/base.html"))
+    env.add_template("base.jinja", include_str!("../templates/base.jinja"))
         .unwrap();
-    env.add_template("login.html", include_str!("../templates/login.html"))
+    env.add_template("login.jinja", include_str!("../templates/login.jinja"))
         .unwrap();
-    env.add_template("index.html", include_str!("../templates/index.html"))
+    env.add_template("index.jinja", include_str!("../templates/index.jinja"))
         .unwrap();
-    env.add_template("site.html", include_str!("../templates/site.html"))
-        .unwrap();
-    env.add_template("events.html", include_str!("../templates/events.html"))
-        .unwrap();
-    env.add_template("funnels.html", include_str!("../templates/funnels.html"))
+    env.add_template("site.jinja", include_str!("../templates/site.jinja"))
         .unwrap();
     env.add_template(
-        "partials/top_pages.html",
-        include_str!("../templates/partials/top_pages.html"),
+        "site_settings.jinja",
+        include_str!("../templates/site_settings.jinja"),
     )
     .unwrap();
-    env.add_template(
-        "partials/top_referrers.html",
-        include_str!("../templates/partials/top_referrers.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "partials/top_countries.html",
-        include_str!("../templates/partials/top_countries.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "partials/top_browsers.html",
-        include_str!("../templates/partials/top_browsers.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "partials/top_devices.html",
-        include_str!("../templates/partials/top_devices.html"),
-    )
-    .unwrap();
-    env.add_template("agents.html", include_str!("../templates/agents.html"))
+    env.add_template("events.jinja", include_str!("../templates/events.jinja"))
         .unwrap();
-    env.add_template("agent.html", include_str!("../templates/agent.html"))
+    env.add_template("funnels.jinja", include_str!("../templates/funnels.jinja"))
         .unwrap();
     env.add_template(
-        "incidents.html",
-        include_str!("../templates/incidents.html"),
+        "partials/top_pages.jinja",
+        include_str!("../templates/partials/top_pages.jinja"),
     )
     .unwrap();
     env.add_template(
-        "partials/agent_spans.html",
-        include_str!("../templates/partials/agent_spans.html"),
+        "partials/top_referrers.jinja",
+        include_str!("../templates/partials/top_referrers.jinja"),
     )
     .unwrap();
     env.add_template(
-        "marketing/base.html",
-        include_str!("../templates/marketing/base.html"),
+        "partials/top_countries.jinja",
+        include_str!("../templates/partials/top_countries.jinja"),
     )
     .unwrap();
     env.add_template(
-        "marketing/home.html",
-        include_str!("../templates/marketing/home.html"),
+        "partials/top_browsers.jinja",
+        include_str!("../templates/partials/top_browsers.jinja"),
     )
     .unwrap();
     env.add_template(
-        "marketing/web_analytics.html",
-        include_str!("../templates/marketing/web_analytics.html"),
+        "partials/top_devices.jinja",
+        include_str!("../templates/partials/top_devices.jinja"),
+    )
+    .unwrap();
+    env.add_template("agents.jinja", include_str!("../templates/agents.jinja"))
+        .unwrap();
+    env.add_template("agent.jinja", include_str!("../templates/agent.jinja"))
+        .unwrap();
+    env.add_template(
+        "incidents.jinja",
+        include_str!("../templates/incidents.jinja"),
     )
     .unwrap();
     env.add_template(
-        "marketing/ai_firewall.html",
-        include_str!("../templates/marketing/ai_firewall.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "marketing/for_saas.html",
-        include_str!("../templates/marketing/for_saas.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "marketing/for_agencies.html",
-        include_str!("../templates/marketing/for_agencies.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "marketing/for_ai_teams.html",
-        include_str!("../templates/marketing/for_ai_teams.html"),
-    )
-    .unwrap();
-    env.add_template(
-        "marketing/for_regulated.html",
-        include_str!("../templates/marketing/for_regulated.html"),
+        "partials/agent_spans.jinja",
+        include_str!("../templates/partials/agent_spans.jinja"),
     )
     .unwrap();
     env
@@ -170,8 +135,6 @@ async fn setup() -> TestCtx {
         templates: build_templates(),
         config,
         tracker_hash: "testhash".into(),
-        marketing_css_hash: "testcss".into(),
-        anime_js_hash: "testanime".into(),
         ingest_tx,
         span_ingest_tx,
         site_cache: Arc::new(DashMap::new()),
@@ -977,7 +940,7 @@ async fn login_with_unknown_email_shows_error() {
 }
 
 #[tokio::test]
-async fn logout_clears_cookie_and_redirects_to_marketing_home() {
+async fn logout_clears_cookie_and_redirects_to_login() {
     let ctx = setup().await;
     let req = Request::builder()
         .method("POST")
@@ -992,7 +955,7 @@ async fn logout_clears_cookie_and_redirects_to_marketing_home() {
         .get("location")
         .and_then(|v: &axum::http::HeaderValue| v.to_str().ok())
         .unwrap_or("");
-    assert_eq!(location, "/");
+    assert_eq!(location, "/login");
 
     let set_cookie = resp
         .headers()
@@ -1006,6 +969,80 @@ async fn logout_clears_cookie_and_redirects_to_marketing_home() {
 }
 
 // ---- Dashboard requires auth ----
+
+#[tokio::test]
+async fn authenticated_site_settings_page_renders_controls() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let user_id = Ulid::new().to_string();
+    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
+    let req = Request::builder()
+        .uri(format!("/app/sites/{}/settings", site.id))
+        .header("cookie", cookie)
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_bytes(resp).await;
+    let html = std::str::from_utf8(&body).unwrap();
+
+    assert!(html.contains("Site Settings"));
+    assert!(
+        html.contains(r#"action="/app/sites/"#),
+        "settings form missing"
+    );
+    assert!(html.contains(r#"<select id="site-timezone" name="timezone""#));
+    assert!(html.contains(r#"class="switch-track""#));
+    assert!(html.contains("Public Key"));
+    assert!(html.contains(r#"class="js-local-time""#));
+    assert!(html.contains("ago") || html.contains("just now"));
+    assert!(html.contains(">Overview</a>"));
+    assert!(html.contains(">Settings</a>"));
+}
+
+#[tokio::test]
+async fn post_site_update_changes_site_metadata() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let user_id = Ulid::new().to_string();
+    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/app/sites/{}", site.id))
+        .header("cookie", cookie)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(
+            "name=Updated+Site&domain=updated.example.com&timezone=America%2FChicago",
+        ))
+        .unwrap();
+
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let location = resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(location, format!("/app/sites/{}/settings", site.id));
+
+    let updated = ctx.backend.meta.get_site(site.id).await.unwrap().unwrap();
+    assert_eq!(updated.name, "Updated Site");
+    assert_eq!(updated.domain, "updated.example.com");
+    assert_eq!(updated.timezone, "America/Chicago");
+    assert!(
+        !updated.is_active,
+        "unchecked checkbox should deactivate site"
+    );
+}
 
 #[tokio::test]
 async fn unauthenticated_dashboard_redirects_to_login() {

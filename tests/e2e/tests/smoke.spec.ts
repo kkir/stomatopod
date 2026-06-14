@@ -20,8 +20,10 @@ test("invalid credentials show an error message", async ({ page }) => {
   await page.fill('input[name="password"]', "definitely-wrong-password");
   await page.click('button[type="submit"]');
 
-  await expect(page.locator(".error")).toBeVisible();
-  await expect(page.locator(".error")).toContainText(/invalid credentials/i);
+  await expect(page.locator(".form-error")).toBeVisible();
+  await expect(page.locator(".form-error")).toContainText(
+    /invalid credentials/i,
+  );
   // Should stay on the login page.
   await expect(page).toHaveURL(/\/login/);
 });
@@ -40,18 +42,11 @@ test("successful login redirects to the dashboard", async ({ page }) => {
   await expect(page.locator(".error")).toHaveCount(0);
 });
 
-// ---- Marketing site (public) ----
+// ---- Root redirect ----
 
-test("marketing homepage renders at / without auth", async ({ page }) => {
+test("/ redirects to /login without auth", async ({ page }) => {
   await page.goto("/");
-  // Should NOT redirect to /login.
-  await expect(page).not.toHaveURL(/\/login/);
-  await expect(page).toHaveURL(/\/$/);
-  // Marketing nav has a "Sign in" CTA. Scope to the nav so we don't match
-  // the body CTA or footer link, which also link to /login.
-  await expect(
-    page.getByRole("navigation").getByRole("link", { name: /sign in/i }),
-  ).toBeVisible();
+  await expect(page).toHaveURL(/\/login/);
 });
 
 // ---- Dashboard (requires auth) ----
@@ -119,7 +114,7 @@ test("logged-in user can access the sites list page", async ({ page }) => {
   // Navigate to sites; requires an authenticated session cookie.
   await page.goto("/app/sites");
   await expect(page).not.toHaveURL(/\/login/);
-  // The page title comes from base.html
+  // The page title comes from base.jinja
   await expect(page).toHaveTitle(/stomatopod/i);
 });
 
@@ -139,7 +134,7 @@ test("logout clears session and requires re-authentication", async ({
   });
 
   // After logout the session cookie is expired; the dashboard should
-  // redirect to /login. (Marketing pages at / remain public either way.)
+  // redirect to /login.
   await page.goto("/app");
   await expect(page).toHaveURL(/\/login/);
 });

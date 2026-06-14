@@ -1,0 +1,18 @@
+<table>
+    <thead>
+        <tr>
+            <th>Value</th>
+            <th>Sessions</th>
+            <th>%</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+        <tr>
+            <td>{{ row.value }}</td>
+            <td>{{ row.sessions }}</td>
+            <td>{{ "%.1f" | format(row.pct) }}%</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>

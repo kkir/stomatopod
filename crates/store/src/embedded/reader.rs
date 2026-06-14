@@ -68,11 +68,21 @@ impl EmbeddedReader {
         self.register_site(site_id).await
     }
 
+    /// Ensure registration has been attempted and report whether a DataFusion
+    /// table is actually available for this site.
+    async fn ensure_site_table_available(&self, site_id: &str) -> Result<bool, StoreError> {
+        self.ensure_site_registered(site_id)
+            .await
+            .map_err(StoreError::db)?;
+        Ok(self.registered.read().contains(site_id))
+    }
+
     async fn register_site(&self, site_id: &str) -> Result<()> {
         let site_dir = self.data_dir.join(site_id);
         if !site_dir.exists() {
             return Ok(());
         }
+        let site_dir = site_dir.canonicalize()?;
 
         // Trailing slash is required: without it object_store treats the
         // path as a single file rather than a directory prefix.
@@ -97,9 +107,9 @@ impl EmbeddedReader {
 
     pub async fn query_pageviews(&self, q: &PageviewsQuery) -> Result<PageviewsResult, StoreError> {
         let site_id = q.site_id.to_string();
-        self.ensure_site_registered(&site_id)
-            .await
-            .map_err(StoreError::db)?;
+        if !self.ensure_site_table_available(&site_id).await? {
+            return Ok(PageviewsResult::default());
+        }
 
         let table = table_name(&site_id);
         let granularity_fn = granularity_trunc(&q.granularity);
@@ -177,6 +187,10 @@ impl EmbeddedReader {
         range: &TimeRange,
         limit: u32,
     ) -> Result<TopList, StoreError> {
+        let site_id_str = site_id.to_string();
+        if !self.ensure_site_table_available(&site_id_str).await? {
+            return Ok(TopList::default());
+        }
         self.query_top_field(site_id, range, limit, field.column())
             .await
     }
@@ -221,9 +235,9 @@ impl EmbeddedReader {
 
     pub async fn query_custom_events(&self, q: &EventQuery) -> Result<TopList, StoreError> {
         let site_id_str = q.site_id.to_string();
-        self.ensure_site_registered(&site_id_str)
-            .await
-            .map_err(StoreError::db)?;
+        if !self.ensure_site_table_available(&site_id_str).await? {
+            return Ok(TopList::default());
+        }
 
         let table = table_name(&site_id_str);
         let start = q.range.start.timestamp_micros();
@@ -265,9 +279,9 @@ impl EmbeddedReader {
         }
 
         let site_id_str = q.site_id.to_string();
-        self.ensure_site_registered(&site_id_str)
-            .await
-            .map_err(StoreError::db)?;
+        if !self.ensure_site_table_available(&site_id_str).await? {
+            return Ok(FunnelResult::default());
+        }
 
         let table = table_name(&site_id_str);
         let start = q.range.start.timestamp_micros();
@@ -442,4 +456,83 @@ fn extract_count(batches: &[arrow::record_batch::RecordBatch]) -> Option<u64> {
             .downcast_ref::<Int64Array>()
             .map(|a| a.value(0) as u64)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EmbeddedReader;
+    use chrono::Utc;
+    use stomatopod_core::query::{
+        events::EventQuery,
+        funnel::{FunnelQuery, FunnelStep},
+        pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},
+    };
+    use tempfile::tempdir;
+    use ulid::Ulid;
+
+    #[test]
+    fn empty_site_queries_return_defaults_without_table_errors() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        rt.block_on(async {
+            let temp = tempdir().expect("tempdir");
+            let reader = EmbeddedReader::new(temp.path().to_path_buf())
+                .await
+                .expect("reader init");
+            let site_id = Ulid::new();
+            let range = TimeRange {
+                start: Utc::now() - chrono::Duration::days(7),
+                end: Utc::now(),
+            };
+
+            let pageviews = reader
+                .query_pageviews(&PageviewsQuery {
+                    site_id,
+                    range: range.clone(),
+                    granularity: Granularity::Day,
+                    filters: vec![],
+                })
+                .await
+                .expect("pageviews query");
+            assert_eq!(pageviews.total_pageviews, 0);
+            assert_eq!(pageviews.total_sessions, 0);
+            assert!(pageviews.buckets.is_empty());
+
+            let top = reader
+                .query_top_list(site_id, TopListField::Page, &range, 10)
+                .await
+                .expect("top list query");
+            assert!(top.rows.is_empty());
+
+            let events = reader
+                .query_custom_events(&EventQuery {
+                    site_id,
+                    range: range.clone(),
+                    event_name: None,
+                    filters: vec![],
+                    limit: 10,
+                })
+                .await
+                .expect("custom events query");
+            assert!(events.rows.is_empty());
+
+            let funnel = reader
+                .query_funnel(&FunnelQuery {
+                    site_id,
+                    range,
+                    steps: vec![FunnelStep {
+                        name: "Signup".to_string(),
+                        event_name: "signup".to_string(),
+                        filters: vec![],
+                    }],
+                    window_secs: 86_400,
+                })
+                .await
+                .expect("funnel query");
+            assert!(funnel.steps.is_empty());
+        });
+    }
 }

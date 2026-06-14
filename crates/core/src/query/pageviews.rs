@@ -158,11 +158,11 @@ impl TopListField {
     /// Filename of the htmx partial that renders this dimension.
     pub fn template_partial(&self) -> &'static str {
         match self {
-            TopListField::Page => "partials/top_pages.html",
-            TopListField::Referrer => "partials/top_referrers.html",
-            TopListField::Country => "partials/top_countries.html",
-            TopListField::Browser => "partials/top_browsers.html",
-            TopListField::Device => "partials/top_devices.html",
+            TopListField::Page => "partials/top_pages.jinja",
+            TopListField::Referrer => "partials/top_referrers.jinja",
+            TopListField::Country => "partials/top_countries.jinja",
+            TopListField::Browser => "partials/top_browsers.jinja",
+            TopListField::Device => "partials/top_devices.jinja",
         }
     }
 }

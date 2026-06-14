@@ -13,8 +13,8 @@ use crate::{
         cors::ingest_cors,
     },
     routes::{
-        agents_dashboard, analytics, api, auth, dashboard, events, funnels, marketing, partials,
-        sentinel, sites, spans,
+        agents_dashboard, analytics, api, auth, dashboard, events, funnels, partials, sentinel,
+        sites, spans,
     },
     state::AppState,
 };
@@ -26,24 +26,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/tracker.js", get(api::tracker_js))
         .layer(ingest_cors());
 
-    // Public marketing site (no auth, no CORS).
-    let marketing_routes = Router::new()
-        .route("/", get(marketing::home))
-        .route("/web-analytics", get(marketing::web_analytics))
-        .route("/ai-firewall", get(marketing::ai_firewall))
-        .route("/for/saas", get(marketing::for_saas))
-        .route("/for/agencies", get(marketing::for_agencies))
-        .route("/for/ai-teams", get(marketing::for_ai_teams))
-        .route("/for/regulated", get(marketing::for_regulated));
-
-    // Hash-busted static assets for the marketing site. The hash is part of
-    // the URL (rendered into the marketing templates) so the response can be
-    // cached for a year.
-    let marketing_css_path = format!("/static/marketing.{}.css", state.marketing_css_hash);
-    let anime_js_path = format!("/static/anime.{}.js", state.anime_js_hash);
-    let marketing_assets = Router::new()
-        .route(&marketing_css_path, get(api::marketing_css))
-        .route(&anime_js_path, get(api::anime_js));
+    // Redirect / to /login — marketing site is out of scope for self-hosted.
+    // The stylesheet is public: the login page needs it before auth.
+    let root_redirect = Router::new()
+        .route(
+            "/",
+            get(|| async { axum::response::Redirect::to("/login") }),
+        )
+        .route("/app.css", get(api::dashboard_css));
 
     // Sentinel span ingest. Bearer-auth'd via sentinel_tokens (handler
     // checks the header itself; no middleware needed). No CORS since
@@ -76,14 +66,18 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout));
 
-    // Protected dashboard routes — live under /app so / can serve marketing.
+    // Protected dashboard routes.
     let dashboard_routes = Router::new()
         .route("/app", get(dashboard::index))
         .route(
             "/app/sites",
             get(sites::sites_list).post(sites::create_site),
         )
-        .route("/app/sites/:site_id", get(dashboard::site_overview))
+        .route(
+            "/app/sites/:site_id",
+            get(dashboard::site_overview).post(sites::update_site),
+        )
+        .route("/app/sites/:site_id/settings", get(sites::site_settings))
         .route("/app/sites/:site_id/events", get(events::events_list))
         .route(
             "/app/sites/:site_id/funnels",
@@ -144,8 +138,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(analytics_routes)
         .merge(sentinel_control)
         .merge(auth_routes)
-        .merge(marketing_routes)
-        .merge(marketing_assets)
+        .merge(root_redirect)
         .merge(dashboard_routes)
         .layer(CompressionLayer::new());
 

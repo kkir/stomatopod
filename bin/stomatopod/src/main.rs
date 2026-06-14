@@ -139,16 +139,6 @@ async fn serve(cfg: Config) -> Result<()> {
         hex::encode(&h.as_bytes()[..8])
     };
 
-    // Marketing-site static assets are also embedded and cache-busted by hash.
-    let marketing_css_hash = {
-        let h = blake3::hash(stomatopod_web::routes::api::MARKETING_CSS.as_bytes());
-        hex::encode(&h.as_bytes()[..8])
-    };
-    let anime_js_hash = {
-        let h = blake3::hash(stomatopod_web::routes::api::ANIME_JS.as_bytes());
-        hex::encode(&h.as_bytes()[..8])
-    };
-
     let redact_keys = Arc::new(cfg.sentinel.redact_keys.clone());
     let (alerts, alerts_rx) = AlertDispatcher::channel();
     let meta_for_alerts = meta.clone();
@@ -163,8 +153,6 @@ async fn serve(cfg: Config) -> Result<()> {
         templates,
         config: cfg.clone(),
         tracker_hash,
-        marketing_css_hash,
-        anime_js_hash,
         ingest_tx,
         span_ingest_tx,
         site_cache: Arc::new(DashMap::new()),
@@ -206,7 +194,7 @@ fn load_config(path: &str) -> Result<Config> {
 fn build_templates() -> Result<JinjaEnv<'static>> {
     let mut env = JinjaEnv::new();
     env.set_auto_escape_callback(|name| {
-        if name.ends_with(".html") {
+        if name.ends_with(".jinja") {
             minijinja::AutoEscape::Html
         } else {
             minijinja::AutoEscape::None
@@ -215,98 +203,68 @@ fn build_templates() -> Result<JinjaEnv<'static>> {
 
     // Embed templates at compile time
     env.add_template(
-        "base.html",
-        include_str!("../../../crates/web/templates/base.html"),
+        "base.jinja",
+        include_str!("../../../crates/web/templates/base.jinja"),
     )?;
     env.add_template(
-        "login.html",
-        include_str!("../../../crates/web/templates/login.html"),
+        "login.jinja",
+        include_str!("../../../crates/web/templates/login.jinja"),
     )?;
     env.add_template(
-        "index.html",
-        include_str!("../../../crates/web/templates/index.html"),
+        "index.jinja",
+        include_str!("../../../crates/web/templates/index.jinja"),
     )?;
     env.add_template(
-        "site.html",
-        include_str!("../../../crates/web/templates/site.html"),
+        "site.jinja",
+        include_str!("../../../crates/web/templates/site.jinja"),
     )?;
     env.add_template(
-        "events.html",
-        include_str!("../../../crates/web/templates/events.html"),
+        "site_settings.jinja",
+        include_str!("../../../crates/web/templates/site_settings.jinja"),
     )?;
     env.add_template(
-        "funnels.html",
-        include_str!("../../../crates/web/templates/funnels.html"),
+        "events.jinja",
+        include_str!("../../../crates/web/templates/events.jinja"),
     )?;
     env.add_template(
-        "partials/top_pages.html",
-        include_str!("../../../crates/web/templates/partials/top_pages.html"),
+        "funnels.jinja",
+        include_str!("../../../crates/web/templates/funnels.jinja"),
     )?;
     env.add_template(
-        "partials/top_referrers.html",
-        include_str!("../../../crates/web/templates/partials/top_referrers.html"),
+        "partials/top_pages.jinja",
+        include_str!("../../../crates/web/templates/partials/top_pages.jinja"),
     )?;
     env.add_template(
-        "partials/top_countries.html",
-        include_str!("../../../crates/web/templates/partials/top_countries.html"),
+        "partials/top_referrers.jinja",
+        include_str!("../../../crates/web/templates/partials/top_referrers.jinja"),
     )?;
     env.add_template(
-        "partials/top_browsers.html",
-        include_str!("../../../crates/web/templates/partials/top_browsers.html"),
+        "partials/top_countries.jinja",
+        include_str!("../../../crates/web/templates/partials/top_countries.jinja"),
     )?;
     env.add_template(
-        "partials/top_devices.html",
-        include_str!("../../../crates/web/templates/partials/top_devices.html"),
+        "partials/top_browsers.jinja",
+        include_str!("../../../crates/web/templates/partials/top_browsers.jinja"),
     )?;
     env.add_template(
-        "agents.html",
-        include_str!("../../../crates/web/templates/agents.html"),
+        "partials/top_devices.jinja",
+        include_str!("../../../crates/web/templates/partials/top_devices.jinja"),
     )?;
     env.add_template(
-        "agent.html",
-        include_str!("../../../crates/web/templates/agent.html"),
+        "agents.jinja",
+        include_str!("../../../crates/web/templates/agents.jinja"),
     )?;
     env.add_template(
-        "incidents.html",
-        include_str!("../../../crates/web/templates/incidents.html"),
+        "agent.jinja",
+        include_str!("../../../crates/web/templates/agent.jinja"),
     )?;
     env.add_template(
-        "partials/agent_spans.html",
-        include_str!("../../../crates/web/templates/partials/agent_spans.html"),
-    )?;
-
-    // Marketing site
-    env.add_template(
-        "marketing/base.html",
-        include_str!("../../../crates/web/templates/marketing/base.html"),
+        "incidents.jinja",
+        include_str!("../../../crates/web/templates/incidents.jinja"),
     )?;
     env.add_template(
-        "marketing/home.html",
-        include_str!("../../../crates/web/templates/marketing/home.html"),
-    )?;
-    env.add_template(
-        "marketing/web_analytics.html",
-        include_str!("../../../crates/web/templates/marketing/web_analytics.html"),
-    )?;
-    env.add_template(
-        "marketing/ai_firewall.html",
-        include_str!("../../../crates/web/templates/marketing/ai_firewall.html"),
-    )?;
-    env.add_template(
-        "marketing/for_saas.html",
-        include_str!("../../../crates/web/templates/marketing/for_saas.html"),
-    )?;
-    env.add_template(
-        "marketing/for_agencies.html",
-        include_str!("../../../crates/web/templates/marketing/for_agencies.html"),
-    )?;
-    env.add_template(
-        "marketing/for_ai_teams.html",
-        include_str!("../../../crates/web/templates/marketing/for_ai_teams.html"),
-    )?;
-    env.add_template(
-        "marketing/for_regulated.html",
-        include_str!("../../../crates/web/templates/marketing/for_regulated.html"),
+        "partials/agent_spans.jinja",
+        include_str!("../../../crates/web/templates/partials/agent_spans.jinja"),
     )?;
 
     Ok(env)

@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use crate::{
     error::AppError,
-    middleware::auth::{sign_session, SESSION_COOKIE},
+    middleware::auth::{sign_session, verify_session, SESSION_COOKIE},
     state::AppState,
     templates,
 };
@@ -21,8 +21,18 @@ pub struct LoginForm {
     pub password: String,
 }
 
-pub async fn login_page(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, AppError> {
-    templates::render(&state, "login.html", minijinja::context! {})
+pub async fn login_page(
+    State(state): State<Arc<AppState>>,
+    jar: CookieJar,
+) -> Result<impl IntoResponse, AppError> {
+    if jar
+        .get(SESSION_COOKIE)
+        .and_then(|c| verify_session(&state.config.auth.secret_key, c.value()))
+        .is_some()
+    {
+        return Ok(Redirect::to("/app").into_response());
+    }
+    Ok(templates::render(&state, "login.jinja", minijinja::context! {})?.into_response())
 }
 
 pub async fn login_submit(
@@ -35,7 +45,7 @@ pub async fn login_submit(
     let render_invalid = |state: &AppState| -> Result<Response, AppError> {
         Ok(templates::render(
             state,
-            "login.html",
+            "login.jinja",
             minijinja::context! { error => "Invalid credentials" },
         )?
         .into_response())
@@ -75,5 +85,5 @@ pub async fn logout(jar: CookieJar) -> impl IntoResponse {
         .same_site(SameSite::Lax)
         .max_age(Duration::seconds(0))
         .build();
-    (jar.add(cookie), Redirect::to("/"))
+    (jar.add(cookie), Redirect::to("/login"))
 }

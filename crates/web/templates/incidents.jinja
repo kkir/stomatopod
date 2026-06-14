@@ -1,0 +1,32 @@
+{% extends "base.jinja" %} {% block title %}Incidents — Stomatopod{% endblock %}
+{% block content %}
+<div class="page-head">
+    <h1 class="page-title">Incidents</h1>
+</div>
+<div class="card">
+    {% if incidents|length == 0 %}
+    <p class="muted">No incidents recorded.</p>
+    {% else %}
+    <table>
+        <thead>
+            <tr>
+                <th>Opened</th>
+                <th>Agent</th>
+                <th>Trigger</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for inc in incidents %}
+            <tr>
+                <td>{{ inc.opened_at }}</td>
+                <td>{{ inc.agent_id }}</td>
+                <td>{{ inc.trigger_summary }}</td>
+                <td>{{ inc.status }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endblock %}

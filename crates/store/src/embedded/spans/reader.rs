@@ -50,11 +50,19 @@ impl SpanReader {
         self.register_site(site_id).await
     }
 
+    async fn ensure_site_table_available(&self, site_id: &str) -> Result<bool, StoreError> {
+        self.ensure_site_registered(site_id)
+            .await
+            .map_err(StoreError::db)?;
+        Ok(self.registered.read().contains(site_id))
+    }
+
     async fn register_site(&self, site_id: &str) -> Result<()> {
         let site_dir = self.data_dir.join(site_id);
         if !site_dir.exists() {
             return Ok(());
         }
+        let site_dir = site_dir.canonicalize()?;
 
         let url = ListingTableUrl::parse(format!("file://{}/", site_dir.to_string_lossy()))?;
         let file_format =
@@ -76,9 +84,9 @@ impl SpanReader {
 
     pub async fn query_spans(&self, q: &SpanQuery) -> Result<Vec<SpanRow>, StoreError> {
         let site_id_str = q.site_id.to_string();
-        self.ensure_site_registered(&site_id_str)
-            .await
-            .map_err(StoreError::db)?;
+        if !self.ensure_site_table_available(&site_id_str).await? {
+            return Ok(Vec::new());
+        }
 
         let table = table_name(&site_id_str);
         let start = q.since.timestamp_micros();
@@ -134,9 +142,9 @@ impl SpanReader {
         since: chrono::DateTime<chrono::Utc>,
     ) -> Result<Vec<AgentSummary>, StoreError> {
         let site_id_str = site_id.to_string();
-        self.ensure_site_registered(&site_id_str)
-            .await
-            .map_err(StoreError::db)?;
+        if !self.ensure_site_table_available(&site_id_str).await? {
+            return Ok(Vec::new());
+        }
 
         let table = table_name(&site_id_str);
         let start = since.timestamp_micros();
@@ -210,9 +218,9 @@ impl SpanReader {
         agent_session_id: &str,
     ) -> Result<f64, StoreError> {
         let site_id_str = site_id.to_string();
-        self.ensure_site_registered(&site_id_str)
-            .await
-            .map_err(StoreError::db)?;
+        if !self.ensure_site_table_available(&site_id_str).await? {
+            return Ok(0.0);
+        }
 
         let table = table_name(&site_id_str);
         let sql = format!(
@@ -344,4 +352,55 @@ fn rows_from_batches(batches: &[arrow::record_batch::RecordBatch]) -> Vec<SpanRo
 
 fn table_name(site_id: &str) -> String {
     format!("spans_{}", site_id.replace('-', "_"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SpanReader;
+    use chrono::Utc;
+    use stomatopod_core::query::spans::SpanQuery;
+    use tempfile::tempdir;
+    use ulid::Ulid;
+
+    #[test]
+    fn empty_site_span_queries_return_defaults_without_table_errors() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        rt.block_on(async {
+            let temp = tempdir().expect("tempdir");
+            let reader = SpanReader::new(temp.path().to_path_buf())
+                .await
+                .expect("reader init");
+            let site_id = Ulid::new();
+            let since = Utc::now() - chrono::Duration::days(1);
+
+            let spans = reader
+                .query_spans(&SpanQuery {
+                    site_id,
+                    agent_id: None,
+                    session_id: None,
+                    since,
+                    until: Utc::now(),
+                    limit: 100,
+                })
+                .await
+                .expect("query spans");
+            assert!(spans.is_empty());
+
+            let summary = reader
+                .summarize_agents(site_id, since)
+                .await
+                .expect("summarize agents");
+            assert!(summary.is_empty());
+
+            let session_cost = reader
+                .session_cost_usd(site_id, "session-1")
+                .await
+                .expect("session cost");
+            assert_eq!(session_cost, 0.0);
+        });
+    }
 }

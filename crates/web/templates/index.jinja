@@ -1,0 +1,56 @@
+{% extends "base.jinja" %} {% block title %}Sites — Stomatopod{% endblock %} {%
+block content %}
+<div class="page-head">
+    <h1 class="page-title">Your Sites</h1>
+</div>
+
+<details class="reveal mb-3">
+    <summary class="btn btn-primary">+ Add Site</summary>
+    <div class="card">
+        <h2 class="mb-2">Add a new site</h2>
+        <form method="post" action="/app/sites" class="form-row">
+            <div class="field">
+                <label for="site-domain">Domain</label>
+                <input
+                    id="site-domain"
+                    name="domain"
+                    placeholder="example.com"
+                    required
+                />
+            </div>
+            <div class="field">
+                <label for="site-name">Name</label>
+                <input
+                    id="site-name"
+                    name="name"
+                    placeholder="My Site"
+                    required
+                />
+            </div>
+            <button type="submit" class="btn btn-primary">Create</button>
+        </form>
+    </div>
+</details>
+
+{% if sites %}
+<div class="list">
+    {% for site in sites %}
+    <a href="/app/sites/{{ site.id }}" class="card card-link">
+        <div>
+            <div
+                class="item-title"
+                style="view-transition-name: s-{{ site.id }}"
+            >
+                {{ site.name }}
+            </div>
+            <div class="item-sub">{{ site.domain }}</div>
+        </div>
+        <span class="item-arrow">→</span>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card empty">
+    <p>No sites yet. Add your first site to get started.</p>
+</div>
+{% endif %} {% endblock %}

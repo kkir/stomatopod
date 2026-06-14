@@ -206,6 +206,29 @@ async fn delete_site_removes_it() {
 }
 
 #[tokio::test]
+async fn update_site_updates_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let meta = open_meta(&dir).await;
+
+    let org = make_org();
+    meta.create_org(&org).await.unwrap();
+    let mut site = make_site(org.id);
+    meta.create_site(&site).await.unwrap();
+
+    site.name = "Updated Site Name".into();
+    site.domain = "updated.example.com".into();
+    site.timezone = "America/New_York".into();
+    site.is_active = false;
+    meta.update_site(&site).await.unwrap();
+
+    let found = meta.get_site(site.id).await.unwrap().unwrap();
+    assert_eq!(found.name, "Updated Site Name");
+    assert_eq!(found.domain, "updated.example.com");
+    assert_eq!(found.timezone, "America/New_York");
+    assert!(!found.is_active);
+}
+
+#[tokio::test]
 async fn inactive_site_not_returned_by_key_lookup() {
     let dir = tempfile::tempdir().unwrap();
     let meta = open_meta(&dir).await;
