@@ -8,6 +8,7 @@
 mod client;
 mod query;
 mod sites;
+mod skills;
 
 use clap::{Parser, Subcommand};
 
@@ -46,7 +47,13 @@ enum Commands {
     },
     /// Print a machine-readable description of every command (for LLM agents).
     Describe,
+    /// Manage Claude Code skills bundled with spq.
+    Skills {
+        #[command(subcommand)]
+        cmd: skills::SkillsCommand,
+    },
 }
+
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -60,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&describe())?);
             Ok(())
         }
+        Commands::Skills { cmd } => skills::run(cmd),
     }
 }
 
@@ -68,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
 fn describe() -> serde_json::Value {
     serde_json::json!({
         "tool": "spq",
-        "description": "Read-only Stomatopod analytics query CLI for LLM agents.",
+        "description": "Stomatopod analytics CLI for LLM agents: read-only queries plus funnel creation.",
         "auth": {
             "env": "STOMATOPOD_TOKEN",
             "credentials_file": "~/.config/stomatopod/credentials",
@@ -132,6 +140,19 @@ fn describe() -> serde_json::Value {
                     { "name": "--site", "required": true },
                     { "name": "--funnel", "required": true },
                     { "name": "--range", "default": "30d" }
+                ]
+            },
+            {
+                "name": "query funnel-create",
+                "description": "Create a new funnel. Requires a read key (rk_); writes are confined to the key's org/site.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--name", "required": true },
+                    {
+                        "name": "--steps",
+                        "required": true,
+                        "note": "JSON array of step objects: [{\"name\":..,\"event_name\":..,\"filters\":[]}]. Minimum 2 steps."
+                    }
                 ]
             }
         ]

@@ -57,7 +57,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(analytics::top_referrers),
         )
         .route("/api/v1/sites/:site/events", get(analytics::events))
-        .route("/api/v1/sites/:site/funnels", get(analytics::list_funnels))
+        .route(
+            "/api/v1/sites/:site/funnels",
+            get(analytics::list_funnels).post(analytics::create_funnel),
+        )
         .route(
             "/api/v1/sites/:site/funnels/:funnel_id",
             get(analytics::funnel_result),

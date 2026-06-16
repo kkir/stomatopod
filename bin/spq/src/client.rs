@@ -41,6 +41,23 @@ impl ApiClient {
         }
         Ok(resp.json().await?)
     }
+
+    pub async fn post<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let mut req = self.client.post(&url).json(body);
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            anyhow::bail!("API error {}: {}", resp.status(), resp.text().await?);
+        }
+        Ok(resp.json().await?)
+    }
 }
 
 fn dirs_path() -> std::path::PathBuf {

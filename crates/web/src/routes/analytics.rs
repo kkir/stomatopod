@@ -8,10 +8,13 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use ulid::Ulid;
 
-use stomatopod_core::query::{
-    events::EventQuery,
-    funnel::{FunnelQuery, FunnelStep},
-    pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},
+use stomatopod_core::{
+    domain::org::Funnel,
+    query::{
+        events::EventQuery,
+        funnel::{FunnelQuery, FunnelStep},
+        pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},
+    },
 };
 
 use crate::{middleware::auth::Principal, state::AppState};
@@ -291,6 +294,62 @@ pub async fn list_funnels(
     };
     match state.meta.list_funnels(site_id).await {
         Ok(funnels) => Json(serde_json::json!({ "funnels": funnels })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// Body for `POST /api/v1/sites/:site/funnels`. Steps are a real JSON array
+/// (unlike the dashboard form, which posts them as a string field).
+#[derive(Deserialize)]
+pub struct CreateFunnelBody {
+    pub name: String,
+    pub steps: Vec<FunnelStep>,
+}
+
+/// POST /api/v1/sites/:site/funnels  — create a funnel. Read API keys are
+/// permitted (same authorization as queries); the key must be in-org and, if
+/// site-bound, match the target site.
+pub async fn create_funnel(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Json(body): Json<CreateFunnelBody>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    if body.name.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "name is required"})),
+        )
+            .into_response();
+    }
+    if body.steps.len() < 2 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "a funnel needs at least 2 steps"})),
+        )
+            .into_response();
+    }
+    let definition = match serde_json::to_string(&body.steps) {
+        Ok(d) => d,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    let funnel = Funnel {
+        id: Ulid::new(),
+        site_id,
+        name: body.name,
+        definition,
+        created_at: chrono::Utc::now(),
+    };
+    match state.meta.create_funnel(&funnel).await {
+        Ok(_) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(&funnel).unwrap()),
+        )
+            .into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

@@ -57,6 +57,18 @@ pub enum QueryCommand {
         #[arg(long)]
         site: String,
     },
+    /// Create a new funnel from a JSON step definition
+    FunnelCreate {
+        #[arg(long)]
+        site: String,
+        /// Display name for the funnel.
+        #[arg(long)]
+        name: String,
+        /// JSON array of steps, e.g.
+        /// '[{"name":"View","event_name":"pageview","filters":[]},{"name":"Signup","event_name":"signup","filters":[]}]'
+        #[arg(long)]
+        steps: String,
+    },
 }
 
 pub async fn run(cmd: &QueryCommand, client: &ApiClient, human: bool) -> anyhow::Result<()> {
@@ -115,6 +127,17 @@ pub async fn run(cmd: &QueryCommand, client: &ApiClient, human: bool) -> anyhow:
         }
         QueryCommand::Funnels { site } => {
             client.get(&format!("/api/v1/sites/{site}/funnels")).await?
+        }
+        QueryCommand::FunnelCreate { site, name, steps } => {
+            let steps_val: Value = serde_json::from_str(steps)
+                .map_err(|e| anyhow::anyhow!("--steps is not valid JSON: {e}"))?;
+            if !steps_val.is_array() {
+                anyhow::bail!("--steps must be a JSON array of step objects");
+            }
+            let body = serde_json::json!({ "name": name, "steps": steps_val });
+            client
+                .post(&format!("/api/v1/sites/{site}/funnels"), &body)
+                .await?
         }
     };
 

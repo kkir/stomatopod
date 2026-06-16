@@ -35,6 +35,8 @@ Authorization: Bearer <key>
 - Read endpoints require a **read** key (or a logged-in dashboard session).
   A read key is confined to its organization, and to a single site if it was
   created site-bound. Cross-organization access returns `403`.
+- A read key may also **create funnels** (see below). This is the one write a
+  read key can perform; it is confined to the same org/site scope as queries.
 
 ## Emitting custom events
 
@@ -101,6 +103,50 @@ curl -H "Authorization: Bearer rk_xxxxxxxx" \
   "https://your-host/api/v1/sites/example.com/top-pages?range=7d&limit=10"
 ```
 
+## Creating funnels
+
+A funnel is a named, ordered list of steps used to measure conversion. Create
+one with a **read** key:
+
+```
+POST /api/v1/sites/:site/funnels
+Authorization: Bearer rk_xxxxxxxx
+Content-Type: application/json
+```
+
+Body:
+
+| Field   | Type   | Required | Notes                                              |
+|---------|--------|----------|----------------------------------------------------|
+| `name`  | string | yes      | Display name for the funnel.                       |
+| `steps` | array  | yes      | Ordered step objects (≥ 2).                        |
+
+Each step object:
+
+| Field        | Type   | Required | Notes                                              |
+|--------------|--------|----------|----------------------------------------------------|
+| `name`       | string | yes      | Step label, e.g. `"Signup"`.                       |
+| `event_name` | string | yes      | Event that satisfies the step, e.g. `"pageview"`.  |
+| `filters`    | array  | yes      | Property filters; `[]` for none.                   |
+
+Returns `201 Created` with the stored funnel (including its `id`), which you can
+then run via `GET /api/v1/sites/:site/funnels/:funnel_id`.
+
+Example:
+
+```bash
+curl -X POST https://your-host/api/v1/sites/example.com/funnels \
+  -H "Authorization: Bearer rk_xxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "name": "Signup flow",
+        "steps": [
+          {"name": "Landing", "event_name": "pageview", "filters": []},
+          {"name": "Signup",  "event_name": "signup",   "filters": []}
+        ]
+      }'
+```
+
 ## CLI
 
 The `spq` binary wraps the read API and is designed for LLM-agent use — it
@@ -124,10 +170,33 @@ spq query top-referrers --site <id|domain> [--range 30d] [--limit 20]
 spq query events        --site <id|domain> [--name signup] [--range 30d]
 spq query funnels       --site <id|domain>
 spq query funnel        --site <id|domain> --funnel <funnel_id> [--range 30d]
+spq query funnel-create --site <id|domain> --name <name> --steps '<json-array>'
+```
+
+`funnel-create` is the one write command: it posts a new funnel and prints the
+created record (with its `id`) as JSON. `--steps` is a JSON array of step
+objects with at least two entries:
+
+```bash
+spq query funnel-create --site example.com --name "Signup flow" \
+  --steps '[{"name":"Landing","event_name":"pageview","filters":[]},
+            {"name":"Signup","event_name":"signup","filters":[]}]'
 ```
 
 Run `spq describe` for a machine-readable JSON manifest of every command and
 argument — useful for wiring `spq` into an LLM agent or MCP server.
+
+### Claude Code skill
+
+Install the bundled Claude Code skill globally so `spq` commands are available
+in any project session:
+
+```bash
+spq skills install          # installs to ~/.claude/skills/spq-analytics/
+spq skills install --force  # overwrite an existing installation
+```
+
+Claude Code picks up the skill on next session start.
 
 ## For LLM agents
 
@@ -139,6 +208,8 @@ To analyze a site's traffic:
    that match the question (`7d` for recent trends, `12m` for year-over-year).
 4. Custom events are queried via `…/events?name=<event>`; emit them via the
    ingest endpoint with an ingest key.
+5. To define a new funnel, `POST …/funnels` (or `spq query funnel-create`) with
+   a read key — list its results afterward via the funnel endpoints.
 
 All responses are JSON; errors use standard HTTP status codes (`401`
 unauthenticated, `403` out of scope, `404` unknown site, `429` rate-limited).
