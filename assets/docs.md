@@ -103,8 +103,9 @@ curl -H "Authorization: Bearer rk_xxxxxxxx" \
 
 ## CLI
 
-The `stomatopod` binary wraps the read API and is designed for LLM-agent use —
-it emits JSON by default (`--human` for a table).
+The `spq` binary wraps the read API and is designed for LLM-agent use — it
+emits JSON by default (`--human` for a table). It is a separate binary from the
+`stomatopod` server.
 
 Set the credential once:
 
@@ -116,13 +117,17 @@ export STOMATOPOD_SERVER=https://your-host  # defaults to http://localhost:8080
 Commands:
 
 ```bash
-stomatopod query pageviews    --site <id|domain> [--range 30d] [--granularity day]
-stomatopod query top-pages    --site <id|domain> [--range 30d] [--limit 20]
-stomatopod query top-referrers --site <id|domain> [--range 30d] [--limit 20]
-stomatopod query events       --site <id|domain> [--name signup] [--range 30d]
-stomatopod query funnels      --site <id|domain>
-stomatopod query funnel       --site <id|domain> --funnel <funnel_id> [--range 30d]
+spq sites
+spq query pageviews     --site <id|domain> [--range 30d] [--granularity day]
+spq query top-pages     --site <id|domain> [--range 30d] [--limit 20]
+spq query top-referrers --site <id|domain> [--range 30d] [--limit 20]
+spq query events        --site <id|domain> [--name signup] [--range 30d]
+spq query funnels       --site <id|domain>
+spq query funnel        --site <id|domain> --funnel <funnel_id> [--range 30d]
 ```
+
+Run `spq describe` for a machine-readable JSON manifest of every command and
+argument — useful for wiring `spq` into an LLM agent or MCP server.
 
 ## For LLM agents
 

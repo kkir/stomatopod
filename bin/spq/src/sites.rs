@@ -1,7 +1,7 @@
 use clap::Subcommand;
 use serde_json::Value;
 
-use super::client::ApiClient;
+use crate::client::ApiClient;
 
 #[derive(Subcommand)]
 pub enum SitesCommand {

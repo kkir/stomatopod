@@ -3972,9 +3972,6 @@ dependencies = [
  "dashmap",
  "hex",
  "minijinja",
- "reqwest",
- "serde",
- "serde_json",
  "stomatopod-core",
  "stomatopod-ingest",
  "stomatopod-query",
@@ -3984,6 +3981,18 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ulid",
+]
+
+[[package]]
+name = "stomatopod-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
