@@ -45,8 +45,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     // Server-side custom event ingest. Bearer-auth'd inline via an ingest
     // API key (handler resolves the site from the key). No CORS — calls
     // come from backends, not browsers.
-    let key_ingest_routes =
-        Router::new().route("/api/v1/ingest", post(api::handle_key_ingest));
+    let key_ingest_routes = Router::new().route("/api/v1/ingest", post(api::handle_key_ingest));
 
     // Analytics JSON API routes (bearer token or session auth)
     let analytics_routes = Router::new()

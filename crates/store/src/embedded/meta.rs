@@ -835,9 +835,12 @@ impl MetaStore for SqliteMeta {
 
     async fn delete_api_key(&self, id: Ulid) -> Result<(), StoreError> {
         db!(self.conn, |conn: &Connection| {
-            conn.execute("DELETE FROM api_keys WHERE id = ?1", params![id.to_string()])
-                .map(|_| ())
-                .map_err(StoreError::db)
+            conn.execute(
+                "DELETE FROM api_keys WHERE id = ?1",
+                params![id.to_string()],
+            )
+            .map(|_| ())
+            .map_err(StoreError::db)
         })
     }
 

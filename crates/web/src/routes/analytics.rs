@@ -61,7 +61,11 @@ async fn resolve_authorized_site(
     site: &str,
 ) -> Result<Ulid, Response> {
     let site_id = resolve_site_id(state, site).await.ok_or_else(not_found)?;
-    if let Principal::ApiKey { org_id, site_id: key_site } = principal {
+    if let Principal::ApiKey {
+        org_id,
+        site_id: key_site,
+    } = principal
+    {
         if let Some(ks) = key_site {
             if *ks != site_id {
                 return Err(forbidden());

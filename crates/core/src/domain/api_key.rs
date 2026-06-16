@@ -85,7 +85,12 @@ impl ApiKey {
         (plaintext, display_prefix, key_hash)
     }
 
-    fn new(scope: ApiKeyScope, org_id: Ulid, site_id: Option<Ulid>, name: String) -> (Self, String) {
+    fn new(
+        scope: ApiKeyScope,
+        org_id: Ulid,
+        site_id: Option<Ulid>,
+        name: String,
+    ) -> (Self, String) {
         let (plaintext, display_prefix, key_hash) = Self::generate(scope);
         let key = ApiKey {
             id: Ulid::new(),

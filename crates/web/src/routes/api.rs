@@ -215,7 +215,11 @@ pub async fn docs_page(
             HeadingLevel::H6 => 6,
         };
         if lvl == 2 || lvl == 3 {
-            toc.push(TocItem { level: lvl, text, slug });
+            toc.push(TocItem {
+                level: lvl,
+                text,
+                slug,
+            });
         }
         i = j + 1;
     }

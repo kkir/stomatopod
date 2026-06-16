@@ -48,8 +48,11 @@ fn build_templates() -> Environment<'static> {
         include_str!("../templates/site_settings.jinja"),
     )
     .unwrap();
-    env.add_template("api_keys.jinja", include_str!("../templates/api_keys.jinja"))
-        .unwrap();
+    env.add_template(
+        "api_keys.jinja",
+        include_str!("../templates/api_keys.jinja"),
+    )
+    .unwrap();
     env.add_template("keys.jinja", include_str!("../templates/keys.jinja"))
         .unwrap();
     env.add_template("docs.jinja", include_str!("../templates/docs.jinja"))
@@ -1099,7 +1102,9 @@ async fn ingest_key_accepts_valid_bearer() {
         .uri("/api/v1/ingest")
         .header("authorization", format!("Bearer {plaintext}"))
         .header("content-type", "application/json")
-        .body(Body::from(r#"{"name":"signup","properties":{"plan":"pro"}}"#))
+        .body(Body::from(
+            r#"{"name":"signup","properties":{"plan":"pro"}}"#,
+        ))
         .unwrap();
 
     let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
@@ -1140,11 +1145,8 @@ async fn ingest_rejects_read_scope_key() {
     let site = make_site(org.id);
     ctx.backend.meta.create_site(&site).await.unwrap();
 
-    let (key, plaintext) = stomatopod_core::domain::api_key::ApiKey::new_read(
-        org.id,
-        Some(site.id),
-        "agent".into(),
-    );
+    let (key, plaintext) =
+        stomatopod_core::domain::api_key::ApiKey::new_read(org.id, Some(site.id), "agent".into());
     ctx.backend.meta.create_api_key(&key).await.unwrap();
 
     let req = Request::builder()
