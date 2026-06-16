@@ -1130,6 +1130,112 @@ details.reveal {
   font-variant-numeric: tabular-nums;
 }
 
+/* ===== Funnel Builder ===== */
+.fb-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 12px;
+}
+
+.fb-step {
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.fb-step-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 12px;
+  background: rgba(45, 212, 191, 0.04);
+  border-bottom: 1px solid var(--border-2);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.fb-step-num {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--teal-hi);
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.fb-step-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fb-fields {
+  display: flex;
+  gap: 10px;
+
+  & .field {
+    flex: 1;
+    margin-bottom: 0;
+  }
+}
+
+.fb-filter-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+
+  & select {
+    flex: 0 0 auto;
+  }
+
+  & input {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.fb-remove-btn {
+  background: transparent;
+  border: 0;
+  color: var(--muted-2);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 6px;
+  transition: color 140ms, background 140ms;
+  flex-shrink: 0;
+
+  &:hover {
+    color: var(--red);
+    background: rgba(251, 113, 133, 0.1);
+  }
+}
+
+.fb-add-filter-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+  color: var(--muted);
+  border-color: var(--border);
+  width: fit-content;
+}
+
+.fb-connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  color: var(--muted-2);
+  font-size: 13px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.fb-add-step-btn {
+  margin-bottom: 16px;
+}
+
 /* ===== Status pill ===== */
 .pill {
   display: inline-flex;
