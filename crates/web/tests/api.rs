@@ -52,6 +52,8 @@ fn build_templates() -> Environment<'static> {
         .unwrap();
     env.add_template("keys.jinja", include_str!("../templates/keys.jinja"))
         .unwrap();
+    env.add_template("docs.jinja", include_str!("../templates/docs.jinja"))
+        .unwrap();
     env.add_template("events.jinja", include_str!("../templates/events.jinja"))
         .unwrap();
     env.add_template("funnels.jinja", include_str!("../templates/funnels.jinja"))
@@ -1295,4 +1297,60 @@ async fn global_create_ingest_key_requires_site() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
     assert!(body.contains("rk_"));
+}
+
+// ---- Docs ----
+
+#[tokio::test]
+async fn llms_txt_is_public_markdown() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/llms.txt")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .contains("markdown"));
+    let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    assert!(body.contains("Stomatopod Documentation"));
+    assert!(body.contains("/api/v1/ingest"));
+}
+
+#[tokio::test]
+async fn docs_page_renders_html_for_authed_user() {
+    let ctx = setup().await;
+    let user_id = Ulid::new().to_string();
+    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
+    let req = Request::builder()
+        .uri("/app/docs")
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    // Markdown was rendered to HTML (headings became tags, not literal '#').
+    assert!(body.contains("<h2"));
+    assert!(body.contains("Emitting custom events"));
+    // Headings carry anchor ids and the right-side ToC links to them.
+    assert!(body.contains("id=\"emitting-custom-events\""));
+    assert!(body.contains("class=\"doc-toc\""));
+    assert!(body.contains("href=\"#emitting-custom-events\""));
+}
+
+#[tokio::test]
+async fn docs_page_requires_auth() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/app/docs")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    // Dashboard routes redirect unauthenticated users to /login.
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
 }

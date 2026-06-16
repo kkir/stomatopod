@@ -33,7 +33,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/",
             get(|| async { axum::response::Redirect::to("/login") }),
         )
-        .route("/app.css", get(api::dashboard_css));
+        .route("/app.css", get(api::dashboard_css))
+        .route("/llms.txt", get(api::llms_txt));
 
     // Sentinel span ingest. Bearer-auth'd via sentinel_tokens (handler
     // checks the header itself; no middleware needed). No CORS since
@@ -75,6 +76,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     // Protected dashboard routes.
     let dashboard_routes = Router::new()
         .route("/app", get(dashboard::index))
+        .route("/app/docs", get(api::docs_page))
         .route(
             "/app/sites",
             get(sites::sites_list).post(sites::create_site),

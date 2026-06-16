@@ -232,6 +232,10 @@ fn build_templates() -> Result<JinjaEnv<'static>> {
         include_str!("../../../crates/web/templates/keys.jinja"),
     )?;
     env.add_template(
+        "docs.jinja",
+        include_str!("../../../crates/web/templates/docs.jinja"),
+    )?;
+    env.add_template(
         "events.jinja",
         include_str!("../../../crates/web/templates/events.jinja"),
     )?;

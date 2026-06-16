@@ -121,6 +121,116 @@ pub async fn tracker_js() -> impl IntoResponse {
     )
 }
 
+static DOCS_MD: &str = include_str!("../../../../assets/docs.md");
+
+/// `GET /llms.txt` — canonical product/API documentation as Markdown, for LLM
+/// agents and other machine consumers. Public (no secrets), following the
+/// llms.txt convention.
+pub async fn llms_txt() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "text/markdown; charset=utf-8"),
+            (header::CACHE_CONTROL, "public, max-age=600"),
+        ],
+        DOCS_MD,
+    )
+}
+
+/// One entry in the docs table of contents (right-side anchor nav).
+#[derive(serde::Serialize)]
+struct TocItem {
+    level: u8,
+    text: String,
+    slug: String,
+}
+
+/// URL-safe anchor slug from heading text: lowercase alphanumerics, other
+/// runs collapsed to single dashes.
+fn slugify(s: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = true; // suppress leading dash
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+/// `GET /app/docs` — the same documentation rendered to HTML for humans, with
+/// a right-side anchor nav built from the H2/H3 headings.
+pub async fn docs_page(
+    State(state): State<Arc<AppState>>,
+) -> Result<axum::response::Response, crate::error::AppError> {
+    use pulldown_cmark::{html, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+    use std::collections::HashMap;
+
+    let mut events: Vec<Event> = Parser::new_ext(DOCS_MD, Options::all()).collect();
+    let mut toc: Vec<TocItem> = Vec::new();
+    let mut seen: HashMap<String, u32> = HashMap::new();
+
+    let mut i = 0;
+    while i < events.len() {
+        let Event::Start(Tag::Heading { level, .. }) = events[i] else {
+            i += 1;
+            continue;
+        };
+
+        // Accumulate the heading's text up to its closing tag.
+        let mut text = String::new();
+        let mut j = i + 1;
+        while j < events.len() {
+            match &events[j] {
+                Event::Text(t) | Event::Code(t) => text.push_str(t),
+                Event::End(TagEnd::Heading(_)) => break,
+                _ => {}
+            }
+            j += 1;
+        }
+
+        // Unique slug, then stamp it onto the heading so the anchor resolves.
+        let base = slugify(&text);
+        let n = seen.entry(base.clone()).or_insert(0);
+        let slug = if *n == 0 {
+            base.clone()
+        } else {
+            format!("{base}-{n}")
+        };
+        *n += 1;
+        if let Event::Start(Tag::Heading { id, .. }) = &mut events[i] {
+            *id = Some(CowStr::from(slug.clone()));
+        }
+
+        let lvl = match level {
+            HeadingLevel::H1 => 1,
+            HeadingLevel::H2 => 2,
+            HeadingLevel::H3 => 3,
+            HeadingLevel::H4 => 4,
+            HeadingLevel::H5 => 5,
+            HeadingLevel::H6 => 6,
+        };
+        if lvl == 2 || lvl == 3 {
+            toc.push(TocItem { level: lvl, text, slug });
+        }
+        i = j + 1;
+    }
+
+    let mut body = String::new();
+    html::push_html(&mut body, events.into_iter());
+
+    let html = crate::templates::render(
+        &state,
+        "docs.jinja",
+        minijinja::context! { content => body, toc => toc },
+    )?;
+    Ok(html.into_response())
+}
+
 static DASHBOARD_CSS: &str = include_str!("../../../../assets/dashboard.css");
 
 /// Shared dashboard stylesheet. Short max-age (vs the tracker's immutable
