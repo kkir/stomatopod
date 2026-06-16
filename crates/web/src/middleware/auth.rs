@@ -7,10 +7,29 @@ use axum::{
 };
 use axum_extra::extract::cookie::CookieJar;
 use std::sync::Arc;
+use ulid::Ulid;
 
-use crate::state::AppState;
+use stomatopod_core::domain::api_key::{ApiKey, ApiKeyScope};
+
+use crate::{routes::api::resolve_api_key, state::AppState};
 
 pub const SESSION_COOKIE: &str = "sp_session";
+
+/// Who authenticated a request, propagated to handlers via a request
+/// extension so they can enforce per-key authorization.
+#[derive(Debug, Clone)]
+pub enum Principal {
+    /// Signed-session bearer token (a logged-in user identity).
+    User(String),
+    /// A read-scoped API key, restricted to its org and (optionally) site.
+    ApiKey {
+        org_id: Ulid,
+        /// `None` = org-wide read access; `Some` = a single site.
+        site_id: Option<Ulid>,
+    },
+    /// Authenticated via the dashboard session cookie (same-origin).
+    Session,
+}
 
 fn session_key(secret: &str) -> [u8; 32] {
     blake3::derive_key("stomatopod session signing key v1", secret.as_bytes())
@@ -42,6 +61,13 @@ fn extract_session_cookie(secret: &str, req: &Request) -> bool {
         .is_some()
 }
 
+fn bearer_token(req: &Request) -> Option<&str> {
+    req.headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+}
+
 /// Dashboard middleware: redirects to /login if unauthenticated.
 pub async fn require_auth(
     State(state): State<Arc<AppState>>,
@@ -55,29 +81,51 @@ pub async fn require_auth(
 }
 
 /// API middleware: returns JSON 401 if unauthenticated.
-/// Accepts both session cookies and `Authorization: Bearer <signed_session>` tokens.
+///
+/// Accepts, in order: a signed-session bearer token, a read-scoped API key
+/// (`rk_...`), or the dashboard session cookie. The resolved [`Principal`]
+/// is stored as a request extension so handlers can enforce org/site scope.
 pub async fn require_api_auth(
     State(state): State<Arc<AppState>>,
-    req: Request,
+    mut req: Request,
     next: Next,
 ) -> Response {
     let secret = &state.config.auth.secret_key;
 
-    let has_bearer = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .and_then(|token| verify_session(secret, token))
-        .is_some();
-
-    if !has_bearer && !extract_session_cookie(secret, &req) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": "authentication required"})),
-        )
-            .into_response();
+    // 1. Signed-session bearer (sync, cheap) — try first.
+    if let Some(uid) = bearer_token(&req).and_then(|t| verify_session(secret, t)) {
+        req.extensions_mut().insert(Principal::User(uid));
+        return next.run(req).await;
     }
 
-    next.run(req).await
+    // 2. Read-scoped API key. The `rk_` prefix is a cheap discriminator so
+    //    non-key bearers never incur a store lookup.
+    if let Some(token) = bearer_token(&req) {
+        if token.starts_with("rk_") {
+            let hash = ApiKey::hash(token);
+            match resolve_api_key(&state, &hash).await {
+                Ok(Some(entry)) if entry.scope == ApiKeyScope::Read => {
+                    crate::routes::api::touch_api_key(&state, entry.key_id);
+                    req.extensions_mut().insert(Principal::ApiKey {
+                        org_id: entry.org_id,
+                        site_id: entry.site_id,
+                    });
+                    return next.run(req).await;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // 3. Dashboard session cookie (same-origin fetch).
+    if extract_session_cookie(secret, &req) {
+        req.extensions_mut().insert(Principal::Session);
+        return next.run(req).await;
+    }
+
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(serde_json::json!({"error": "authentication required"})),
+    )
+        .into_response()
 }

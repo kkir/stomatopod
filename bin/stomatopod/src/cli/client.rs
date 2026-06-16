@@ -9,6 +9,10 @@ pub struct ApiClient {
 }
 
 impl ApiClient {
+    /// Builds a client, reading the bearer credential from `STOMATOPOD_TOKEN`
+    /// (falling back to `~/.config/stomatopod/credentials`). For agent/CLI use
+    /// this should be a read-scoped API key (`rk_...`) minted in the dashboard;
+    /// a signed session token also works but is tied to a login.
     pub fn new(base_url: String) -> Self {
         let token = std::env::var("STOMATOPOD_TOKEN").ok().or_else(|| {
             let path = dirs_path();

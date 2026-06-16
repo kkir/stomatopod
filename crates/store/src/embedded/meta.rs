@@ -9,6 +9,7 @@ use ulid::Ulid;
 use stomatopod_core::{
     domain::{
         agent::{Agent, AlertChannel, AlertChannelKind, SentinelToken},
+        api_key::{ApiKey, ApiKeyScope},
         incident::{Incident, IncidentStatus, IncidentTrigger},
         org::{Funnel, Organization, Plan, User, UserRole},
         policy::Policy,
@@ -127,6 +128,20 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_sentinel_tokens_hash ON sentinel_tokens(token_hash);
         CREATE INDEX IF NOT EXISTS idx_sentinel_tokens_site ON sentinel_tokens(site_id);
+
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id             TEXT PRIMARY KEY,
+            org_id         TEXT NOT NULL REFERENCES orgs(id),
+            site_id        TEXT REFERENCES sites(id),
+            name           TEXT NOT NULL,
+            scope          TEXT NOT NULL,
+            key_hash       TEXT UNIQUE NOT NULL,
+            display_prefix TEXT NOT NULL,
+            created_at     TEXT NOT NULL,
+            last_used_at   TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+        CREATE INDEX IF NOT EXISTS idx_api_keys_org ON api_keys(org_id);
 
         CREATE TABLE IF NOT EXISTS alert_channels (
             id              TEXT PRIMARY KEY,
@@ -256,6 +271,28 @@ fn row_to_sentinel_token(row: &rusqlite::Row<'_>) -> rusqlite::Result<SentinelTo
         site_id: Ulid::from_string(&site_id_str).unwrap_or_default(),
         name: row.get(2)?,
         token_hash: row.get(3)?,
+        created_at: parse_utc(&created_at_str),
+        last_used_at: parse_utc_opt(last_used_at_str),
+    })
+}
+
+fn row_to_api_key(row: &rusqlite::Row<'_>) -> rusqlite::Result<ApiKey> {
+    let id_str: String = row.get(0)?;
+    let org_id_str: String = row.get(1)?;
+    let site_id_str: Option<String> = row.get(2)?;
+    let scope_str: String = row.get(4)?;
+    let created_at_str: String = row.get(7)?;
+    let last_used_at_str: Option<String> = row.get(8)?;
+    Ok(ApiKey {
+        id: Ulid::from_string(&id_str).unwrap_or_default(),
+        org_id: Ulid::from_string(&org_id_str).unwrap_or_default(),
+        site_id: site_id_str
+            .as_deref()
+            .and_then(|s| Ulid::from_string(s).ok()),
+        name: row.get(3)?,
+        scope: ApiKeyScope::parse(&scope_str).unwrap_or(ApiKeyScope::Read),
+        key_hash: row.get(5)?,
+        display_prefix: row.get(6)?,
         created_at: parse_utc(&created_at_str),
         last_used_at: parse_utc_opt(last_used_at_str),
     })
@@ -727,6 +764,80 @@ impl MetaStore for SqliteMeta {
             )
             .map(|_| ())
             .map_err(StoreError::db)
+        })
+    }
+
+    // ---- API keys ----
+    async fn create_api_key(&self, key: &ApiKey) -> Result<(), StoreError> {
+        let key = key.clone();
+        db!(self.conn, |conn: &Connection| {
+            conn.execute(
+                "INSERT INTO api_keys
+                    (id, org_id, site_id, name, scope, key_hash, display_prefix, created_at, last_used_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    key.id.to_string(),
+                    key.org_id.to_string(),
+                    key.site_id.map(|s| s.to_string()),
+                    key.name,
+                    key.scope.as_str(),
+                    key.key_hash,
+                    key.display_prefix,
+                    key.created_at.to_rfc3339(),
+                    key.last_used_at.map(|d| d.to_rfc3339()),
+                ],
+            )
+            .map(|_| ())
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn list_api_keys(&self, org_id: Ulid) -> Result<Vec<ApiKey>, StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, org_id, site_id, name, scope, key_hash, display_prefix, created_at, last_used_at
+                     FROM api_keys WHERE org_id = ?1 ORDER BY created_at DESC",
+                )
+                .map_err(StoreError::db)?;
+            let rows = stmt
+                .query_map(params![org_id.to_string()], row_to_api_key)
+                .map_err(StoreError::db)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(StoreError::db)
+        })
+    }
+
+    async fn get_api_key_by_hash(&self, key_hash: &str) -> Result<Option<ApiKey>, StoreError> {
+        let key_hash = key_hash.to_string();
+        db!(self.conn, |conn: &Connection| {
+            conn.query_row(
+                "SELECT id, org_id, site_id, name, scope, key_hash, display_prefix, created_at, last_used_at
+                 FROM api_keys WHERE key_hash = ?1",
+                params![key_hash],
+                row_to_api_key,
+            )
+            .optional()
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn touch_api_key(&self, id: Ulid) -> Result<(), StoreError> {
+        let now = Utc::now().to_rfc3339();
+        db!(self.conn, |conn: &Connection| {
+            conn.execute(
+                "UPDATE api_keys SET last_used_at = ?1 WHERE id = ?2",
+                params![now, id.to_string()],
+            )
+            .map(|_| ())
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn delete_api_key(&self, id: Ulid) -> Result<(), StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            conn.execute("DELETE FROM api_keys WHERE id = ?1", params![id.to_string()])
+                .map(|_| ())
+                .map_err(StoreError::db)
         })
     }
 

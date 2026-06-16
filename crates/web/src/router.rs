@@ -13,8 +13,8 @@ use crate::{
         cors::ingest_cors,
     },
     routes::{
-        agents_dashboard, analytics, api, auth, dashboard, events, funnels, partials, sentinel,
-        sites, spans,
+        agents_dashboard, analytics, api, api_keys, auth, dashboard, events, funnels, partials,
+        sentinel, sites, spans,
     },
     state::AppState,
 };
@@ -40,6 +40,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     // calls come from sidecars, not browsers.
     let span_ingest_routes =
         Router::new().route("/api/v1/spans", post(spans::handle_span_ingest_route));
+
+    // Server-side custom event ingest. Bearer-auth'd inline via an ingest
+    // API key (handler resolves the site from the key). No CORS — calls
+    // come from backends, not browsers.
+    let key_ingest_routes =
+        Router::new().route("/api/v1/ingest", post(api::handle_key_ingest));
 
     // Analytics JSON API routes (bearer token or session auth)
     let analytics_routes = Router::new()
@@ -74,10 +80,26 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(sites::sites_list).post(sites::create_site),
         )
         .route(
+            "/app/keys",
+            get(api_keys::global_keys_page).post(api_keys::global_create_key),
+        )
+        .route(
+            "/app/keys/:key_id/delete",
+            post(api_keys::global_delete_key),
+        )
+        .route(
             "/app/sites/:site_id",
             get(dashboard::site_overview).post(sites::update_site),
         )
         .route("/app/sites/:site_id/settings", get(sites::site_settings))
+        .route(
+            "/app/sites/:site_id/keys",
+            get(api_keys::keys_page).post(api_keys::create_key),
+        )
+        .route(
+            "/app/sites/:site_id/keys/:key_id/delete",
+            post(api_keys::delete_key),
+        )
         .route("/app/sites/:site_id/events", get(events::events_list))
         .route(
             "/app/sites/:site_id/funnels",
@@ -135,6 +157,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let compressed = Router::new()
         .merge(ingest_routes)
         .merge(span_ingest_routes)
+        .merge(key_ingest_routes)
         .merge(analytics_routes)
         .merge(sentinel_control)
         .merge(auth_routes)

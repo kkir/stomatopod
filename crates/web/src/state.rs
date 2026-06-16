@@ -7,7 +7,7 @@ use dashmap::DashMap;
 use minijinja::Environment;
 use stomatopod_core::{
     config::Config,
-    domain::control::ControlEnvelope,
+    domain::{api_key::ApiKeyScope, control::ControlEnvelope},
     traits::{AgentStore, MetaStore, StorageBackend},
 };
 use tokio::sync::{broadcast, mpsc};
@@ -16,6 +16,17 @@ use ulid::Ulid;
 use stomatopod_ingest::geo::GeoLookup;
 
 use crate::alerts::AlertDispatcher;
+
+/// A resolved API key held in the in-memory cache. `key_id` lets cache
+/// hits still update `last_used_at`; `scope`/`site_id` let the same map
+/// back both the ingest and read-auth paths.
+#[derive(Debug, Clone, Copy)]
+pub struct ApiKeyCacheEntry {
+    pub org_id: Ulid,
+    pub site_id: Option<Ulid>,
+    pub key_id: Ulid,
+    pub scope: ApiKeyScope,
+}
 
 pub struct AppState {
     pub backend: Arc<dyn StorageBackend>,
@@ -35,6 +46,9 @@ pub struct AppState {
     /// Sentinel token cache: token_hash → (site_id, token_id). The
     /// token id is stored so cache hits can still update `last_used_at`.
     pub sentinel_token_cache: Arc<DashMap<String, (Ulid, Ulid)>>,
+    /// API key cache: key_hash → resolved key. Serves both the ingest and
+    /// read-auth paths. Evicted on revocation so deletes take effect at once.
+    pub api_key_cache: Arc<DashMap<String, ApiKeyCacheEntry>>,
     /// PII redaction keys applied to span `properties`.
     pub redact_keys: Arc<Vec<String>>,
     /// GeoIP lookup service.

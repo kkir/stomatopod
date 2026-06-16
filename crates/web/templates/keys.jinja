@@ -1,0 +1,119 @@
+{% extends "base.jinja" %}
+{% block title %}API Keys{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1 class="page-title">API Keys</h1>
+  <p class="page-sub">Ingest keys emit custom events from a backend; read keys query analytics (CLI / agents).</p>
+</div>
+
+{% if new_key %}
+<div class="card mb-3" style="border-color: var(--gold);">
+  <div class="section-header"><h2>Copy your new key now</h2></div>
+  <p class="page-sub">This is the only time the full key is shown. Store it somewhere safe — you can't see it again.</p>
+  <div class="form-row" style="align-items: center;">
+    <input class="mono" id="new-key-value" value="{{ new_key }}" readonly style="flex:1;">
+    <button type="button" class="btn btn-primary" onclick="copyKey()">Copy</button>
+  </div>
+</div>
+{% endif %}
+
+<div class="card mb-3">
+  <div class="section-header">
+    <h2>Keys</h2>
+    <form method="get" action="/app/keys" class="form-row" style="margin:0;">
+      <div class="field" style="margin:0;">
+        <label for="filter">Filter</label>
+        <select id="filter" name="filter" onchange="this.form.submit()">
+          <option value="all" {% if filter == 'all' %}selected{% endif %}>All keys</option>
+          <option value="org" {% if filter == 'org' %}selected{% endif %}>Org-wide only</option>
+          {% for s in sites %}
+          <option value="{{ s.id }}" {% if filter == s.id %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+  </div>
+  {% if keys %}
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Prefix</th><th>Scope</th><th>Site</th><th>Last used</th><th>Created</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for key in keys %}
+      <tr>
+        <td>{{ key.name }}</td>
+        <td class="mono">{{ key.display_prefix }}…</td>
+        <td><span class="pill {% if key.scope == 'ingest' %}warn{% else %}ok{% endif %}">{{ key.scope }}</span></td>
+        <td>{{ key.site_label }}</td>
+        <td>
+          {% if key.last_used_at %}
+          <time class="js-local-time" datetime="{{ key.last_used_at }}">{{ key.last_used_at }}</time>
+          {% else %}never{% endif %}
+        </td>
+        <td><time class="js-local-time" datetime="{{ key.created_at }}">{{ key.created_at }}</time></td>
+        <td>
+          <form method="post" action="/app/keys/{{ key.id }}/delete"
+                onsubmit="return confirm('Revoke this key? Any client using it will stop working immediately.')">
+            <button type="submit" class="btn btn-danger btn-sm">Revoke</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="page-sub">No API keys match this filter.</p>
+  {% endif %}
+</div>
+
+<details class="reveal">
+  <summary class="btn btn-primary">+ Create API key</summary>
+  <div class="card mt-2">
+    <h2 class="mb-2">New API key</h2>
+    <form method="post" action="/app/keys">
+      <div class="field">
+        <label for="key-name">Name</label>
+        <input id="key-name" name="name" placeholder="e.g. Production backend" required>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label for="key-scope">Scope</label>
+          <select id="key-scope" name="scope" required>
+            <option value="read">Read — query analytics (CLI / agents)</option>
+            <option value="ingest">Ingest — emit custom events from a backend</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="key-site">Site</label>
+          <select id="key-site" name="site" required>
+            <option value="org">Org-wide (read keys only)</option>
+            {% for s in sites %}
+            <option value="{{ s.id }}">{{ s.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <p class="page-sub">Ingest keys must target a single site. Read keys may be org-wide or site-bound.</p>
+      <button type="submit" class="btn btn-primary mt-2">Create key</button>
+    </form>
+  </div>
+</details>
+
+<script>
+(() => {
+  for (const el of document.querySelectorAll(".js-local-time")) {
+    const iso = el.getAttribute("datetime");
+    if (!iso) continue;
+    const dt = new Date(iso);
+    if (Number.isNaN(dt.getTime())) continue;
+    el.textContent = dt.toLocaleString();
+    el.title = iso;
+  }
+})();
+function copyKey() {
+  const el = document.getElementById("new-key-value");
+  el.select();
+  navigator.clipboard.writeText(el.value);
+}
+</script>
+{% endblock %}

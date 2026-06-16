@@ -157,6 +157,7 @@ async fn serve(cfg: Config) -> Result<()> {
         span_ingest_tx,
         site_cache: Arc::new(DashMap::new()),
         sentinel_token_cache: Arc::new(DashMap::new()),
+        api_key_cache: Arc::new(DashMap::new()),
         redact_keys,
         geo,
         control_channels: dashmap::DashMap::new(),
@@ -221,6 +222,14 @@ fn build_templates() -> Result<JinjaEnv<'static>> {
     env.add_template(
         "site_settings.jinja",
         include_str!("../../../crates/web/templates/site_settings.jinja"),
+    )?;
+    env.add_template(
+        "api_keys.jinja",
+        include_str!("../../../crates/web/templates/api_keys.jinja"),
+    )?;
+    env.add_template(
+        "keys.jinja",
+        include_str!("../../../crates/web/templates/keys.jinja"),
     )?;
     env.add_template(
         "events.jinja",

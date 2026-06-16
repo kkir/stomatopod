@@ -22,7 +22,11 @@ pub enum Commands {
         #[arg(long)]
         port: Option<u16>,
     },
-    /// Query analytics data (outputs JSON for AI agent consumption)
+    /// Query analytics data (outputs JSON for AI agent consumption).
+    ///
+    /// Authenticates with the bearer credential in STOMATOPOD_TOKEN (or
+    /// ~/.config/stomatopod/credentials). Use a read-scoped API key (`rk_...`)
+    /// minted under a site's "API Keys" page in the dashboard.
     Query {
         #[command(subcommand)]
         cmd: query::QueryCommand,
