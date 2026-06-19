@@ -32,8 +32,8 @@ use stomatopod_core::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
         pageviews::{
-            Granularity, PageviewsQuery, PageviewsResult, TimeBucket, TimeRange, TopList,
-            TopListField, TopRow,
+            Filter, FilterOp, Granularity, PageviewsQuery, PageviewsResult, TimeBucket, TimeRange,
+            TopList, TopListField, TopRow,
         },
         spans::{AgentSummary, SpanQuery, SpanRow},
     },
@@ -141,18 +141,23 @@ impl StorageBackend for PostgresBackend {
 
     async fn query_pageviews(&self, q: &PageviewsQuery) -> Result<PageviewsResult, StoreError> {
         let bucket = pg_date_trunc(&q.granularity);
+        let (filter_sql, filter_vals) = pg_filter_clause(&q.filters, 4);
         let sql = format!(
             "SELECT date_trunc('{bucket}', timestamp) AS bucket, \
                     COUNT(*) FILTER (WHERE kind = 'pageview')::BIGINT AS pageviews, \
                     COUNT(DISTINCT session_id)::BIGINT AS sessions \
              FROM events \
-             WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
+             WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 {filter_sql} \
              GROUP BY 1 ORDER BY 1"
         );
-        let rows = sqlx::query(&sql)
+        let mut query = sqlx::query(&sql)
             .bind(q.site_id.to_string())
             .bind(q.range.start)
-            .bind(q.range.end)
+            .bind(q.range.end);
+        for val in &filter_vals {
+            query = query.bind(val.clone());
+        }
+        let rows = query
             .fetch_all(&self.pool)
             .await
             .map_err(StoreError::query)?;
@@ -180,8 +185,9 @@ impl StorageBackend for PostgresBackend {
         field: TopListField,
         range: &TimeRange,
         limit: u32,
+        filters: &[Filter],
     ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, field.column())
+        self.query_top_field(site_id, range, limit, field.column(), filters)
             .await
     }
 
@@ -267,28 +273,57 @@ impl PostgresBackend {
         range: &TimeRange,
         limit: u32,
         field: &str,
+        filters: &[Filter],
     ) -> Result<TopList, StoreError> {
         // `field` is a static identifier from the trait surface, never
-        // user input — see top-level trait docs.
+        // user input — see top-level trait docs. Filter values are bound as
+        // parameters ($4+), so they're injection-safe too.
+        let (filter_sql, filter_vals) = pg_filter_clause(filters, 4);
         let sql = format!(
             "SELECT COALESCE({field}, 'Direct / None') AS value, \
                     COUNT(*)::BIGINT AS pageviews, \
                     COUNT(DISTINCT session_id)::BIGINT AS sessions \
              FROM events \
              WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
-               AND kind = 'pageview' \
+               AND kind = 'pageview' {filter_sql} \
              GROUP BY 1 ORDER BY pageviews DESC \
              LIMIT {limit}"
         );
-        let rows = sqlx::query(&sql)
+        let mut query = sqlx::query(&sql)
             .bind(site_id.to_string())
             .bind(range.start)
-            .bind(range.end)
+            .bind(range.end);
+        for val in &filter_vals {
+            query = query.bind(val.clone());
+        }
+        let rows = query
             .fetch_all(&self.pool)
             .await
             .map_err(StoreError::query)?;
         top_list_from_rows(rows)
     }
+}
+
+/// Build the `AND <col> <op> $N` fragment for analytics filters, plus the
+/// ordered list of values to bind. `start_idx` is the first placeholder
+/// number (after the fixed site/start/end binds). Columns are static enum
+/// values; values are always bound, never interpolated.
+fn pg_filter_clause(filters: &[Filter], start_idx: usize) -> (String, Vec<String>) {
+    let mut frag = String::new();
+    let mut vals = Vec::with_capacity(filters.len());
+    for (i, f) in filters.iter().enumerate() {
+        let idx = start_idx + i;
+        frag.push_str(&format!(
+            " AND {} {} ${idx}",
+            f.field.column(),
+            f.op.sql_operator()
+        ));
+        if matches!(f.op, FilterOp::Contains | FilterOp::StartsWith) {
+            frag.push_str(" ESCAPE '\\'");
+        }
+        vals.push(f.sql_value());
+    }
+    (frag, vals)
 }
 
 fn pg_date_trunc(g: &Granularity) -> &'static str {

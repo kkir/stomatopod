@@ -1,0 +1,22 @@
+<table>
+  <thead>
+    <tr>
+      <th>Region</th>
+      <th>Sessions</th>
+      <th>%</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.value }}</td>
+      <td>{{ row.sessions }}</td>
+      <td>{{ "%.1f" | format(row.pct) }}%</td>
+    </tr>
+    {% else %}
+    <tr>
+      <td colspan="3" class="empty-cell">No data</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>

@@ -85,7 +85,9 @@ fn describe() -> serde_json::Value {
         "conventions": {
             "site": "A site ULID or its domain.",
             "range": ["7d", "30d", "90d", "12m"],
+            "custom_range": "Pass --from/--to as YYYY-MM-DD to override the preset range.",
             "granularity": ["hour", "day", "week", "month"],
+            "filter": "Repeatable --filter as field:op:value. Fields: url, referrer, country, region, browser, os, device_type, utm_source, utm_medium, utm_campaign, utm_term, utm_content, event_name. Ops: eq, not_eq, contains, starts_with.",
             "output": "JSON on stdout unless --human is passed."
         },
         "commands": [
@@ -96,7 +98,11 @@ fn describe() -> serde_json::Value {
                 "args": [
                     { "name": "--site", "required": true },
                     { "name": "--range", "default": "30d" },
-                    { "name": "--granularity", "default": "day" }
+                    { "name": "--from", "required": false, "note": "YYYY-MM-DD; with --to overrides --range." },
+                    { "name": "--to", "required": false, "note": "YYYY-MM-DD." },
+                    { "name": "--granularity", "default": "day" },
+                    { "name": "--compare", "required": false, "note": "Flag: attach prior-period totals under `comparison`." },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
                 ]
             },
             {
@@ -105,7 +111,10 @@ fn describe() -> serde_json::Value {
                 "args": [
                     { "name": "--site", "required": true },
                     { "name": "--range", "default": "30d" },
-                    { "name": "--limit", "default": "20" }
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
                 ]
             },
             {
@@ -114,7 +123,34 @@ fn describe() -> serde_json::Value {
                 "args": [
                     { "name": "--site", "required": true },
                     { "name": "--range", "default": "30d" },
-                    { "name": "--limit", "default": "20" }
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query top-os",
+                "description": "Top operating systems by traffic.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query top-regions",
+                "description": "Top regions by traffic.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
                 ]
             },
             {
@@ -124,6 +160,8 @@ fn describe() -> serde_json::Value {
                     { "name": "--site", "required": true },
                     { "name": "--name", "required": false },
                     { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
                     { "name": "--limit", "default": "20" }
                 ]
             },

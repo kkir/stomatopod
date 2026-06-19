@@ -11,8 +11,18 @@ pub enum QueryCommand {
         site: String,
         #[arg(long, default_value = "30d")]
         range: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
         #[arg(long, default_value = "day")]
         granularity: String,
+        /// Compare to the immediately preceding, equal-length period.
+        #[arg(long)]
+        compare: bool,
+        /// Filter as `field:op:value` (repeatable). E.g. `country:eq:US`.
+        #[arg(long = "filter")]
+        filters: Vec<String>,
     },
     /// Top pages by traffic
     TopPages {
@@ -20,8 +30,14 @@ pub enum QueryCommand {
         site: String,
         #[arg(long, default_value = "30d")]
         range: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
         #[arg(long, default_value = "20")]
         limit: u32,
+        #[arg(long = "filter")]
+        filters: Vec<String>,
     },
     /// Top referrers
     TopReferrers {
@@ -29,8 +45,44 @@ pub enum QueryCommand {
         site: String,
         #[arg(long, default_value = "30d")]
         range: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
         #[arg(long, default_value = "20")]
         limit: u32,
+        #[arg(long = "filter")]
+        filters: Vec<String>,
+    },
+    /// Top operating systems
+    TopOs {
+        #[arg(long)]
+        site: String,
+        #[arg(long, default_value = "30d")]
+        range: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, default_value = "20")]
+        limit: u32,
+        #[arg(long = "filter")]
+        filters: Vec<String>,
+    },
+    /// Top regions
+    TopRegions {
+        #[arg(long)]
+        site: String,
+        #[arg(long, default_value = "30d")]
+        range: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, default_value = "20")]
+        limit: u32,
+        #[arg(long = "filter")]
+        filters: Vec<String>,
     },
     /// Custom events breakdown
     Events {
@@ -40,6 +92,10 @@ pub enum QueryCommand {
         name: Option<String>,
         #[arg(long, default_value = "30d")]
         range: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
         #[arg(long, default_value = "20")]
         limit: u32,
     },
@@ -71,46 +127,129 @@ pub enum QueryCommand {
     },
 }
 
+/// Range portion of a query string: a `from`+`to` pair wins over the preset.
+fn range_qs(range: &str, from: &Option<String>, to: &Option<String>) -> String {
+    match (from, to) {
+        (Some(f), Some(t)) => format!("from={}&to={}", enc(f), enc(t)),
+        _ => format!("range={range}"),
+    }
+}
+
+/// `&filter=field:op:value` fragment for each filter, URL-encoded.
+fn filters_qs(filters: &[String]) -> String {
+    filters
+        .iter()
+        .map(|f| format!("&filter={}", enc(f)))
+        .collect()
+}
+
+/// Percent-encode a query-string component (RFC 3986 unreserved set passes
+/// through).
+fn enc(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 pub async fn run(cmd: &QueryCommand, client: &ApiClient, human: bool) -> anyhow::Result<()> {
     let result: Value = match cmd {
         QueryCommand::Pageviews {
             site,
             range,
+            from,
+            to,
             granularity,
+            compare,
+            filters,
         } => {
+            let rq = range_qs(range, from, to);
+            let fq = filters_qs(filters);
+            let cq = if *compare { "&compare=1" } else { "" };
             client
                 .get(&format!(
-                    "/api/v1/sites/{site}/pageviews?range={range}&granularity={granularity}"
+                    "/api/v1/sites/{site}/pageviews?{rq}&granularity={granularity}{fq}{cq}"
                 ))
                 .await?
         }
-        QueryCommand::TopPages { site, range, limit } => {
-            client
-                .get(&format!(
-                    "/api/v1/sites/{site}/top-pages?range={range}&limit={limit}"
-                ))
-                .await?
+        QueryCommand::TopPages {
+            site,
+            range,
+            from,
+            to,
+            limit,
+            filters,
+        } => top_query(client, site, "top-pages", range, from, to, *limit, filters).await?,
+        QueryCommand::TopReferrers {
+            site,
+            range,
+            from,
+            to,
+            limit,
+            filters,
+        } => {
+            top_query(
+                client,
+                site,
+                "top-referrers",
+                range,
+                from,
+                to,
+                *limit,
+                filters,
+            )
+            .await?
         }
-        QueryCommand::TopReferrers { site, range, limit } => {
-            client
-                .get(&format!(
-                    "/api/v1/sites/{site}/top-referrers?range={range}&limit={limit}"
-                ))
-                .await?
+        QueryCommand::TopOs {
+            site,
+            range,
+            from,
+            to,
+            limit,
+            filters,
+        } => top_query(client, site, "top-os", range, from, to, *limit, filters).await?,
+        QueryCommand::TopRegions {
+            site,
+            range,
+            from,
+            to,
+            limit,
+            filters,
+        } => {
+            top_query(
+                client,
+                site,
+                "top-regions",
+                range,
+                from,
+                to,
+                *limit,
+                filters,
+            )
+            .await?
         }
         QueryCommand::Events {
             site,
             name,
             range,
+            from,
+            to,
             limit,
         } => {
+            let rq = range_qs(range, from, to);
             let name_param = name
                 .as_deref()
-                .map(|n| format!("&name={n}"))
+                .map(|n| format!("&name={}", enc(n)))
                 .unwrap_or_default();
             client
                 .get(&format!(
-                    "/api/v1/sites/{site}/events?range={range}&limit={limit}{name_param}"
+                    "/api/v1/sites/{site}/events?{rq}&limit={limit}{name_param}"
                 ))
                 .await?
         }
@@ -148,6 +287,27 @@ pub async fn run(cmd: &QueryCommand, client: &ApiClient, human: bool) -> anyhow:
     }
 
     Ok(())
+}
+
+/// Shared request builder for the `top-*` dimension endpoints.
+#[allow(clippy::too_many_arguments)]
+async fn top_query(
+    client: &ApiClient,
+    site: &str,
+    endpoint: &str,
+    range: &str,
+    from: &Option<String>,
+    to: &Option<String>,
+    limit: u32,
+    filters: &[String],
+) -> anyhow::Result<Value> {
+    let rq = range_qs(range, from, to);
+    let fq = filters_qs(filters);
+    client
+        .get(&format!(
+            "/api/v1/sites/{site}/{endpoint}?{rq}&limit={limit}{fq}"
+        ))
+        .await
 }
 
 fn print_human(value: &Value) {

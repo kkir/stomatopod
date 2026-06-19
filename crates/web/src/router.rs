@@ -56,6 +56,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/api/v1/sites/:site/top-referrers",
             get(analytics::top_referrers),
         )
+        .route("/api/v1/sites/:site/top-os", get(analytics::top_os))
+        .route(
+            "/api/v1/sites/:site/top-regions",
+            get(analytics::top_regions),
+        )
         .route("/api/v1/sites/:site/events", get(analytics::events))
         .route(
             "/api/v1/sites/:site/funnels",
@@ -141,6 +146,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/app/sites/:site_id/partials/top-devices",
             get(partials::top_devices),
+        )
+        .route("/app/sites/:site_id/partials/top-os", get(partials::top_os))
+        .route(
+            "/app/sites/:site_id/partials/top-regions",
+            get(partials::top_regions),
         )
         .layer(middleware::from_fn_with_state(state.clone(), require_auth));
 

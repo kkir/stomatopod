@@ -1,6 +1,57 @@
 {% extends "base.jinja" %} {% block title %}{{ site.name }} — Stomatopod{%
 endblock %} {% block content %}
 
+{# Reusable top-N table. `field` is the filter token to add when a row's value
+   is clicked (empty string = not clickable). `metric` picks the count column. #}
+{% macro toptable(title, header, rows, field, metric, base) %}
+<div class="card">
+  <div class="section-header"><h2>{{ title }}</h2></div>
+  <table>
+    <thead>
+      <tr>
+        <th>{{ header }}</th>
+        <th>{{ "Views" if metric == "pageviews" else "Visitors" }}</th>
+        <th>%</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="cell-truncate">
+          {% if field %}<a
+            class="row-link"
+            href="?{{ base }}&filter={{ field }}:eq:{{ row.value | urlencode }}"
+            >{{ row.value }}</a
+          >{% else %}{{ row.value }}{% endif %}
+        </td>
+        <td>{{ row.pageviews if metric == "pageviews" else row.sessions }}</td>
+        <td>
+          <div class="bar-cell">
+            <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
+            {{ "%.1f" | format(row.pct) }}%
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="3" class="empty-cell">No data</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% macro delta_badge(d) %} {% if d %} {% if d.dir == "up" %}
+<div class="delta up">▲ {{ "%.1f" | format(d.pct) }}%</div>
+{% elif d.dir == "down" %}
+<div class="delta down">▼ {{ "%.1f" | format(d.pct) }}%</div>
+{% elif d.dir == "new" %}
+<div class="delta new">new</div>
+{% else %}
+<div class="delta">→ 0%</div>
+{% endif %} {% endif %} {% endmacro %}
+
 <div class="page-head">
   <div>
     <h1 class="page-title" style="view-transition-name: s-{{ site.id }}">
@@ -9,29 +60,80 @@ endblock %} {% block content %}
     <p class="page-sub">{{ site.domain }}</p>
   </div>
   <div class="range-tabs">
-    <a href="?range=7d" class="{% if range == '7d' %}active{% endif %}">7d</a>
     <a
-      href="?range=30d"
-      class="{% if range == '30d' or not range %}active{% endif %}"
+      href="?range=7d{{ q_fc }}"
+      class="{% if not custom and range == '7d' %}active{% endif %}"
+      >7d</a
+    >
+    <a
+      href="?range=30d{{ q_fc }}"
+      class="{% if not custom and range == '30d' %}active{% endif %}"
       >30d</a
     >
-    <a href="?range=90d" class="{% if range == '90d' %}active{% endif %}"
+    <a
+      href="?range=90d{{ q_fc }}"
+      class="{% if not custom and range == '90d' %}active{% endif %}"
       >90d</a
     >
-    <a href="?range=12m" class="{% if range == '12m' %}active{% endif %}"
+    <a
+      href="?range=12m{{ q_fc }}"
+      class="{% if not custom and range == '12m' %}active{% endif %}"
       >12m</a
     >
   </div>
 </div>
 
 <div class="tabs">
-  <a href="/app/sites/{{ site.id }}?range={{ range }}" class="active"
-    >Overview</a
-  >
+  <a href="/app/sites/{{ site.id }}?range={{ range }}" class="active">Overview</a>
   <a href="/app/sites/{{ site.id }}/events?range={{ range }}">Events</a>
   <a href="/app/sites/{{ site.id }}/funnels?range={{ range }}">Funnels</a>
   <a href="/app/sites/{{ site.id }}/keys?range={{ range }}">API Keys</a>
   <a href="/app/sites/{{ site.id }}/settings?range={{ range }}">Settings</a>
+</div>
+
+<!-- Controls: active filters, add-filter + custom range, period comparison.
+     One form, one Apply button: the field/op/value selects, the date range,
+     and the existing filters all submit together so nothing is dropped. -->
+<div class="controls">
+  {% for f in filters %}
+  <span class="filter-pill"
+    >{{ f.label }} <a class="rm" href="{{ f.remove_href }}" title="Remove">×</a></span
+  >
+  {% endfor %}
+
+  <form method="get" onsubmit="return spqApply(this)">
+    <select name="_field" aria-label="Filter field">
+      <option value="url">Page</option>
+      <option value="referrer">Referrer</option>
+      <option value="country">Country</option>
+      <option value="region">Region</option>
+      <option value="browser">Browser</option>
+      <option value="os">OS</option>
+      <option value="device_type">Device</option>
+      <option value="utm_source">UTM source</option>
+      <option value="utm_medium">UTM medium</option>
+      <option value="utm_campaign">UTM campaign</option>
+    </select>
+    <select name="_op" aria-label="Operator">
+      <option value="eq">is</option>
+      <option value="not_eq">is not</option>
+      <option value="contains">contains</option>
+      <option value="starts_with">starts with</option>
+    </select>
+    <input type="text" name="_value" placeholder="filter value" />
+    <span class="ctl-sep">·</span>
+    <input type="date" name="from" value="{{ from or '' }}" aria-label="From" />
+    <input type="date" name="to" value="{{ to or '' }}" aria-label="To" />
+    <button type="submit">Apply</button>
+    <!-- Preserve the active range when no dates are picked (from/to win when set). -->
+    <input type="hidden" name="range" value="{{ range }}" />
+    {% if compare %}<input type="hidden" name="compare" value="1" />{% endif %}
+    {% for f in filters %}<input type="hidden" name="filter" value="{{ f.token }}" />{% endfor %}
+  </form>
+
+  <a class="compare-toggle {% if compare %}on{% endif %}" href="{{ compare_href }}"
+    >{% if compare %}Comparing prior period{% else %}Compare period{% endif %}</a
+  >
 </div>
 
 <!-- Hero: stats summary + traffic chart in one panel -->
@@ -40,10 +142,16 @@ endblock %} {% block content %}
     <div class="stat">
       <div class="label">Pageviews</div>
       <div class="value">{{ total_pageviews }}</div>
+      {{ delta_badge(pv_delta) }} {% if compare and cmp_pageviews is not none %}
+      <div class="cmp-prev">prev {{ cmp_pageviews }}</div>
+      {% endif %}
     </div>
     <div class="stat">
       <div class="label">Sessions</div>
       <div class="value">{{ total_sessions }}</div>
+      {{ delta_badge(sess_delta) }} {% if compare and cmp_sessions is not none %}
+      <div class="cmp-prev">prev {{ cmp_sessions }}</div>
+      {% endif %}
     </div>
     <div class="stat">
       <div class="label">Bounce Rate</div>
@@ -85,128 +193,34 @@ endblock %} {% block content %}
 
 <!-- Top tables grid -->
 <div class="grid-2">
-  <div class="card">
-    <div class="section-header"><h2>Top Pages</h2></div>
-    <table>
-      <thead>
-        <tr>
-          <th>Page</th>
-          <th>Views</th>
-          <th>%</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in top_pages %}
-        <tr>
-          <td class="cell-truncate">{{ row.value }}</td>
-          <td>{{ row.pageviews }}</td>
-          <td>
-            <div class="bar-cell">
-              <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
-              {{ "%.1f" | format(row.pct) }}%
-            </div>
-          </td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="3" class="empty-cell">No data</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <div class="section-header"><h2>Top Referrers</h2></div>
-    <table>
-      <thead>
-        <tr>
-          <th>Source</th>
-          <th>Visitors</th>
-          <th>%</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in top_referrers %}
-        <tr>
-          <td>{{ row.value }}</td>
-          <td>{{ row.sessions }}</td>
-          <td>
-            <div class="bar-cell">
-              <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
-              {{ "%.1f" | format(row.pct) }}%
-            </div>
-          </td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="3" class="empty-cell">No data</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <div class="section-header"><h2>Countries</h2></div>
-    <table>
-      <thead>
-        <tr>
-          <th>Country</th>
-          <th>Visitors</th>
-          <th>%</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in top_countries %}
-        <tr>
-          <td>{{ row.value }}</td>
-          <td>{{ row.sessions }}</td>
-          <td>
-            <div class="bar-cell">
-              <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
-              {{ "%.1f" | format(row.pct) }}%
-            </div>
-          </td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="3" class="empty-cell">No data</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <div class="section-header"><h2>Browsers &amp; Devices</h2></div>
-    <table>
-      <thead>
-        <tr>
-          <th>Browser</th>
-          <th>Visitors</th>
-          <th>%</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in top_browsers %}
-        <tr>
-          <td>{{ row.value }}</td>
-          <td>{{ row.sessions }}</td>
-          <td>
-            <div class="bar-cell">
-              <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
-              {{ "%.1f" | format(row.pct) }}%
-            </div>
-          </td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="3" class="empty-cell">No data</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  {{ toptable("Top Pages", "Page", top_pages, "url", "pageviews", base) }} {{
+  toptable("Top Referrers", "Source", top_referrers, "referrer", "sessions",
+  base) }} {{ toptable("Countries", "Country", top_countries, "country",
+  "sessions", base) }} {{ toptable("Regions", "Region", top_regions, "region",
+  "sessions", base) }} {{ toptable("Browsers", "Browser", top_browsers,
+  "browser", "sessions", base) }} {{ toptable("Operating Systems", "OS", top_os,
+  "os", "sessions", base) }} {{ toptable("Devices", "Device", top_devices,
+  "device_type", "sessions", base) }}
 </div>
+
+<script>
+  // The controls form applies the date range AND, if a filter value was
+  // typed, a new `filter=field:op:value` param — in one submit. Existing
+  // filters, compare, and range ride along via hidden inputs.
+  function spqApply(form) {
+    var value = form._value.value.trim();
+    if (value) {
+      var hidden = document.createElement("input");
+      hidden.type = "hidden";
+      hidden.name = "filter";
+      hidden.value = form._field.value + ":" + form._op.value + ":" + value;
+      form.appendChild(hidden);
+    }
+    // Drop the helper select/inputs so they don't leak into the query string.
+    form._field.removeAttribute("name");
+    form._op.removeAttribute("name");
+    form._value.removeAttribute("name");
+    return true;
+  }
+</script>
 {% endblock %}

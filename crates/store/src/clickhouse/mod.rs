@@ -22,7 +22,7 @@ use stomatopod_core::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
         pageviews::{
-            PageviewsQuery, PageviewsResult, TimeBucket, TimeRange, TopList, TopListField,
+            Filter, PageviewsQuery, PageviewsResult, TimeBucket, TimeRange, TopList, TopListField,
         },
         spans::{AgentSummary, SpanQuery, SpanRow},
     },
@@ -143,8 +143,9 @@ impl StorageBackend for ClickhouseBackend {
         field: TopListField,
         range: &TimeRange,
         limit: u32,
+        filters: &[Filter],
     ) -> Result<TopList, StoreError> {
-        self.query_top_field(site_id, range, limit, field.column())
+        self.query_top_field(site_id, range, limit, field.column(), filters)
             .await
     }
 
@@ -198,8 +199,9 @@ impl ClickhouseBackend {
         range: &TimeRange,
         limit: u32,
         field: &str,
+        filters: &[Filter],
     ) -> Result<TopList, StoreError> {
-        let sql = sql::top_field(site_id, range, limit, field);
+        let sql = sql::top_field(site_id, range, limit, field, filters);
         let rows: Vec<row::TopRowJson> = self.query_json(&sql).await?;
         Ok(row::top_list_from_rows(rows))
     }
@@ -355,7 +357,7 @@ mod sql {
     use stomatopod_core::query::{
         events::EventQuery,
         funnel::FunnelQuery,
-        pageviews::{Granularity, PageviewsQuery, TimeRange},
+        pageviews::{Filter, FilterOp, Granularity, PageviewsQuery, TimeRange},
         spans::SpanQuery,
     };
 
@@ -364,6 +366,28 @@ mod sql {
     pub(super) fn quote(s: &str) -> String {
         let escaped = s.replace('\\', "\\\\").replace('\'', "\\'");
         format!("'{escaped}'")
+    }
+
+    /// Build the `AND <col> <op> '<value>'` fragment for analytics filters.
+    /// Columns come from the `FilterField` enum (never user input); values
+    /// are quote-escaped. `LIKE` patterns rely on ClickHouse's default
+    /// backslash escape character, matching [`Filter::sql_value`].
+    pub(super) fn filter_clause(filters: &[Filter]) -> String {
+        let mut out = String::new();
+        for f in filters {
+            // For LIKE the pattern already carries backslash escapes; for the
+            // others the raw value is escaped by `quote`.
+            let lit = match f.op {
+                FilterOp::Contains | FilterOp::StartsWith => quote(&f.sql_value()),
+                _ => quote(&f.value),
+            };
+            out.push_str(&format!(
+                " AND {} {} {lit}",
+                f.field.column(),
+                f.op.sql_operator()
+            ));
+        }
+        out
     }
 
     fn date_trunc(g: &Granularity) -> &'static str {
@@ -389,18 +413,27 @@ mod sql {
              WHERE site_id = {site} \
                AND timestamp >= {start} \
                AND timestamp <= {end} \
+               {filters} \
              GROUP BY bucket \
              ORDER BY bucket",
             fn = date_trunc(&q.granularity),
             site = quote(&q.site_id.to_string()),
             start = micros(q.range.start),
             end = micros(q.range.end),
+            filters = filter_clause(&q.filters),
         )
     }
 
-    pub fn top_field(site_id: Ulid, range: &TimeRange, limit: u32, field: &str) -> String {
+    pub fn top_field(
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+        field: &str,
+        filters: &[Filter],
+    ) -> String {
         // `field` is a static identifier from the public API surface (url,
-        // referrer, country_code, browser, device_type); never user input.
+        // referrer, country_code, browser, device_type, os, region); never
+        // user input.
         format!(
             "SELECT \
                 coalesce({field}, 'Direct / None') AS value, \
@@ -411,12 +444,14 @@ mod sql {
                AND timestamp >= {start} \
                AND timestamp <= {end} \
                AND kind = 'pageview' \
+               {filters} \
              GROUP BY value \
              ORDER BY count() DESC \
              LIMIT {limit}",
             site = quote(&site_id.to_string()),
             start = micros(range.start),
             end = micros(range.end),
+            filters = filter_clause(filters),
         )
     }
 
@@ -792,10 +827,22 @@ mod tests {
             start: fixed_ts(),
             end: fixed_ts() + chrono::Duration::hours(1),
         };
-        let sql = sql::top_field(site, &range, 5, "url");
+        let sql = sql::top_field(site, &range, 5, "url", &[]);
         assert!(sql.contains("coalesce(url, 'Direct / None')"));
         assert!(sql.contains("LIMIT 5"));
         assert!(sql.contains("kind = 'pageview'"));
+    }
+
+    #[test]
+    fn filter_clause_builds_and_fragments() {
+        use stomatopod_core::query::pageviews::Filter;
+        let filters = vec![
+            Filter::parse("country:eq:US").unwrap(),
+            Filter::parse("url:contains:/blog").unwrap(),
+        ];
+        let frag = sql::filter_clause(&filters);
+        assert!(frag.contains("AND country_code = 'US'"));
+        assert!(frag.contains("AND url LIKE '%/blog%'"));
     }
 
     #[test]

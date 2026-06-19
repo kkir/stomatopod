@@ -86,6 +86,28 @@ fn build_templates() -> Environment<'static> {
         include_str!("../templates/partials/top_devices.jinja"),
     )
     .unwrap();
+    env.add_template(
+        "partials/top_os.jinja",
+        include_str!("../templates/partials/top_os.jinja"),
+    )
+    .unwrap();
+    env.add_template(
+        "partials/top_regions.jinja",
+        include_str!("../templates/partials/top_regions.jinja"),
+    )
+    .unwrap();
+    env.add_filter("urlencode", |s: String| {
+        let mut out = String::with_capacity(s.len());
+        for b in s.bytes() {
+            match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    out.push(b as char)
+                }
+                _ => out.push_str(&format!("%{b:02X}")),
+            }
+        }
+        out
+    });
     env.add_template("agents.jinja", include_str!("../templates/agents.jinja"))
         .unwrap();
     env.add_template("agent.jinja", include_str!("../templates/agent.jinja"))
@@ -826,6 +848,144 @@ async fn api_pageviews_resolves_known_site() {
     // Auth passed and site resolved — not 401 and not 404.
     assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
     assert_ne!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+// ---- Tier-1 analytics endpoints: filters, custom range, comparison, OS/region ----
+
+/// Create an org + site and mint a session token authorized to read it.
+async fn site_and_token(ctx: &TestCtx) -> (Site, String) {
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let token = sign_session(&ctx.secret, &Ulid::new().to_string());
+    (site, token)
+}
+
+/// GET an authorized analytics URL and return (status, parsed-json).
+async fn get_json(state: Arc<AppState>, uri: &str, token: &str) -> (StatusCode, serde_json::Value) {
+    let req = Request::builder()
+        .uri(uri)
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(state).oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = body_bytes(resp).await;
+    let json = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, json)
+}
+
+#[tokio::test]
+async fn api_top_os_and_regions_routes_return_rows() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    for dim in ["top-os", "top-regions"] {
+        let (status, json) = get_json(
+            ctx.state.clone(),
+            &format!("/api/v1/sites/{}/{dim}", site.id),
+            &token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{dim} should resolve");
+        assert!(
+            json.get("rows").map(|r| r.is_array()).unwrap_or(false),
+            "{dim} response should carry a rows array, got {json}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn api_pageviews_compare_attaches_comparison_block() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/pageviews?range=7d&compare=1", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        json.get("comparison").is_some(),
+        "compare=1 must attach a comparison block, got {json}"
+    );
+    // Without compare, no comparison block.
+    let (_, plain) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/pageviews?range=7d", site.id),
+        &token,
+    )
+    .await;
+    assert!(plain.get("comparison").is_none());
+}
+
+#[tokio::test]
+async fn api_pageviews_accepts_custom_from_to_range() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!(
+            "/api/v1/sites/{}/pageviews?from=2025-01-01&to=2025-01-31",
+            site.id
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(json.get("buckets").is_some(), "expected a pageviews result");
+}
+
+#[tokio::test]
+async fn api_top_pages_accepts_and_tolerates_filters() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    // A well-formed, repeated filter parses without error.
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!(
+            "/api/v1/sites/{}/top-pages?filter=browser:eq:Chrome&filter=country:eq:US",
+            site.id
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(json.get("rows").is_some());
+
+    // A malformed filter is dropped rather than 400-ing the request.
+    let (status, _) = get_json(
+        ctx.state.clone(),
+        &format!(
+            "/api/v1/sites/{}/top-pages?filter=not-a-valid-filter",
+            site.id
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn api_events_accepts_custom_range() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    let (status, _) = get_json(
+        ctx.state.clone(),
+        &format!(
+            "/api/v1/sites/{}/events?from=2025-01-01&to=2025-02-01",
+            site.id
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 // ---- Auth routes ----
