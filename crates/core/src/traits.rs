@@ -5,7 +5,9 @@ use crate::{
     domain::{
         agent::{Agent, AlertChannel, SentinelToken},
         agent_span::AgentSpan,
+        analytics_alert::{AnalyticsAlert, AnalyticsAlertFire},
         api_key::ApiKey,
+        goal::Goal,
         incident::{Incident, IncidentStatus},
         org::{Funnel, Organization, User},
         policy::Policy,
@@ -13,6 +15,9 @@ use crate::{
     },
     error::StoreError,
     query::{
+        analytics::{
+            EntryPages, ExitPages, GoalQuery, GoalStats, RawEventRow, RealtimeSnapshot, SessionRow,
+        },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
         pageviews::{Filter, PageviewsQuery, PageviewsResult, TimeRange, TopList, TopListField},
@@ -53,6 +58,52 @@ pub trait StorageBackend: Send + Sync + 'static {
     async fn query_custom_events(&self, q: &EventQuery) -> Result<TopList, StoreError>;
 
     async fn query_funnel(&self, q: &FunnelQuery) -> Result<FunnelResult, StoreError>;
+
+    // ---- Tier-2 analytics queries ----
+
+    /// Top entry pages (where sessions begin) over `range`, with bounce rate.
+    async fn query_entry_pages(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+        filters: &[Filter],
+    ) -> Result<EntryPages, StoreError>;
+
+    /// Top exit pages (where sessions end) over `range`, with exit rate.
+    async fn query_exit_pages(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+        filters: &[Filter],
+    ) -> Result<ExitPages, StoreError>;
+
+    /// Live snapshot of the last `window_minutes` of activity.
+    async fn query_realtime(
+        &self,
+        site_id: Ulid,
+        window_minutes: u32,
+    ) -> Result<RealtimeSnapshot, StoreError>;
+
+    /// Goal completions + conversion-rate timeseries.
+    async fn query_goal(&self, q: &GoalQuery) -> Result<GoalStats, StoreError>;
+
+    /// Derived session rows for export (newest first).
+    async fn query_sessions(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+    ) -> Result<Vec<SessionRow>, StoreError>;
+
+    /// Raw event rows for export (newest first).
+    async fn query_events_list(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+    ) -> Result<Vec<RawEventRow>, StoreError>;
 }
 
 /// Metadata CRUD: sites, orgs, users, funnels.
@@ -83,6 +134,31 @@ pub trait MetaStore: Send + Sync + 'static {
     async fn get_funnel(&self, id: Ulid) -> Result<Option<Funnel>, StoreError>;
     async fn list_funnels(&self, site_id: Ulid) -> Result<Vec<Funnel>, StoreError>;
     async fn delete_funnel(&self, id: Ulid) -> Result<(), StoreError>;
+
+    // ---- Goals ----
+    async fn create_goal(&self, goal: &Goal) -> Result<(), StoreError>;
+    async fn get_goal(&self, id: Ulid) -> Result<Option<Goal>, StoreError>;
+    async fn list_goals(&self, site_id: Ulid) -> Result<Vec<Goal>, StoreError>;
+    async fn delete_goal(&self, id: Ulid) -> Result<(), StoreError>;
+
+    // ---- Analytics alerts ----
+    async fn create_analytics_alert(&self, alert: &AnalyticsAlert) -> Result<(), StoreError>;
+    async fn get_analytics_alert(&self, id: Ulid) -> Result<Option<AnalyticsAlert>, StoreError>;
+    async fn list_analytics_alerts(&self, site_id: Ulid)
+        -> Result<Vec<AnalyticsAlert>, StoreError>;
+    /// All enabled alerts across every site — used by the evaluator loop.
+    async fn list_enabled_analytics_alerts(&self) -> Result<Vec<AnalyticsAlert>, StoreError>;
+    async fn set_analytics_alert_enabled(&self, id: Ulid, enabled: bool) -> Result<(), StoreError>;
+    async fn delete_analytics_alert(&self, id: Ulid) -> Result<(), StoreError>;
+    async fn record_analytics_alert_fire(
+        &self,
+        fire: &AnalyticsAlertFire,
+    ) -> Result<(), StoreError>;
+    /// Most recent fire time for an alert, for cooldown enforcement.
+    async fn last_analytics_alert_fire(
+        &self,
+        alert_id: Ulid,
+    ) -> Result<Option<AnalyticsAlertFire>, StoreError>;
 
     // ---- Agents ----
     async fn upsert_agent(&self, agent: &Agent) -> Result<(), StoreError>;

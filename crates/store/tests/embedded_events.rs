@@ -603,3 +603,226 @@ async fn legacy_flat_partitions_are_migrated_on_open() {
         .unwrap();
     assert_eq!(result.total_pageviews, 1);
 }
+
+// ---- Tier-2 analytics: entry/exit, realtime, goals, export ----
+
+/// Build a single event with explicit session, url, kind/name and timestamp.
+#[allow(clippy::too_many_arguments)]
+fn mk(
+    site_id: Ulid,
+    sid: u8,
+    url: &str,
+    kind: EventKind,
+    name: &str,
+    ts: chrono::DateTime<Utc>,
+    properties: Option<serde_json::Value>,
+) -> Event {
+    let mut e = make_event(site_id, url);
+    e.id = Ulid::new();
+    e.session_id = [sid; 16];
+    e.kind = kind;
+    e.name = name.into();
+    e.timestamp = ts;
+    e.received_at = ts;
+    e.referrer = Some("https://ref.example/".into());
+    e.properties = properties;
+    e
+}
+
+/// Seed three sessions (A: /home → /pricing, B: /home bounce, C: /blog →
+/// /home) plus one `signup` custom event, then flush to parquet. Returns the
+/// site id and a wide query range.
+async fn seed_sessions(backend: &EmbeddedBackend) -> (Ulid, TimeRange) {
+    let site_id = Ulid::new();
+    let now = Utc::now();
+    let t = |secs: i64| now - chrono::Duration::seconds(300 - secs);
+    let pv = EventKind::Pageview;
+    backend
+        .ingest_events(vec![
+            mk(site_id, 1, "/home", pv, "pageview", t(0), None),
+            mk(site_id, 1, "/pricing", pv, "pageview", t(10), None),
+            mk(site_id, 2, "/home", pv, "pageview", t(0), None),
+            mk(site_id, 3, "/blog", pv, "pageview", t(0), None),
+            mk(site_id, 3, "/home", pv, "pageview", t(5), None),
+            mk(
+                site_id,
+                1,
+                "/welcome",
+                EventKind::Custom,
+                "signup",
+                t(12),
+                Some(serde_json::json!({"plan": "pro"})),
+            ),
+        ])
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let range = TimeRange {
+        start: now - chrono::Duration::hours(1),
+        end: now + chrono::Duration::hours(1),
+    };
+    (site_id, range)
+}
+
+#[tokio::test]
+async fn entry_pages_report_counts_sessions_and_bounces() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let (site_id, range) = seed_sessions(&backend).await;
+
+    let entry = backend
+        .query_entry_pages(site_id, &range, 20, &[])
+        .await
+        .unwrap();
+
+    let home = entry
+        .rows
+        .iter()
+        .find(|r| r.url == "/home")
+        .expect("/home should be a top entry page");
+    // Sessions A and B both start on /home; only B (single pageview) bounced.
+    assert_eq!(home.sessions, 2, "two sessions enter on /home");
+    assert!(
+        (home.bounce_rate - 50.0).abs() < 0.01,
+        "one of two /home entries bounced, got {}",
+        home.bounce_rate
+    );
+    assert!(
+        entry.rows.iter().any(|r| r.url == "/blog"),
+        "/blog is also an entry page"
+    );
+}
+
+#[tokio::test]
+async fn exit_pages_report_counts_exits() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let (site_id, range) = seed_sessions(&backend).await;
+
+    let exit = backend
+        .query_exit_pages(site_id, &range, 20, &[])
+        .await
+        .unwrap();
+
+    // Sessions B and C both end on /home; A ends on /pricing.
+    let home = exit
+        .rows
+        .iter()
+        .find(|r| r.url == "/home")
+        .expect("/home should be an exit page");
+    assert_eq!(home.exits, 2, "two sessions exit on /home");
+    assert!(
+        exit.rows
+            .iter()
+            .any(|r| r.url == "/pricing" && r.exits == 1),
+        "/pricing is an exit page with one exit"
+    );
+}
+
+#[tokio::test]
+async fn realtime_snapshot_reports_active_sessions_and_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let (site_id, _range) = seed_sessions(&backend).await;
+
+    let rt = backend.query_realtime(site_id, 30).await.unwrap();
+    assert_eq!(rt.active_sessions, 3, "three distinct sessions are active");
+    assert!(rt.pageviews_per_minute > 0.0);
+    // Last pageview per session: A→/pricing, B→/home, C→/home.
+    let home = rt
+        .top_pages
+        .iter()
+        .find(|p| p.url == "/home")
+        .expect("/home is an active page");
+    assert_eq!(home.active_sessions, 2);
+    // The signup custom event shows up in the live feed.
+    assert!(
+        rt.recent_events.iter().any(|e| e.name == "signup"),
+        "recent events should include the signup, got {:?}",
+        rt.recent_events
+    );
+}
+
+#[tokio::test]
+async fn goal_stats_compute_completions_and_conversion_rate() {
+    use stomatopod_core::query::{analytics::GoalQuery, pageviews::Granularity};
+
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let (site_id, range) = seed_sessions(&backend).await;
+
+    let stats = backend
+        .query_goal(&GoalQuery {
+            site_id,
+            event_name: "signup".into(),
+            filters: vec![],
+            granularity: Granularity::Day,
+            range,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(stats.completions, 1, "one signup event");
+    assert_eq!(stats.unique_completions, 1);
+    // 1 converting session out of 3 total → ~33.3%.
+    assert!(
+        (stats.conversion_rate - 33.333).abs() < 0.1,
+        "conversion rate should be ~33.3%, got {}",
+        stats.conversion_rate
+    );
+    assert!(
+        !stats.timeseries.is_empty(),
+        "timeseries should have a bucket"
+    );
+}
+
+#[tokio::test]
+async fn sessions_export_derives_entry_exit_and_bounce() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let (site_id, range) = seed_sessions(&backend).await;
+
+    let sessions = backend.query_sessions(site_id, &range, 100).await.unwrap();
+    assert_eq!(sessions.len(), 3, "three derived sessions");
+
+    // Session A (id [1;16]) hex: "0101...01".
+    let a = sessions
+        .iter()
+        .find(|s| s.session_id == "01".repeat(16))
+        .expect("session A present");
+    assert_eq!(a.entry_url, "/home");
+    assert_eq!(a.exit_url, "/pricing");
+    assert_eq!(a.pageviews, 2);
+    assert!(!a.is_bounce);
+
+    let b = sessions
+        .iter()
+        .find(|s| s.session_id == "02".repeat(16))
+        .expect("session B present");
+    assert_eq!(b.entry_url, "/home");
+    assert_eq!(b.exit_url, "/home");
+    assert!(b.is_bounce, "single-pageview session B is a bounce");
+}
+
+#[tokio::test]
+async fn events_export_returns_raw_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let (site_id, range) = seed_sessions(&backend).await;
+
+    let events = backend
+        .query_events_list(site_id, &range, 1000)
+        .await
+        .unwrap();
+    assert_eq!(events.len(), 6, "all six seeded events are exported");
+    let signup = events
+        .iter()
+        .find(|e| e.name == "signup")
+        .expect("signup event present");
+    assert_eq!(signup.kind, "custom");
+    assert!(
+        signup.properties.as_deref().unwrap_or("").contains("pro"),
+        "properties JSON should round-trip, got {:?}",
+        signup.properties
+    );
+}

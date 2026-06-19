@@ -9,7 +9,9 @@ use ulid::Ulid;
 use stomatopod_core::{
     domain::{
         agent::{Agent, AlertChannel, AlertChannelKind, SentinelToken},
+        analytics_alert::{AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind},
         api_key::{ApiKey, ApiKeyScope},
+        goal::Goal,
         incident::{Incident, IncidentStatus, IncidentTrigger},
         org::{Funnel, Organization, Plan, User, UserRole},
         policy::Policy,
@@ -165,6 +167,36 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_incidents_site_opened ON incidents(site_id, opened_at DESC);
 
+        CREATE TABLE IF NOT EXISTS goals (
+            id          TEXT PRIMARY KEY,
+            site_id     TEXT NOT NULL REFERENCES sites(id),
+            name        TEXT NOT NULL,
+            event_name  TEXT NOT NULL,
+            filters     TEXT,
+            created_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_goals_site ON goals(site_id);
+
+        CREATE TABLE IF NOT EXISTS analytics_alerts (
+            id          TEXT PRIMARY KEY,
+            site_id     TEXT NOT NULL REFERENCES sites(id),
+            type        TEXT NOT NULL,
+            config      TEXT NOT NULL,
+            channel_id  TEXT NOT NULL REFERENCES alert_channels(id),
+            enabled     INTEGER NOT NULL DEFAULT 1,
+            created_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_analytics_alerts_site ON analytics_alerts(site_id);
+        CREATE INDEX IF NOT EXISTS idx_analytics_alerts_enabled ON analytics_alerts(enabled);
+
+        CREATE TABLE IF NOT EXISTS analytics_alert_fires (
+            id          TEXT PRIMARY KEY,
+            alert_id    TEXT NOT NULL REFERENCES analytics_alerts(id),
+            fired_at    TEXT NOT NULL,
+            payload     TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_alert_fires_alert ON analytics_alert_fires(alert_id, fired_at DESC);
+
         INSERT OR IGNORE INTO schema_version (id, version, applied_at)
         VALUES (1, 1, datetime('now'));
         "#,
@@ -307,10 +339,7 @@ fn row_to_alert_channel(row: &rusqlite::Row<'_>) -> rusqlite::Result<AlertChanne
     Ok(AlertChannel {
         id: Ulid::from_string(&id_str).unwrap_or_default(),
         site_id: Ulid::from_string(&site_id_str).unwrap_or_default(),
-        kind: match kind_str.as_str() {
-            "slack" => AlertChannelKind::Slack,
-            _ => AlertChannelKind::Webhook,
-        },
+        kind: AlertChannelKind::from_str(&kind_str),
         url: row.get(3)?,
         secret: row.get(4)?,
         created_at: parse_utc(&created_at_str),
@@ -369,6 +398,52 @@ fn row_to_funnel(row: &rusqlite::Row<'_>) -> rusqlite::Result<Funnel> {
         created_at: chrono::DateTime::parse_from_rfc3339(&created_at_str)
             .map(|d| d.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now()),
+    })
+}
+
+fn row_to_goal(row: &rusqlite::Row<'_>) -> rusqlite::Result<Goal> {
+    let id_str: String = row.get(0)?;
+    let site_id_str: String = row.get(1)?;
+    let created_at_str: String = row.get(5)?;
+    Ok(Goal {
+        id: Ulid::from_string(&id_str).unwrap_or_default(),
+        site_id: Ulid::from_string(&site_id_str).unwrap_or_default(),
+        name: row.get(2)?,
+        event_name: row.get(3)?,
+        filters: row.get(4)?,
+        created_at: parse_utc(&created_at_str),
+    })
+}
+
+fn row_to_analytics_alert(row: &rusqlite::Row<'_>) -> rusqlite::Result<AnalyticsAlert> {
+    let id_str: String = row.get(0)?;
+    let site_id_str: String = row.get(1)?;
+    let type_str: String = row.get(2)?;
+    let config_str: String = row.get(3)?;
+    let channel_id_str: String = row.get(4)?;
+    let enabled: i32 = row.get(5)?;
+    let created_at_str: String = row.get(6)?;
+    Ok(AnalyticsAlert {
+        id: Ulid::from_string(&id_str).unwrap_or_default(),
+        site_id: Ulid::from_string(&site_id_str).unwrap_or_default(),
+        kind: AnalyticsAlertKind::from_str(&type_str).unwrap_or(AnalyticsAlertKind::TrafficSpike),
+        config: serde_json::from_str(&config_str).unwrap_or_default(),
+        channel_id: Ulid::from_string(&channel_id_str).unwrap_or_default(),
+        enabled: enabled != 0,
+        created_at: parse_utc(&created_at_str),
+    })
+}
+
+fn row_to_alert_fire(row: &rusqlite::Row<'_>) -> rusqlite::Result<AnalyticsAlertFire> {
+    let id_str: String = row.get(0)?;
+    let alert_id_str: String = row.get(1)?;
+    let fired_at_str: String = row.get(2)?;
+    let payload_str: String = row.get(3)?;
+    Ok(AnalyticsAlertFire {
+        id: Ulid::from_string(&id_str).unwrap_or_default(),
+        alert_id: Ulid::from_string(&alert_id_str).unwrap_or_default(),
+        fired_at: parse_utc(&fired_at_str),
+        payload: serde_json::from_str(&payload_str).unwrap_or(serde_json::Value::Null),
     })
 }
 
@@ -633,6 +708,193 @@ impl MetaStore for SqliteMeta {
             conn.execute("DELETE FROM funnels WHERE id = ?1", params![id.to_string()])
                 .map(|_| ())
                 .map_err(StoreError::db)
+        })
+    }
+
+    // ---- Goals ----
+    async fn create_goal(&self, goal: &Goal) -> Result<(), StoreError> {
+        let goal = goal.clone();
+        db!(self.conn, |conn: &Connection| {
+            conn.execute(
+                "INSERT INTO goals (id, site_id, name, event_name, filters, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    goal.id.to_string(),
+                    goal.site_id.to_string(),
+                    goal.name,
+                    goal.event_name,
+                    goal.filters,
+                    goal.created_at.to_rfc3339(),
+                ],
+            )
+            .map(|_| ())
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn get_goal(&self, id: Ulid) -> Result<Option<Goal>, StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            conn.query_row(
+                "SELECT id, site_id, name, event_name, filters, created_at FROM goals WHERE id = ?1",
+                params![id.to_string()],
+                row_to_goal,
+            )
+            .optional()
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn list_goals(&self, site_id: Ulid) -> Result<Vec<Goal>, StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, site_id, name, event_name, filters, created_at
+                     FROM goals WHERE site_id = ?1 ORDER BY created_at ASC",
+                )
+                .map_err(StoreError::db)?;
+            let rows = stmt
+                .query_map(params![site_id.to_string()], row_to_goal)
+                .map_err(StoreError::db)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(StoreError::db)
+        })
+    }
+
+    async fn delete_goal(&self, id: Ulid) -> Result<(), StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            conn.execute("DELETE FROM goals WHERE id = ?1", params![id.to_string()])
+                .map(|_| ())
+                .map_err(StoreError::db)
+        })
+    }
+
+    // ---- Analytics alerts ----
+    async fn create_analytics_alert(&self, alert: &AnalyticsAlert) -> Result<(), StoreError> {
+        let alert = alert.clone();
+        db!(self.conn, |conn: &Connection| {
+            let config = serde_json::to_string(&alert.config)
+                .map_err(|e| StoreError::Serialization(e.to_string()))?;
+            conn.execute(
+                "INSERT INTO analytics_alerts (id, site_id, type, config, channel_id, enabled, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    alert.id.to_string(),
+                    alert.site_id.to_string(),
+                    alert.kind.as_str(),
+                    config,
+                    alert.channel_id.to_string(),
+                    alert.enabled as i32,
+                    alert.created_at.to_rfc3339(),
+                ],
+            )
+            .map(|_| ())
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn get_analytics_alert(&self, id: Ulid) -> Result<Option<AnalyticsAlert>, StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            conn.query_row(
+                "SELECT id, site_id, type, config, channel_id, enabled, created_at
+                 FROM analytics_alerts WHERE id = ?1",
+                params![id.to_string()],
+                row_to_analytics_alert,
+            )
+            .optional()
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn list_analytics_alerts(
+        &self,
+        site_id: Ulid,
+    ) -> Result<Vec<AnalyticsAlert>, StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, site_id, type, config, channel_id, enabled, created_at
+                     FROM analytics_alerts WHERE site_id = ?1 ORDER BY created_at DESC",
+                )
+                .map_err(StoreError::db)?;
+            let rows = stmt
+                .query_map(params![site_id.to_string()], row_to_analytics_alert)
+                .map_err(StoreError::db)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(StoreError::db)
+        })
+    }
+
+    async fn list_enabled_analytics_alerts(&self) -> Result<Vec<AnalyticsAlert>, StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, site_id, type, config, channel_id, enabled, created_at
+                     FROM analytics_alerts WHERE enabled = 1 ORDER BY created_at ASC",
+                )
+                .map_err(StoreError::db)?;
+            let rows = stmt
+                .query_map([], row_to_analytics_alert)
+                .map_err(StoreError::db)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(StoreError::db)
+        })
+    }
+
+    async fn set_analytics_alert_enabled(&self, id: Ulid, enabled: bool) -> Result<(), StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            conn.execute(
+                "UPDATE analytics_alerts SET enabled = ?1 WHERE id = ?2",
+                params![enabled as i32, id.to_string()],
+            )
+            .map(|_| ())
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn delete_analytics_alert(&self, id: Ulid) -> Result<(), StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            conn.execute(
+                "DELETE FROM analytics_alerts WHERE id = ?1",
+                params![id.to_string()],
+            )
+            .map(|_| ())
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn record_analytics_alert_fire(
+        &self,
+        fire: &AnalyticsAlertFire,
+    ) -> Result<(), StoreError> {
+        let fire = fire.clone();
+        db!(self.conn, |conn: &Connection| {
+            let payload = serde_json::to_string(&fire.payload)
+                .map_err(|e| StoreError::Serialization(e.to_string()))?;
+            conn.execute(
+                "INSERT INTO analytics_alert_fires (id, alert_id, fired_at, payload)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    fire.id.to_string(),
+                    fire.alert_id.to_string(),
+                    fire.fired_at.to_rfc3339(),
+                    payload,
+                ],
+            )
+            .map(|_| ())
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn last_analytics_alert_fire(
+        &self,
+        alert_id: Ulid,
+    ) -> Result<Option<AnalyticsAlertFire>, StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            conn.query_row(
+                "SELECT id, alert_id, fired_at, payload FROM analytics_alert_fires
+                 WHERE alert_id = ?1 ORDER BY fired_at DESC LIMIT 1",
+                params![alert_id.to_string()],
+                row_to_alert_fire,
+            )
+            .optional()
+            .map_err(StoreError::db)
         })
     }
 

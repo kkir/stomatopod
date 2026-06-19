@@ -47,6 +47,18 @@ pub async fn site_overview(
 
     let report = fetch_dashboard(&state.backend, &query, 20, dq.compare).await?;
 
+    // Entry/exit page reports share the overview's range + filters.
+    let entry_pages = state
+        .backend
+        .query_entry_pages(site_id, &dq.range, 20, &dq.filters)
+        .await
+        .unwrap_or_default();
+    let exit_pages = state
+        .backend
+        .query_exit_pages(site_id, &dq.range, 20, &dq.filters)
+        .await
+        .unwrap_or_default();
+
     let site = state
         .meta
         .get_site(site_id)
@@ -147,6 +159,8 @@ pub async fn site_overview(
             top_devices => serde_json::to_value(&report.top_devices.rows).unwrap(),
             top_os => serde_json::to_value(&report.top_os.rows).unwrap(),
             top_regions => serde_json::to_value(&report.top_regions.rows).unwrap(),
+            entry_pages => serde_json::to_value(&entry_pages.rows).unwrap(),
+            exit_pages => serde_json::to_value(&exit_pages.rows).unwrap(),
             buckets => serde_json::to_value(&report.pageviews.buckets).unwrap(),
         },
     )?;

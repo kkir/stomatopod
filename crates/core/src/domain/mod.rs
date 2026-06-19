@@ -1,8 +1,10 @@
 pub mod agent;
 pub mod agent_span;
+pub mod analytics_alert;
 pub mod api_key;
 pub mod control;
 pub mod event;
+pub mod goal;
 pub mod incident;
 pub mod org;
 pub mod policy;

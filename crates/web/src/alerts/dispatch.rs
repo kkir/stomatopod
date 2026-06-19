@@ -7,7 +7,7 @@ use stomatopod_core::{
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use super::sinks::{AlertSink, SlackSink, WebhookSink};
+use super::sinks::{AlertSink, SlackSink, TelegramSink, WebhookSink};
 
 /// Wraps the producer side of the dispatch channel. Cloneable; callers
 /// can stash it in AppState and emit incidents from anywhere.
@@ -39,6 +39,7 @@ pub async fn run_alert_dispatcher(mut rx: mpsc::Receiver<Incident>, meta: Arc<dy
         .expect("reqwest client");
     let webhook = WebhookSink::new(client.clone());
     let slack = SlackSink::new(client.clone());
+    let telegram = TelegramSink::new(client.clone());
 
     while let Some(incident) = rx.recv().await {
         let channels = match meta.list_alert_channels(incident.site_id).await {
@@ -52,6 +53,7 @@ pub async fn run_alert_dispatcher(mut rx: mpsc::Receiver<Incident>, meta: Arc<dy
             let sink: &dyn AlertSink = match ch.kind {
                 AlertChannelKind::Webhook => &webhook,
                 AlertChannelKind::Slack => &slack,
+                AlertChannelKind::Telegram => &telegram,
             };
             dispatch_with_retry(sink, &ch, &incident).await;
         }

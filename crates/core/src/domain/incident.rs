@@ -22,6 +22,14 @@ pub enum IncidentTrigger {
     TokenVelocity { tokens_per_sec: f64 },
     /// Session-level cost cap exceeded.
     CostThreshold { usd: f64 },
+    /// An analytics alert condition fired (traffic spike/drop, goal
+    /// threshold, referrer spike). `alert_type` is the alert kind token,
+    /// `value` the observed metric, `threshold` the configured trigger.
+    AnalyticsAlert {
+        alert_type: String,
+        value: f64,
+        threshold: f64,
+    },
     /// Operator clicked the Kill button.
     Manual,
 }
@@ -32,6 +40,7 @@ impl IncidentTrigger {
             IncidentTrigger::Repetition { .. } => "repetition",
             IncidentTrigger::TokenVelocity { .. } => "token_velocity",
             IncidentTrigger::CostThreshold { .. } => "cost_threshold",
+            IncidentTrigger::AnalyticsAlert { .. } => "analytics_alert",
             IncidentTrigger::Manual => "manual",
         }
     }

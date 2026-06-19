@@ -6,6 +6,7 @@ pub mod auth;
 pub mod dashboard;
 pub mod events;
 pub mod funnels;
+pub mod insights;
 pub mod partials;
 pub mod sentinel;
 pub mod sites;

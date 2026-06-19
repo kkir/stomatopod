@@ -20,8 +20,10 @@ use stomatopod_core::{
     domain::{
         agent::{Agent, AlertChannel, AlertChannelKind, SentinelToken},
         agent_span::AgentSpan,
+        analytics_alert::{AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind},
         api_key::{ApiKey, ApiKeyScope},
         event::Event,
+        goal::Goal,
         incident::{Incident, IncidentStatus, IncidentTrigger},
         org::{Funnel, Organization, Plan, User, UserRole},
         policy::Policy,
@@ -29,6 +31,10 @@ use stomatopod_core::{
     },
     error::StoreError,
     query::{
+        analytics::{
+            EntryPageRow, EntryPages, ExitPageRow, ExitPages, GoalBucket, GoalQuery, GoalStats,
+            RawEventRow, RealtimeEvent, RealtimeSnapshot, RealtimeTopPage, SessionRow,
+        },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
         pageviews::{
@@ -263,6 +269,421 @@ impl StorageBackend for PostgresBackend {
         Ok(FunnelResult {
             steps: step_results,
         })
+    }
+
+    async fn query_entry_pages(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+        filters: &[Filter],
+    ) -> Result<EntryPages, StoreError> {
+        let (filter_sql, filter_vals) = pg_filter_clause(filters, 4);
+        let sql = format!(
+            "WITH ranked AS (\
+                SELECT url, \
+                    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY timestamp ASC, id ASC) AS rn, \
+                    COUNT(*) OVER (PARTITION BY session_id) AS pv_count \
+                FROM events \
+                WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
+                  AND kind = 'pageview' {filter_sql}) \
+             SELECT COALESCE(url, '') AS value, COUNT(*)::BIGINT AS sessions, \
+                    SUM(CASE WHEN pv_count = 1 THEN 1 ELSE 0 END)::BIGINT AS bounces \
+             FROM ranked WHERE rn = 1 GROUP BY url ORDER BY sessions DESC LIMIT {limit}"
+        );
+        let mut query = sqlx::query(&sql)
+            .bind(site_id.to_string())
+            .bind(range.start)
+            .bind(range.end);
+        for v in &filter_vals {
+            query = query.bind(v.clone());
+        }
+        let rows = query
+            .fetch_all(&self.pool)
+            .await
+            .map_err(StoreError::query)?;
+        let mut out = Vec::with_capacity(rows.len());
+        let mut total: u64 = 0;
+        for row in rows {
+            let url: String = row.try_get("value").map_err(StoreError::query)?;
+            let sessions: i64 = row.try_get("sessions").map_err(StoreError::query)?;
+            let bounces: i64 = row.try_get("bounces").map_err(StoreError::query)?;
+            let sessions = sessions as u64;
+            total += sessions;
+            let bounce_rate = if sessions > 0 {
+                bounces as f64 / sessions as f64 * 100.0
+            } else {
+                0.0
+            };
+            out.push(EntryPageRow {
+                url,
+                sessions,
+                pct: 0.0,
+                bounce_rate,
+            });
+        }
+        if total > 0 {
+            for r in &mut out {
+                r.pct = r.sessions as f64 / total as f64 * 100.0;
+            }
+        }
+        Ok(EntryPages { rows: out })
+    }
+
+    async fn query_exit_pages(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+        filters: &[Filter],
+    ) -> Result<ExitPages, StoreError> {
+        let (filter_sql, filter_vals) = pg_filter_clause(filters, 4);
+        let sql = format!(
+            "WITH ranked AS (\
+                SELECT url, \
+                    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY timestamp DESC, id DESC) AS rn \
+                FROM events \
+                WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
+                  AND kind = 'pageview' {filter_sql}) \
+             SELECT COALESCE(url, '') AS value, \
+                    SUM(CASE WHEN rn = 1 THEN 1 ELSE 0 END)::BIGINT AS exits, \
+                    COUNT(*)::BIGINT AS pageviews \
+             FROM ranked GROUP BY url HAVING SUM(CASE WHEN rn = 1 THEN 1 ELSE 0 END) > 0 \
+             ORDER BY exits DESC LIMIT {limit}"
+        );
+        let mut query = sqlx::query(&sql)
+            .bind(site_id.to_string())
+            .bind(range.start)
+            .bind(range.end);
+        for v in &filter_vals {
+            query = query.bind(v.clone());
+        }
+        let rows = query
+            .fetch_all(&self.pool)
+            .await
+            .map_err(StoreError::query)?;
+        let mut out = Vec::with_capacity(rows.len());
+        let mut total: u64 = 0;
+        for row in rows {
+            let url: String = row.try_get("value").map_err(StoreError::query)?;
+            let exits: i64 = row.try_get("exits").map_err(StoreError::query)?;
+            let pageviews: i64 = row.try_get("pageviews").map_err(StoreError::query)?;
+            let exits = exits as u64;
+            total += exits;
+            let exit_rate = if pageviews > 0 {
+                exits as f64 / pageviews as f64 * 100.0
+            } else {
+                0.0
+            };
+            out.push(ExitPageRow {
+                url,
+                exits,
+                pct: 0.0,
+                exit_rate,
+            });
+        }
+        if total > 0 {
+            for r in &mut out {
+                r.pct = r.exits as f64 / total as f64 * 100.0;
+            }
+        }
+        Ok(ExitPages { rows: out })
+    }
+
+    async fn query_realtime(
+        &self,
+        site_id: Ulid,
+        window_minutes: u32,
+    ) -> Result<RealtimeSnapshot, StoreError> {
+        let window = window_minutes.max(1);
+        let since = format!("NOW() - INTERVAL '{window} minutes'");
+
+        let head = sqlx::query(&format!(
+            "SELECT COUNT(DISTINCT session_id)::BIGINT AS active, \
+                    COUNT(*) FILTER (WHERE kind = 'pageview')::BIGINT AS pvs \
+             FROM events WHERE site_id = $1 AND timestamp >= {since}"
+        ))
+        .bind(site_id.to_string())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(StoreError::query)?;
+        let active: i64 = head.try_get("active").map_err(StoreError::query)?;
+        let pvs: i64 = head.try_get("pvs").map_err(StoreError::query)?;
+        let active_sessions = active as u64;
+        let pageviews_per_minute = pvs as f64 / window as f64;
+
+        let page_rows = sqlx::query(&format!(
+            "WITH ranked AS (\
+                SELECT url, session_id, \
+                    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY timestamp DESC, id DESC) AS rn \
+                FROM events WHERE site_id = $1 AND timestamp >= {since} AND kind = 'pageview') \
+             SELECT COALESCE(url, '') AS value, COUNT(DISTINCT session_id)::BIGINT AS active \
+             FROM ranked WHERE rn = 1 GROUP BY url ORDER BY active DESC LIMIT 10"
+        ))
+        .bind(site_id.to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::query)?;
+        let mut top_pages = Vec::new();
+        for row in page_rows {
+            let url: String = row.try_get("value").map_err(StoreError::query)?;
+            let a: i64 = row.try_get("active").map_err(StoreError::query)?;
+            let a = a as u64;
+            let pct = if active_sessions > 0 {
+                a as f64 / active_sessions as f64 * 100.0
+            } else {
+                0.0
+            };
+            top_pages.push(RealtimeTopPage {
+                url,
+                active_sessions: a,
+                pct,
+            });
+        }
+
+        let ev_rows = sqlx::query(&format!(
+            "SELECT name, COALESCE(url, '') AS url, timestamp, properties \
+             FROM events WHERE site_id = $1 AND timestamp >= {since} AND kind = 'custom' \
+             ORDER BY timestamp DESC LIMIT 50"
+        ))
+        .bind(site_id.to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::query)?;
+        let now = Utc::now();
+        let mut recent_events = Vec::new();
+        for row in ev_rows {
+            let name: String = row.try_get("name").map_err(StoreError::query)?;
+            let url: String = row.try_get("url").map_err(StoreError::query)?;
+            let ts: DateTime<Utc> = row.try_get("timestamp").map_err(StoreError::query)?;
+            let props: Option<String> = row.try_get("properties").map_err(StoreError::query)?;
+            recent_events.push(RealtimeEvent {
+                name,
+                url,
+                seconds_ago: (now - ts).num_seconds().max(0),
+                properties: props
+                    .and_then(|p| serde_json::from_str(&p).ok())
+                    .unwrap_or(serde_json::Value::Null),
+            });
+        }
+
+        Ok(RealtimeSnapshot {
+            active_sessions,
+            pageviews_per_minute,
+            top_pages,
+            recent_events,
+        })
+    }
+
+    async fn query_goal(&self, q: &GoalQuery) -> Result<GoalStats, StoreError> {
+        let (filter_sql, filter_vals) = pg_filter_clause(&q.filters, 5);
+        let bucket = pg_date_trunc(&q.granularity);
+
+        // Headline completions.
+        let totals_sql = format!(
+            "SELECT COUNT(*)::BIGINT AS completions, COUNT(DISTINCT session_id)::BIGINT AS uniq \
+             FROM events WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
+               AND kind = 'custom' AND name = $4 {filter_sql}"
+        );
+        let mut tq = sqlx::query(&totals_sql)
+            .bind(q.site_id.to_string())
+            .bind(q.range.start)
+            .bind(q.range.end)
+            .bind(&q.event_name);
+        for v in &filter_vals {
+            tq = tq.bind(v.clone());
+        }
+        let trow = tq.fetch_one(&self.pool).await.map_err(StoreError::query)?;
+        let completions: i64 = trow.try_get("completions").map_err(StoreError::query)?;
+        let uniq: i64 = trow.try_get("uniq").map_err(StoreError::query)?;
+        let unique_completions = uniq as u64;
+
+        let srow = sqlx::query(
+            "SELECT COUNT(DISTINCT session_id)::BIGINT AS sessions FROM events \
+             WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3",
+        )
+        .bind(q.site_id.to_string())
+        .bind(q.range.start)
+        .bind(q.range.end)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(StoreError::query)?;
+        let total_sessions: i64 = srow.try_get("sessions").map_err(StoreError::query)?;
+        let conversion_rate = if total_sessions > 0 {
+            unique_completions as f64 / total_sessions as f64 * 100.0
+        } else {
+            0.0
+        };
+
+        let ts_sql = format!(
+            "WITH comp AS (\
+                SELECT date_trunc('{bucket}', timestamp) AS b, COUNT(DISTINCT session_id) AS uniq \
+                FROM events WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
+                  AND kind = 'custom' AND name = $4 {filter_sql} GROUP BY 1), \
+             sess AS (\
+                SELECT date_trunc('{bucket}', timestamp) AS b, COUNT(DISTINCT session_id) AS sessions \
+                FROM events WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 GROUP BY 1) \
+             SELECT comp.b AS bucket, comp.uniq::BIGINT AS uniq, \
+                    COALESCE(sess.sessions, 0)::BIGINT AS sessions \
+             FROM comp LEFT JOIN sess ON comp.b = sess.b ORDER BY comp.b"
+        );
+        let mut tsq = sqlx::query(&ts_sql)
+            .bind(q.site_id.to_string())
+            .bind(q.range.start)
+            .bind(q.range.end)
+            .bind(&q.event_name);
+        for v in &filter_vals {
+            tsq = tsq.bind(v.clone());
+        }
+        let ts_rows = tsq.fetch_all(&self.pool).await.map_err(StoreError::query)?;
+        let mut timeseries = Vec::new();
+        for row in ts_rows {
+            let b: DateTime<Utc> = row.try_get("bucket").map_err(StoreError::query)?;
+            let c: i64 = row.try_get("uniq").map_err(StoreError::query)?;
+            let s: i64 = row.try_get("sessions").map_err(StoreError::query)?;
+            let cr = if s > 0 {
+                c as f64 / s as f64 * 100.0
+            } else {
+                0.0
+            };
+            timeseries.push(GoalBucket {
+                date: b.format("%Y-%m-%d").to_string(),
+                completions: c as u64,
+                conversion_rate: cr,
+            });
+        }
+
+        Ok(GoalStats {
+            completions: completions as u64,
+            unique_completions,
+            conversion_rate,
+            timeseries,
+        })
+    }
+
+    async fn query_sessions(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+    ) -> Result<Vec<SessionRow>, StoreError> {
+        let sql = format!(
+            "WITH s AS (\
+                SELECT session_id, timestamp AS ts, url, referrer, country_code, browser, os, \
+                    device_type, utm_source, utm_medium, utm_campaign, \
+                    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY timestamp ASC, id ASC) AS rn_first, \
+                    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY timestamp DESC, id DESC) AS rn_last \
+                FROM events WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 AND kind = 'pageview') \
+             SELECT encode(session_id, 'hex') AS session_id, MIN(ts) AS started, MAX(ts) AS ended, \
+                    COUNT(*)::BIGINT AS pageviews, \
+                    MAX(url) FILTER (WHERE rn_first = 1) AS entry_url, \
+                    MAX(url) FILTER (WHERE rn_last = 1) AS exit_url, \
+                    MAX(referrer) FILTER (WHERE rn_first = 1) AS referrer, \
+                    MAX(country_code) FILTER (WHERE rn_first = 1) AS country_code, \
+                    MAX(browser) FILTER (WHERE rn_first = 1) AS browser, \
+                    MAX(os) FILTER (WHERE rn_first = 1) AS os, \
+                    MAX(device_type) FILTER (WHERE rn_first = 1) AS device_type, \
+                    MAX(utm_source) FILTER (WHERE rn_first = 1) AS utm_source, \
+                    MAX(utm_medium) FILTER (WHERE rn_first = 1) AS utm_medium, \
+                    MAX(utm_campaign) FILTER (WHERE rn_first = 1) AS utm_campaign \
+             FROM s GROUP BY session_id ORDER BY started DESC LIMIT {limit}"
+        );
+        let rows = sqlx::query(&sql)
+            .bind(site_id.to_string())
+            .bind(range.start)
+            .bind(range.end)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(StoreError::query)?;
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let started: DateTime<Utc> = row.try_get("started").map_err(StoreError::query)?;
+            let ended: DateTime<Utc> = row.try_get("ended").map_err(StoreError::query)?;
+            let pageviews: i64 = row.try_get("pageviews").map_err(StoreError::query)?;
+            let pageviews = pageviews as u64;
+            let duration_secs = (ended - started).num_seconds();
+            out.push(SessionRow {
+                session_id: row.try_get("session_id").map_err(StoreError::query)?,
+                started_at: started,
+                ended_at: ended,
+                duration_secs,
+                pageviews,
+                entry_url: row
+                    .try_get::<Option<String>, _>("entry_url")
+                    .map_err(StoreError::query)?
+                    .unwrap_or_default(),
+                exit_url: row
+                    .try_get::<Option<String>, _>("exit_url")
+                    .map_err(StoreError::query)?
+                    .unwrap_or_default(),
+                referrer: row.try_get("referrer").map_err(StoreError::query)?,
+                country_code: row.try_get("country_code").map_err(StoreError::query)?,
+                browser: row
+                    .try_get::<Option<String>, _>("browser")
+                    .map_err(StoreError::query)?
+                    .unwrap_or_default(),
+                os: row
+                    .try_get::<Option<String>, _>("os")
+                    .map_err(StoreError::query)?
+                    .unwrap_or_default(),
+                device_type: row
+                    .try_get::<Option<String>, _>("device_type")
+                    .map_err(StoreError::query)?
+                    .unwrap_or_default(),
+                utm_source: row.try_get("utm_source").map_err(StoreError::query)?,
+                utm_medium: row.try_get("utm_medium").map_err(StoreError::query)?,
+                utm_campaign: row.try_get("utm_campaign").map_err(StoreError::query)?,
+                is_bounce: pageviews == 1 && duration_secs < 30,
+            });
+        }
+        Ok(out)
+    }
+
+    async fn query_events_list(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+    ) -> Result<Vec<RawEventRow>, StoreError> {
+        let sql = format!(
+            "SELECT id, name, kind, timestamp, COALESCE(url, '') AS url, referrer, country_code, \
+                    browser, os, device_type, properties \
+             FROM events WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
+             ORDER BY timestamp DESC LIMIT {limit}"
+        );
+        let rows = sqlx::query(&sql)
+            .bind(site_id.to_string())
+            .bind(range.start)
+            .bind(range.end)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(StoreError::query)?;
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            out.push(RawEventRow {
+                id: row.try_get("id").map_err(StoreError::query)?,
+                name: row.try_get("name").map_err(StoreError::query)?,
+                kind: row.try_get("kind").map_err(StoreError::query)?,
+                timestamp: row.try_get("timestamp").map_err(StoreError::query)?,
+                url: row.try_get("url").map_err(StoreError::query)?,
+                referrer: row.try_get("referrer").map_err(StoreError::query)?,
+                country_code: row.try_get("country_code").map_err(StoreError::query)?,
+                browser: row
+                    .try_get::<Option<String>, _>("browser")
+                    .map_err(StoreError::query)?
+                    .unwrap_or_default(),
+                os: row
+                    .try_get::<Option<String>, _>("os")
+                    .map_err(StoreError::query)?
+                    .unwrap_or_default(),
+                device_type: row
+                    .try_get::<Option<String>, _>("device_type")
+                    .map_err(StoreError::query)?
+                    .unwrap_or_default(),
+                properties: row.try_get("properties").map_err(StoreError::query)?,
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -563,6 +984,169 @@ impl MetaStore for PostgresBackend {
             .await
             .map_err(StoreError::db)?;
         Ok(())
+    }
+
+    // ---- Goals ----
+    async fn create_goal(&self, goal: &Goal) -> Result<(), StoreError> {
+        sqlx::query(
+            "INSERT INTO goals (id, site_id, name, event_name, filters, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(goal.id.to_string())
+        .bind(goal.site_id.to_string())
+        .bind(&goal.name)
+        .bind(&goal.event_name)
+        .bind(&goal.filters)
+        .bind(goal.created_at)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    async fn get_goal(&self, id: Ulid) -> Result<Option<Goal>, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, site_id, name, event_name, filters, created_at FROM goals WHERE id = $1",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        row.map(row_to_goal).transpose()
+    }
+
+    async fn list_goals(&self, site_id: Ulid) -> Result<Vec<Goal>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT id, site_id, name, event_name, filters, created_at FROM goals \
+             WHERE site_id = $1 ORDER BY created_at ASC",
+        )
+        .bind(site_id.to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        rows.into_iter().map(row_to_goal).collect()
+    }
+
+    async fn delete_goal(&self, id: Ulid) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM goals WHERE id = $1")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    // ---- Analytics alerts ----
+    async fn create_analytics_alert(&self, alert: &AnalyticsAlert) -> Result<(), StoreError> {
+        let config = serde_json::to_string(&alert.config)
+            .map_err(|e| StoreError::Serialization(e.to_string()))?;
+        sqlx::query(
+            "INSERT INTO analytics_alerts (id, site_id, type, config, channel_id, enabled, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(alert.id.to_string())
+        .bind(alert.site_id.to_string())
+        .bind(alert.kind.as_str())
+        .bind(config)
+        .bind(alert.channel_id.to_string())
+        .bind(alert.enabled)
+        .bind(alert.created_at)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    async fn get_analytics_alert(&self, id: Ulid) -> Result<Option<AnalyticsAlert>, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, site_id, type, config, channel_id, enabled, created_at \
+             FROM analytics_alerts WHERE id = $1",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        row.map(row_to_analytics_alert).transpose()
+    }
+
+    async fn list_analytics_alerts(
+        &self,
+        site_id: Ulid,
+    ) -> Result<Vec<AnalyticsAlert>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT id, site_id, type, config, channel_id, enabled, created_at \
+             FROM analytics_alerts WHERE site_id = $1 ORDER BY created_at DESC",
+        )
+        .bind(site_id.to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        rows.into_iter().map(row_to_analytics_alert).collect()
+    }
+
+    async fn list_enabled_analytics_alerts(&self) -> Result<Vec<AnalyticsAlert>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT id, site_id, type, config, channel_id, enabled, created_at \
+             FROM analytics_alerts WHERE enabled = TRUE ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        rows.into_iter().map(row_to_analytics_alert).collect()
+    }
+
+    async fn set_analytics_alert_enabled(&self, id: Ulid, enabled: bool) -> Result<(), StoreError> {
+        sqlx::query("UPDATE analytics_alerts SET enabled = $1 WHERE id = $2")
+            .bind(enabled)
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    async fn delete_analytics_alert(&self, id: Ulid) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM analytics_alerts WHERE id = $1")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    async fn record_analytics_alert_fire(
+        &self,
+        fire: &AnalyticsAlertFire,
+    ) -> Result<(), StoreError> {
+        let payload = serde_json::to_string(&fire.payload)
+            .map_err(|e| StoreError::Serialization(e.to_string()))?;
+        sqlx::query(
+            "INSERT INTO analytics_alert_fires (id, alert_id, fired_at, payload) \
+             VALUES ($1, $2, $3, $4)",
+        )
+        .bind(fire.id.to_string())
+        .bind(fire.alert_id.to_string())
+        .bind(fire.fired_at)
+        .bind(payload)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    async fn last_analytics_alert_fire(
+        &self,
+        alert_id: Ulid,
+    ) -> Result<Option<AnalyticsAlertFire>, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, alert_id, fired_at, payload FROM analytics_alert_fires \
+             WHERE alert_id = $1 ORDER BY fired_at DESC LIMIT 1",
+        )
+        .bind(alert_id.to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        row.map(row_to_alert_fire).transpose()
     }
 
     async fn upsert_agent(&self, agent: &Agent) -> Result<(), StoreError> {
@@ -1075,6 +1659,48 @@ fn row_to_funnel(row: sqlx::postgres::PgRow) -> Result<Funnel, StoreError> {
     })
 }
 
+fn row_to_goal(row: sqlx::postgres::PgRow) -> Result<Goal, StoreError> {
+    let id: String = row.try_get("id").map_err(StoreError::db)?;
+    let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
+    Ok(Goal {
+        id: parse_ulid(&id),
+        site_id: parse_ulid(&site_id),
+        name: row.try_get("name").map_err(StoreError::db)?,
+        event_name: row.try_get("event_name").map_err(StoreError::db)?,
+        filters: row.try_get("filters").map_err(StoreError::db)?,
+        created_at: row.try_get("created_at").map_err(StoreError::db)?,
+    })
+}
+
+fn row_to_analytics_alert(row: sqlx::postgres::PgRow) -> Result<AnalyticsAlert, StoreError> {
+    let id: String = row.try_get("id").map_err(StoreError::db)?;
+    let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
+    let type_str: String = row.try_get("type").map_err(StoreError::db)?;
+    let config_str: String = row.try_get("config").map_err(StoreError::db)?;
+    let channel_id: String = row.try_get("channel_id").map_err(StoreError::db)?;
+    Ok(AnalyticsAlert {
+        id: parse_ulid(&id),
+        site_id: parse_ulid(&site_id),
+        kind: AnalyticsAlertKind::from_str(&type_str).unwrap_or(AnalyticsAlertKind::TrafficSpike),
+        config: serde_json::from_str(&config_str).unwrap_or_default(),
+        channel_id: parse_ulid(&channel_id),
+        enabled: row.try_get("enabled").map_err(StoreError::db)?,
+        created_at: row.try_get("created_at").map_err(StoreError::db)?,
+    })
+}
+
+fn row_to_alert_fire(row: sqlx::postgres::PgRow) -> Result<AnalyticsAlertFire, StoreError> {
+    let id: String = row.try_get("id").map_err(StoreError::db)?;
+    let alert_id: String = row.try_get("alert_id").map_err(StoreError::db)?;
+    let payload_str: String = row.try_get("payload").map_err(StoreError::db)?;
+    Ok(AnalyticsAlertFire {
+        id: parse_ulid(&id),
+        alert_id: parse_ulid(&alert_id),
+        fired_at: row.try_get("fired_at").map_err(StoreError::db)?,
+        payload: serde_json::from_str(&payload_str).unwrap_or(serde_json::Value::Null),
+    })
+}
+
 fn row_to_agent(row: sqlx::postgres::PgRow) -> Result<Agent, StoreError> {
     let id: String = row.try_get("id").map_err(StoreError::db)?;
     let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
@@ -1204,10 +1830,7 @@ fn parse_role(s: &str) -> UserRole {
 }
 
 fn parse_alert_kind(s: &str) -> AlertChannelKind {
-    match s {
-        "slack" => AlertChannelKind::Slack,
-        _ => AlertChannelKind::Webhook,
-    }
+    AlertChannelKind::from_str(s)
 }
 
 fn parse_incident_status(s: &str) -> IncidentStatus {
@@ -1219,7 +1842,7 @@ fn parse_incident_status(s: &str) -> IncidentStatus {
 }
 
 mod ddl {
-    pub fn all_statements() -> [&'static str; 10] {
+    pub fn all_statements() -> [&'static str; 13] {
         [
             ORGS_DDL,
             SITES_DDL,
@@ -1231,6 +1854,9 @@ mod ddl {
             API_KEYS_DDL,
             ALERT_CHANNELS_DDL,
             INCIDENTS_DDL,
+            GOALS_DDL,
+            ANALYTICS_ALERTS_DDL,
+            ANALYTICS_ALERT_FIRES_DDL,
         ]
     }
 
@@ -1353,6 +1979,38 @@ mod ddl {
             status        TEXT NOT NULL DEFAULT 'open',
             opened_at     TIMESTAMPTZ NOT NULL,
             closed_at     TIMESTAMPTZ
+        )
+    "#;
+
+    const GOALS_DDL: &str = r#"
+        CREATE TABLE IF NOT EXISTS goals (
+            id          TEXT PRIMARY KEY,
+            site_id     TEXT NOT NULL REFERENCES sites(id),
+            name        TEXT NOT NULL,
+            event_name  TEXT NOT NULL,
+            filters     TEXT,
+            created_at  TIMESTAMPTZ NOT NULL
+        )
+    "#;
+
+    const ANALYTICS_ALERTS_DDL: &str = r#"
+        CREATE TABLE IF NOT EXISTS analytics_alerts (
+            id          TEXT PRIMARY KEY,
+            site_id     TEXT NOT NULL REFERENCES sites(id),
+            type        TEXT NOT NULL,
+            config      TEXT NOT NULL,
+            channel_id  TEXT NOT NULL REFERENCES alert_channels(id),
+            enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at  TIMESTAMPTZ NOT NULL
+        )
+    "#;
+
+    const ANALYTICS_ALERT_FIRES_DDL: &str = r#"
+        CREATE TABLE IF NOT EXISTS analytics_alert_fires (
+            id          TEXT PRIMARY KEY,
+            alert_id    TEXT NOT NULL REFERENCES analytics_alerts(id),
+            fired_at    TIMESTAMPTZ NOT NULL,
+            payload     TEXT NOT NULL
         )
     "#;
 

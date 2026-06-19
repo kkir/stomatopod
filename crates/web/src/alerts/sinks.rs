@@ -86,6 +86,42 @@ impl AlertSink for SlackSink {
     }
 }
 
+/// Telegram bot sink. The channel's `url` holds the chat id and `secret`
+/// holds the bot token; we POST to the Bot API `sendMessage` method.
+pub struct TelegramSink {
+    pub client: reqwest::Client,
+}
+
+impl TelegramSink {
+    pub fn new(client: reqwest::Client) -> Self {
+        Self { client }
+    }
+}
+
+#[async_trait]
+impl AlertSink for TelegramSink {
+    async fn dispatch(&self, channel: &AlertChannel, incident: &Incident) -> anyhow::Result<()> {
+        let token = channel
+            .secret
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("telegram channel missing bot token"))?;
+        let chat_id = &channel.url;
+        let text = format!(
+            "*Stomatopod alert*\nAgent: `{}`\nTrigger: {}\nStatus: {}",
+            incident.agent_id,
+            format_trigger(&incident.trigger),
+            incident.status.as_str()
+        );
+        let api = format!("https://api.telegram.org/bot{token}/sendMessage");
+        let body = json!({ "chat_id": chat_id, "text": text, "parse_mode": "Markdown" });
+        let resp = self.client.post(api).json(&body).send().await?;
+        if !resp.status().is_success() {
+            anyhow::bail!("telegram returned {}", resp.status());
+        }
+        Ok(())
+    }
+}
+
 pub fn select_sink(
     channel: &AlertChannel,
     webhook: &WebhookSink,
@@ -95,6 +131,7 @@ pub fn select_sink(
     match channel.kind {
         AlertChannelKind::Webhook => "webhook",
         AlertChannelKind::Slack => "slack",
+        AlertChannelKind::Telegram => "telegram",
     }
 }
 
@@ -119,6 +156,11 @@ fn format_trigger(t: &IncidentTrigger) -> String {
             format!("token velocity {tokens_per_sec:.0}/s")
         }
         IncidentTrigger::CostThreshold { usd } => format!("cost threshold ${usd:.2}"),
+        IncidentTrigger::AnalyticsAlert {
+            alert_type,
+            value,
+            threshold,
+        } => format!("{alert_type} (value {value:.1}, threshold {threshold:.1})"),
         IncidentTrigger::Manual => "manual operator action".into(),
     }
 }

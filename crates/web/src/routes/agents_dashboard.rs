@@ -161,6 +161,9 @@ fn summarize_trigger(t: &IncidentTrigger) -> String {
             format!("token velocity {tokens_per_sec:.0}/s")
         }
         IncidentTrigger::CostThreshold { usd } => format!("cost ${usd:.2}"),
+        IncidentTrigger::AnalyticsAlert {
+            alert_type, value, ..
+        } => format!("{alert_type} ({value:.1})"),
         IncidentTrigger::Manual => "manual".into(),
     }
 }

@@ -13,8 +13,8 @@ use crate::{
         cors::ingest_cors,
     },
     routes::{
-        agents_dashboard, analytics, api, api_keys, auth, dashboard, events, funnels, partials,
-        sentinel, sites, spans,
+        agents_dashboard, analytics, api, api_keys, auth, dashboard, events, funnels, insights,
+        partials, sentinel, sites, spans,
     },
     state::AppState,
 };
@@ -63,6 +63,44 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         .route("/api/v1/sites/:site/events", get(analytics::events))
         .route(
+            "/api/v1/sites/:site/top-entry-pages",
+            get(analytics::top_entry_pages),
+        )
+        .route(
+            "/api/v1/sites/:site/top-exit-pages",
+            get(analytics::top_exit_pages),
+        )
+        .route("/api/v1/sites/:site/realtime", get(analytics::realtime))
+        .route(
+            "/api/v1/sites/:site/export/events",
+            get(analytics::export_events),
+        )
+        .route(
+            "/api/v1/sites/:site/export/sessions",
+            get(analytics::export_sessions),
+        )
+        .route(
+            "/api/v1/sites/:site/goals",
+            get(analytics::list_goals).post(analytics::create_goal),
+        )
+        .route(
+            "/api/v1/sites/:site/goals/:goal_id",
+            axum::routing::delete(analytics::delete_goal),
+        )
+        .route(
+            "/api/v1/sites/:site/goals/:goal_id/stats",
+            get(analytics::goal_stats),
+        )
+        .route(
+            "/api/v1/sites/:site/analytics-alerts",
+            get(analytics::list_analytics_alerts).post(analytics::create_analytics_alert),
+        )
+        .route(
+            "/api/v1/sites/:site/analytics-alerts/:id",
+            axum::routing::patch(analytics::patch_analytics_alert)
+                .delete(analytics::delete_analytics_alert),
+        )
+        .route(
             "/api/v1/sites/:site/funnels",
             get(analytics::list_funnels).post(analytics::create_funnel),
         )
@@ -84,6 +122,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let dashboard_routes = Router::new()
         .route("/app", get(dashboard::index))
         .route("/app/docs", get(api::docs_page))
+        // Global feature pages with a site-filter dropdown.
+        .route("/app/realtime", get(insights::realtime_global))
+        .route("/app/goals", get(insights::goals_global))
+        .route("/app/alerts", get(insights::alerts_global))
         .route(
             "/app/sites",
             get(sites::sites_list).post(sites::create_site),
@@ -110,6 +152,40 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             post(api_keys::delete_key),
         )
         .route("/app/sites/:site_id/events", get(events::events_list))
+        // Tier-2 dashboard pages: real-time, goals, analytics alerts.
+        .route("/app/sites/:site_id/realtime", get(insights::realtime_page))
+        .route(
+            "/app/sites/:site_id/partials/realtime",
+            get(insights::realtime_panel),
+        )
+        .route(
+            "/app/sites/:site_id/goals",
+            get(insights::goals_page).post(insights::create_goal),
+        )
+        .route(
+            "/app/sites/:site_id/goals/:goal_id/delete",
+            post(insights::delete_goal),
+        )
+        .route(
+            "/app/sites/:site_id/alerts",
+            get(insights::alerts_page).post(insights::create_alert),
+        )
+        .route(
+            "/app/sites/:site_id/alerts/:alert_id/delete",
+            post(insights::delete_alert),
+        )
+        .route(
+            "/app/sites/:site_id/channels",
+            post(insights::create_channel),
+        )
+        .route(
+            "/app/sites/:site_id/channels/:channel_id/delete",
+            post(insights::delete_channel),
+        )
+        .route(
+            "/app/sites/:site_id/channels/:channel_id/test",
+            post(insights::test_channel),
+        )
         .route(
             "/app/sites/:site_id/funnels",
             get(funnels::funnels_page).post(funnels::create_funnel),
