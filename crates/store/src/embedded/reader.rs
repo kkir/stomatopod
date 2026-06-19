@@ -16,8 +16,8 @@ use stomatopod_core::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
         pageviews::{
-            Granularity, PageviewsQuery, PageviewsResult, TimeBucket, TimeRange, TopList,
-            TopListField, TopRow,
+            Filter, FilterOp, Granularity, PageviewsQuery, PageviewsResult, TimeBucket, TimeRange,
+            TopList, TopListField, TopRow,
         },
     },
 };
@@ -126,6 +126,7 @@ impl EmbeddedReader {
         // side can rely on a single `Int64Array` downcast — DataFusion
         // promotes integer aggregates to wider types and the column types
         // would otherwise differ between SUM and COUNT.
+        let filters = datafusion_filter_clause(&q.filters);
         let sql = format!(
             r#"
             SELECT
@@ -136,6 +137,7 @@ impl EmbeddedReader {
             WHERE site_id = '{site_id}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
+              {filters}
             GROUP BY 1
             ORDER BY 1
             "#
@@ -186,12 +188,13 @@ impl EmbeddedReader {
         field: TopListField,
         range: &TimeRange,
         limit: u32,
+        filters: &[Filter],
     ) -> Result<TopList, StoreError> {
         let site_id_str = site_id.to_string();
         if !self.ensure_site_table_available(&site_id_str).await? {
             return Ok(TopList::default());
         }
-        self.query_top_field(site_id, range, limit, field.column())
+        self.query_top_field(site_id, range, limit, field.column(), filters)
             .await
     }
 
@@ -201,6 +204,7 @@ impl EmbeddedReader {
         range: &TimeRange,
         limit: u32,
         field: &str,
+        filters: &[Filter],
     ) -> Result<TopList, StoreError> {
         let site_id_str = site_id.to_string();
         self.ensure_site_registered(&site_id_str)
@@ -210,6 +214,7 @@ impl EmbeddedReader {
         let table = table_name(&site_id_str);
         let start = range.start.timestamp_micros();
         let end = range.end.timestamp_micros();
+        let filter_sql = datafusion_filter_clause(filters);
 
         let sql = format!(
             r#"
@@ -222,6 +227,7 @@ impl EmbeddedReader {
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
               AND CAST(kind AS VARCHAR) = 'pageview'
+              {filter_sql}
             GROUP BY 1
             ORDER BY pageviews DESC
             LIMIT {limit}
@@ -382,6 +388,40 @@ fn table_name(site_id: &str) -> String {
     format!("events_{}", site_id.replace('-', "_"))
 }
 
+/// Build the `AND <col> <op> '<value>'` fragment for a set of analytics
+/// filters, escaped for DataFusion's SQL dialect. Columns come from the
+/// `FilterField` enum (never user input); values are single-quote-escaped.
+///
+/// DataFusion's `LIKE` has no `ESCAPE` support, so `Contains`/`StartsWith`
+/// build the wildcard pattern from the raw value here rather than reusing
+/// `Filter::sql_value` (whose backslash escapes would be taken literally).
+/// The trade-off: a `%`/`_` inside a contains/starts-with value acts as a
+/// wildcard on this backend.
+fn datafusion_filter_clause(filters: &[Filter]) -> String {
+    let mut out = String::new();
+    for f in filters {
+        let col = f.field.column();
+        match f.op {
+            FilterOp::Contains => {
+                let val = f.value.replace('\'', "''");
+                out.push_str(&format!(" AND CAST({col} AS VARCHAR) LIKE '%{val}%'"));
+            }
+            FilterOp::StartsWith => {
+                let val = f.value.replace('\'', "''");
+                out.push_str(&format!(" AND CAST({col} AS VARCHAR) LIKE '{val}%'"));
+            }
+            _ => {
+                let val = f.value.replace('\'', "''");
+                out.push_str(&format!(
+                    " AND CAST({col} AS VARCHAR) {} '{val}'",
+                    f.op.sql_operator()
+                ));
+            }
+        }
+    }
+    out
+}
+
 /// Rename any pre-existing flat `<date>/` partitions under a site directory
 /// to Hive-style `date=<date>/` partitions. Earlier versions wrote the flat
 /// layout, but DataFusion's `ListingTable` defaults to
@@ -502,7 +542,7 @@ mod tests {
             assert!(pageviews.buckets.is_empty());
 
             let top = reader
-                .query_top_list(site_id, TopListField::Page, &range, 10)
+                .query_top_list(site_id, TopListField::Page, &range, 10, &[])
                 .await
                 .expect("top list query");
             assert!(top.rows.is_empty());

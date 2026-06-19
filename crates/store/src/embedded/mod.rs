@@ -22,7 +22,7 @@ use stomatopod_core::{
     query::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
-        pageviews::{PageviewsQuery, PageviewsResult, TimeRange, TopList, TopListField},
+        pageviews::{Filter, PageviewsQuery, PageviewsResult, TimeRange, TopList, TopListField},
         spans::{AgentSummary, SpanQuery, SpanRow},
     },
     traits::{AgentStore, MetaStore, StorageBackend},
@@ -122,9 +122,10 @@ impl StorageBackend for EmbeddedBackend {
         field: TopListField,
         range: &TimeRange,
         limit: u32,
+        filters: &[Filter],
     ) -> Result<TopList, StoreError> {
         self.reader
-            .query_top_list(site_id, field, range, limit)
+            .query_top_list(site_id, field, range, limit, filters)
             .await
     }
 

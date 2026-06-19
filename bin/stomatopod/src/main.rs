@@ -212,6 +212,10 @@ fn build_templates() -> Result<JinjaEnv<'static>> {
         }
     });
 
+    // Percent-encode a string for a URL query component. Used by the
+    // dashboard to build "click to filter" links from row values.
+    env.add_filter("urlencode", urlencode_filter);
+
     // Embed templates at compile time
     env.add_template(
         "base.jinja",
@@ -274,6 +278,14 @@ fn build_templates() -> Result<JinjaEnv<'static>> {
         include_str!("../../../crates/web/templates/partials/top_devices.jinja"),
     )?;
     env.add_template(
+        "partials/top_os.jinja",
+        include_str!("../../../crates/web/templates/partials/top_os.jinja"),
+    )?;
+    env.add_template(
+        "partials/top_regions.jinja",
+        include_str!("../../../crates/web/templates/partials/top_regions.jinja"),
+    )?;
+    env.add_template(
         "agents.jinja",
         include_str!("../../../crates/web/templates/agents.jinja"),
     )?;
@@ -291,6 +303,21 @@ fn build_templates() -> Result<JinjaEnv<'static>> {
     )?;
 
     Ok(env)
+}
+
+/// `urlencode` jinja filter: percent-encode a query-string component, leaving
+/// the RFC 3986 unreserved set intact.
+fn urlencode_filter(s: String) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 async fn bootstrap_self_hosted(

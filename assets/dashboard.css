@@ -1486,3 +1486,135 @@ body.auth::after {
     animation: none !important;
   }
 }
+
+/* ===== Controls bar: filters + custom range + compare ===== */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 1.25rem;
+}
+
+/* Active filter pills */
+.filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px 4px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  border: 1px solid var(--border);
+}
+
+.filter-pill .rm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  transition:
+    background 140ms,
+    color 140ms;
+}
+
+.filter-pill .rm:hover {
+  background: var(--red);
+  color: #fff;
+}
+
+/* Inline add-filter + custom-range forms */
+.controls form {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.controls select,
+.controls input[type="text"],
+.controls input[type="date"] {
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.controls button {
+  padding: 5px 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #032621;
+  background: var(--grad-btn);
+  border: none;
+  cursor: pointer;
+}
+
+.controls button.ghost {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  border: 1px solid var(--border);
+}
+
+/* Compare-period toggle */
+.compare-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  border: 1px solid var(--border);
+  transition:
+    color 160ms,
+    border-color 160ms;
+}
+
+.compare-toggle:hover {
+  color: var(--text-2);
+}
+
+.compare-toggle.on {
+  color: #032621;
+  background: var(--grad-btn);
+  border-color: transparent;
+}
+
+/* "new" / "flat" delta variants extend the existing .stat .delta rules */
+.stat .delta.new {
+  color: var(--teal);
+}
+
+/* Clickable dimension values (click a row to add a filter) */
+a.row-link {
+  color: inherit;
+  border-bottom: 1px dotted var(--border-2);
+}
+
+a.row-link:hover {
+  color: var(--teal);
+  border-bottom-color: var(--teal);
+}
+
+.cmp-prev {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.controls .ctl-sep {
+  color: var(--muted);
+  opacity: 0.6;
+}

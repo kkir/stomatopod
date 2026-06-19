@@ -15,7 +15,7 @@ use crate::{
     query::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
-        pageviews::{PageviewsQuery, PageviewsResult, TimeRange, TopList, TopListField},
+        pageviews::{Filter, PageviewsQuery, PageviewsResult, TimeRange, TopList, TopListField},
         spans::{AgentSummary, SpanQuery, SpanRow},
     },
 };
@@ -39,13 +39,15 @@ pub trait StorageBackend: Send + Sync + 'static {
     async fn query_pageviews(&self, q: &PageviewsQuery) -> Result<PageviewsResult, StoreError>;
 
     /// Group pageviews by a single dimension (URL, referrer, country, browser,
-    /// or device type) and return the top `limit` values ordered by traffic.
+    /// device type, OS, or region) and return the top `limit` values ordered
+    /// by traffic. `filters` further narrows the rows (ANDed together).
     async fn query_top_list(
         &self,
         site_id: Ulid,
         field: TopListField,
         range: &TimeRange,
         limit: u32,
+        filters: &[Filter],
     ) -> Result<TopList, StoreError>;
 
     async fn query_custom_events(&self, q: &EventQuery) -> Result<TopList, StoreError>;

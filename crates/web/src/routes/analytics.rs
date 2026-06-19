@@ -4,6 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use axum_extra::extract::Query as FormQuery;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use ulid::Ulid;
@@ -13,7 +14,7 @@ use stomatopod_core::{
     query::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelStep},
-        pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},
+        pageviews::{Filter, Granularity, PageviewsQuery, TimeRange, TopListField},
     },
 };
 
@@ -23,6 +24,30 @@ use crate::{middleware::auth::Principal, state::AppState};
 
 fn parse_range(s: &str) -> TimeRange {
     TimeRange::from_label(s)
+}
+
+/// Resolve the effective time range from the preset/`from`/`to` triple: a
+/// valid `from`+`to` pair wins, otherwise the preset label (default 30d).
+fn resolve_range(range: Option<&str>, from: Option<&str>, to: Option<&str>) -> TimeRange {
+    if let (Some(f), Some(t)) = (from, to) {
+        if let Some(r) = TimeRange::parse_dates(f, t) {
+            return r;
+        }
+    }
+    TimeRange::from_label(range.unwrap_or("30d"))
+}
+
+/// Parse `filter=field:op:value` params into validated filters, dropping
+/// malformed ones and capping the count to bound query cost.
+fn parse_filters(raw: &[String]) -> Vec<Filter> {
+    raw.iter()
+        .filter_map(|s| Filter::parse(s))
+        .take(10)
+        .collect()
+}
+
+fn compare_enabled(v: Option<&str>) -> bool {
+    matches!(v, Some("1" | "true" | "on"))
 }
 
 /// Resolve `{site}` path segment: try ULID first, then domain lookup.
@@ -96,26 +121,45 @@ pub struct RangeParams {
     pub range: String,
 }
 
-#[derive(Deserialize)]
-pub struct PageviewsParams {
-    #[serde(default = "default_range")]
-    pub range: String,
+/// Unified query params for the analytics read endpoints. Parsed with
+/// `axum_extra`'s `Query` so repeated `filter=` keys collect into a `Vec`.
+/// Supports preset ranges (`range=30d`), custom windows (`from`/`to`),
+/// dimension filters, and the period-comparison toggle.
+#[derive(Deserialize, Default)]
+pub struct AnalyticsParams {
+    pub range: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub compare: Option<String>,
     #[serde(default)]
     pub granularity: Granularity,
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub filter: Vec<String>,
 }
 
-#[derive(Deserialize)]
-pub struct TopParams {
-    #[serde(default = "default_range")]
-    pub range: String,
-    #[serde(default = "default_limit")]
-    pub limit: u32,
+impl AnalyticsParams {
+    fn range(&self) -> TimeRange {
+        resolve_range(
+            self.range.as_deref(),
+            self.from.as_deref(),
+            self.to.as_deref(),
+        )
+    }
+    fn filters(&self) -> Vec<Filter> {
+        parse_filters(&self.filter)
+    }
+    fn limit_or_default(&self) -> u32 {
+        self.limit.unwrap_or(20)
+    }
 }
 
 #[derive(Deserialize)]
 pub struct EventsParams {
     #[serde(default = "default_range")]
     pub range: String,
+    pub from: Option<String>,
+    pub to: Option<String>,
     #[serde(default = "default_limit")]
     pub limit: u32,
     pub name: Option<String>,
@@ -181,7 +225,7 @@ pub async fn pageviews(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
     Path(site): Path<String>,
-    Query(params): Query<PageviewsParams>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
 ) -> impl IntoResponse {
     let site_id = match resolve_authorized_site(&state, &principal, &site).await {
         Ok(id) => id,
@@ -189,13 +233,33 @@ pub async fn pageviews(
     };
     let q = PageviewsQuery {
         site_id,
-        range: parse_range(&params.range),
+        range: params.range(),
         granularity: params.granularity,
-        filters: vec![],
+        filters: params.filters(),
     };
-    match state.backend.query_pageviews(&q).await {
-        Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    let result = match state.backend.query_pageviews(&q).await {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+
+    // Period-over-period comparison: when requested, attach the prior
+    // equal-length window's totals under `comparison`.
+    if compare_enabled(params.compare.as_deref()) {
+        let prev = PageviewsQuery {
+            range: q.range.previous(),
+            filters: q.filters.clone(),
+            ..q
+        };
+        match state.backend.query_pageviews(&prev).await {
+            Ok(cmp) => {
+                let mut body = serde_json::to_value(&result).unwrap();
+                body["comparison"] = serde_json::to_value(&cmp).unwrap();
+                Json(body).into_response()
+            }
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        }
+    } else {
+        Json(serde_json::to_value(result).unwrap()).into_response()
     }
 }
 
@@ -203,18 +267,23 @@ async fn top_list_response(
     state: &AppState,
     principal: &Principal,
     site: &str,
-    range_label: &str,
-    limit: u32,
+    params: &AnalyticsParams,
     field: TopListField,
 ) -> axum::response::Response {
     let site_id = match resolve_authorized_site(state, principal, site).await {
         Ok(id) => id,
         Err(resp) => return resp,
     };
-    let range = parse_range(range_label);
+    let range = params.range();
     match state
         .backend
-        .query_top_list(site_id, field, &range, limit)
+        .query_top_list(
+            site_id,
+            field,
+            &range,
+            params.limit_or_default(),
+            &params.filters(),
+        )
         .await
     {
         Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),
@@ -227,17 +296,9 @@ pub async fn top_pages(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
     Path(site): Path<String>,
-    Query(params): Query<TopParams>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
 ) -> impl IntoResponse {
-    top_list_response(
-        &state,
-        &principal,
-        &site,
-        &params.range,
-        params.limit,
-        TopListField::Page,
-    )
-    .await
+    top_list_response(&state, &principal, &site, &params, TopListField::Page).await
 }
 
 /// GET /api/v1/sites/:site/top-referrers
@@ -245,17 +306,29 @@ pub async fn top_referrers(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
     Path(site): Path<String>,
-    Query(params): Query<TopParams>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
 ) -> impl IntoResponse {
-    top_list_response(
-        &state,
-        &principal,
-        &site,
-        &params.range,
-        params.limit,
-        TopListField::Referrer,
-    )
-    .await
+    top_list_response(&state, &principal, &site, &params, TopListField::Referrer).await
+}
+
+/// GET /api/v1/sites/:site/top-os
+pub async fn top_os(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    top_list_response(&state, &principal, &site, &params, TopListField::Os).await
+}
+
+/// GET /api/v1/sites/:site/top-regions
+pub async fn top_regions(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    top_list_response(&state, &principal, &site, &params, TopListField::Region).await
 }
 
 /// GET /api/v1/sites/:site/events
@@ -271,7 +344,11 @@ pub async fn events(
     };
     let q = EventQuery {
         site_id,
-        range: parse_range(&params.range),
+        range: resolve_range(
+            Some(&params.range),
+            params.from.as_deref(),
+            params.to.as_deref(),
+        ),
         event_name: params.name,
         filters: vec![],
         limit: params.limit,

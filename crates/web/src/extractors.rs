@@ -3,11 +3,16 @@ use axum::{
     extract::{FromRequestParts, Path, Query},
     http::request::Parts,
 };
+use axum_extra::extract::Query as FormQuery;
 use serde::Deserialize;
-use stomatopod_core::query::pageviews::{canonical_label, TimeRange};
+use stomatopod_core::query::pageviews::{canonical_label, Filter, Granularity, TimeRange};
 use ulid::Ulid;
 
 use crate::error::AppError;
+
+/// Most filters a single dashboard query honours. Caps query cost and URL
+/// length; extra `filter=` params beyond this are dropped.
+const MAX_FILTERS: usize = 10;
 
 /// Path extractor that decodes a single `:site_id` segment as a ULID.
 ///
@@ -64,5 +69,93 @@ impl<S: Send + Sync> FromRequestParts<S> for Range {
             range: TimeRange::from_label(&p.range),
             label: canonical_label(&p.range),
         })
+    }
+}
+
+/// Raw query params for the analytics dashboard. Uses `axum_extra`'s `Query`
+/// so repeated `filter=` keys deserialize into a `Vec`.
+#[derive(Deserialize, Default)]
+struct DashParams {
+    range: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+    /// Presence-based: any of `1`/`true`/`on` enables comparison.
+    compare: Option<String>,
+    #[serde(default)]
+    filter: Vec<String>,
+}
+
+/// The full set of dashboard query controls: time range (preset *or* custom
+/// `from`/`to`), active filters, and the period-comparison toggle. Replaces
+/// the bare [`Range`] extractor on the overview, its partials, and the
+/// analytics API so all three honour the same URL contract.
+pub struct DashQuery {
+    pub range: TimeRange,
+    pub granularity: Granularity,
+    pub filters: Vec<Filter>,
+    /// Canonical preset label (`"7d"`/`"30d"`/…). Used for tab highlighting
+    /// and for links on sibling pages that only understand presets.
+    pub label: &'static str,
+    /// True when a custom `from`/`to` range is in effect.
+    pub custom: bool,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub compare: bool,
+}
+
+impl DashQuery {
+    fn from_params(p: DashParams) -> Self {
+        let filters: Vec<Filter> = p
+            .filter
+            .iter()
+            .filter_map(|s| Filter::parse(s))
+            .take(MAX_FILTERS)
+            .collect();
+
+        let custom_range = match (p.from.as_deref(), p.to.as_deref()) {
+            (Some(f), Some(t)) => TimeRange::parse_dates(f, t),
+            _ => None,
+        };
+
+        let label_str = p.range.as_deref().unwrap_or("30d");
+        let compare = matches!(p.compare.as_deref(), Some("1" | "true" | "on"));
+
+        match custom_range {
+            Some(range) => {
+                let granularity = Granularity::auto_for_range(&range);
+                DashQuery {
+                    range,
+                    granularity,
+                    filters,
+                    label: canonical_label(label_str),
+                    custom: true,
+                    from: p.from,
+                    to: p.to,
+                    compare,
+                }
+            }
+            None => DashQuery {
+                range: TimeRange::from_label(label_str),
+                granularity: Granularity::Day,
+                filters,
+                label: canonical_label(label_str),
+                custom: false,
+                from: None,
+                to: None,
+                compare,
+            },
+        }
+    }
+}
+
+#[async_trait]
+impl<S: Send + Sync> FromRequestParts<S> for DashQuery {
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let FormQuery(p): FormQuery<DashParams> = FormQuery::from_request_parts(parts, state)
+            .await
+            .map_err(|_| AppError::BadRequest("invalid dashboard query"))?;
+        Ok(DashQuery::from_params(p))
     }
 }
