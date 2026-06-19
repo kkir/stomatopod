@@ -23,7 +23,10 @@ pub fn run(cmd: &SkillsCommand) -> Result<()> {
 
 fn skill_dir() -> Result<PathBuf> {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    Ok(PathBuf::from(home).join(".claude").join("skills").join(SKILL_NAME))
+    Ok(PathBuf::from(home)
+        .join(".claude")
+        .join("skills")
+        .join(SKILL_NAME))
 }
 
 fn install(force: bool) -> Result<()> {
