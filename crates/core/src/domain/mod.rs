@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod agent_span;
+pub mod api_key;
 pub mod control;
 pub mod event;
 pub mod incident;

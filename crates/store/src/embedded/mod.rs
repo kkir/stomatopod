@@ -296,6 +296,35 @@ impl MetaStore for EmbeddedBackend {
         self.meta.delete_sentinel_token(id).await
     }
 
+    async fn create_api_key(
+        &self,
+        key: &stomatopod_core::domain::api_key::ApiKey,
+    ) -> Result<(), StoreError> {
+        self.meta.create_api_key(key).await
+    }
+
+    async fn list_api_keys(
+        &self,
+        org_id: Ulid,
+    ) -> Result<Vec<stomatopod_core::domain::api_key::ApiKey>, StoreError> {
+        self.meta.list_api_keys(org_id).await
+    }
+
+    async fn get_api_key_by_hash(
+        &self,
+        key_hash: &str,
+    ) -> Result<Option<stomatopod_core::domain::api_key::ApiKey>, StoreError> {
+        self.meta.get_api_key_by_hash(key_hash).await
+    }
+
+    async fn touch_api_key(&self, id: Ulid) -> Result<(), StoreError> {
+        self.meta.touch_api_key(id).await
+    }
+
+    async fn delete_api_key(&self, id: Ulid) -> Result<(), StoreError> {
+        self.meta.delete_api_key(id).await
+    }
+
     async fn create_alert_channel(
         &self,
         channel: &stomatopod_core::domain::agent::AlertChannel,

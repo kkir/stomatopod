@@ -1,20 +1,23 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use ulid::Ulid;
 
-use stomatopod_core::query::{
-    events::EventQuery,
-    funnel::{FunnelQuery, FunnelStep},
-    pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},
+use stomatopod_core::{
+    domain::org::Funnel,
+    query::{
+        events::EventQuery,
+        funnel::{FunnelQuery, FunnelStep},
+        pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},
+    },
 };
 
-use crate::state::AppState;
+use crate::{middleware::auth::Principal, state::AppState};
 
 // ---- Shared helpers ----
 
@@ -34,6 +37,55 @@ async fn resolve_site_id(state: &AppState, site: &str) -> Option<Ulid> {
         .ok()
         .flatten()
         .map(|s| s.id)
+}
+
+fn not_found() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({"error": "site not found"})),
+    )
+        .into_response()
+}
+
+fn forbidden() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({"error": "not authorized for this site"})),
+    )
+        .into_response()
+}
+
+/// Resolve `{site}` and enforce that `principal` may read it. Read API keys
+/// are confined to their org (and, if site-bound, that single site); session
+/// and user principals are unrestricted (matching pre-existing behavior).
+async fn resolve_authorized_site(
+    state: &AppState,
+    principal: &Principal,
+    site: &str,
+) -> Result<Ulid, Response> {
+    let site_id = resolve_site_id(state, site).await.ok_or_else(not_found)?;
+    if let Principal::ApiKey {
+        org_id,
+        site_id: key_site,
+    } = principal
+    {
+        if let Some(ks) = key_site {
+            if *ks != site_id {
+                return Err(forbidden());
+            }
+        }
+        let site_org = state
+            .meta
+            .get_site(site_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|s| s.org_id);
+        if site_org != Some(*org_id) {
+            return Err(forbidden());
+        }
+    }
+    Ok(site_id)
 }
 
 // ---- Query params ----
@@ -90,11 +142,27 @@ struct SiteListItem {
 
 // ---- Handlers ----
 
-/// GET /api/v1/sites  — list all sites (for the default org in self-hosted mode)
-pub async fn list_sites(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let orgs = state.meta.list_orgs().await.unwrap_or_default();
-    let org_id = orgs.first().map(|o| o.id).unwrap_or_default();
-    let sites = state.meta.list_sites(org_id).await.unwrap_or_default();
+/// GET /api/v1/sites  — list sites. For a read API key, scoped to its org
+/// (and its single site if site-bound); otherwise the default org.
+pub async fn list_sites(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+) -> impl IntoResponse {
+    let org_id = match &principal {
+        Principal::ApiKey { org_id, .. } => *org_id,
+        _ => {
+            let orgs = state.meta.list_orgs().await.unwrap_or_default();
+            orgs.first().map(|o| o.id).unwrap_or_default()
+        }
+    };
+    let mut sites = state.meta.list_sites(org_id).await.unwrap_or_default();
+    // Site-bound read keys see only their site.
+    if let Principal::ApiKey {
+        site_id: Some(ks), ..
+    } = &principal
+    {
+        sites.retain(|s| s.id == *ks);
+    }
     let items: Vec<SiteListItem> = sites
         .into_iter()
         .map(|s| SiteListItem {
@@ -111,15 +179,13 @@ pub async fn list_sites(State(state): State<Arc<AppState>>) -> impl IntoResponse
 /// GET /api/v1/sites/:site/pageviews
 pub async fn pageviews(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
     Path(site): Path<String>,
     Query(params): Query<PageviewsParams>,
 ) -> impl IntoResponse {
-    let Some(site_id) = resolve_site_id(&state, &site).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "site not found"})),
-        )
-            .into_response();
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
     };
     let q = PageviewsQuery {
         site_id,
@@ -135,17 +201,15 @@ pub async fn pageviews(
 
 async fn top_list_response(
     state: &AppState,
+    principal: &Principal,
     site: &str,
     range_label: &str,
     limit: u32,
     field: TopListField,
 ) -> axum::response::Response {
-    let Some(site_id) = resolve_site_id(state, site).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "site not found"})),
-        )
-            .into_response();
+    let site_id = match resolve_authorized_site(state, principal, site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
     };
     let range = parse_range(range_label);
     match state
@@ -161,11 +225,13 @@ async fn top_list_response(
 /// GET /api/v1/sites/:site/top-pages
 pub async fn top_pages(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
     Path(site): Path<String>,
     Query(params): Query<TopParams>,
 ) -> impl IntoResponse {
     top_list_response(
         &state,
+        &principal,
         &site,
         &params.range,
         params.limit,
@@ -177,11 +243,13 @@ pub async fn top_pages(
 /// GET /api/v1/sites/:site/top-referrers
 pub async fn top_referrers(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
     Path(site): Path<String>,
     Query(params): Query<TopParams>,
 ) -> impl IntoResponse {
     top_list_response(
         &state,
+        &principal,
         &site,
         &params.range,
         params.limit,
@@ -193,15 +261,13 @@ pub async fn top_referrers(
 /// GET /api/v1/sites/:site/events
 pub async fn events(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
     Path(site): Path<String>,
     Query(params): Query<EventsParams>,
 ) -> impl IntoResponse {
-    let Some(site_id) = resolve_site_id(&state, &site).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "site not found"})),
-        )
-            .into_response();
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
     };
     let q = EventQuery {
         site_id,
@@ -219,14 +285,12 @@ pub async fn events(
 /// GET /api/v1/sites/:site/funnels  — list funnels
 pub async fn list_funnels(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
     Path(site): Path<String>,
 ) -> impl IntoResponse {
-    let Some(site_id) = resolve_site_id(&state, &site).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "site not found"})),
-        )
-            .into_response();
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
     };
     match state.meta.list_funnels(site_id).await {
         Ok(funnels) => Json(serde_json::json!({ "funnels": funnels })).into_response(),
@@ -234,18 +298,72 @@ pub async fn list_funnels(
     }
 }
 
+/// Body for `POST /api/v1/sites/:site/funnels`. Steps are a real JSON array
+/// (unlike the dashboard form, which posts them as a string field).
+#[derive(Deserialize)]
+pub struct CreateFunnelBody {
+    pub name: String,
+    pub steps: Vec<FunnelStep>,
+}
+
+/// POST /api/v1/sites/:site/funnels  — create a funnel. Read API keys are
+/// permitted (same authorization as queries); the key must be in-org and, if
+/// site-bound, match the target site.
+pub async fn create_funnel(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Json(body): Json<CreateFunnelBody>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    if body.name.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "name is required"})),
+        )
+            .into_response();
+    }
+    if body.steps.len() < 2 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "a funnel needs at least 2 steps"})),
+        )
+            .into_response();
+    }
+    let definition = match serde_json::to_string(&body.steps) {
+        Ok(d) => d,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    let funnel = Funnel {
+        id: Ulid::new(),
+        site_id,
+        name: body.name,
+        definition,
+        created_at: chrono::Utc::now(),
+    };
+    match state.meta.create_funnel(&funnel).await {
+        Ok(_) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(&funnel).unwrap()),
+        )
+            .into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 /// GET /api/v1/sites/:site/funnels/:funnel_id  — run a funnel query
 pub async fn funnel_result(
     State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
     Path((site, funnel_id)): Path<(String, String)>,
     Query(params): Query<RangeParams>,
 ) -> impl IntoResponse {
-    let Some(site_id) = resolve_site_id(&state, &site).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "site not found"})),
-        )
-            .into_response();
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
     };
     let funnel_ulid = match Ulid::from_string(&funnel_id) {
         Ok(id) => id,

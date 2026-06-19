@@ -9,6 +9,10 @@ pub struct ApiClient {
 }
 
 impl ApiClient {
+    /// Builds a client, reading the bearer credential from `STOMATOPOD_TOKEN`
+    /// (falling back to `~/.config/stomatopod/credentials`). For agent/CLI use
+    /// this should be a read-scoped API key (`rk_...`) minted in the dashboard;
+    /// a signed session token also works but is tied to a login.
     pub fn new(base_url: String) -> Self {
         let token = std::env::var("STOMATOPOD_TOKEN").ok().or_else(|| {
             let path = dirs_path();
@@ -28,6 +32,23 @@ impl ApiClient {
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let mut req = self.client.get(&url);
+        if let Some(token) = &self.token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            anyhow::bail!("API error {}: {}", resp.status(), resp.text().await?);
+        }
+        Ok(resp.json().await?)
+    }
+
+    pub async fn post<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let mut req = self.client.post(&url).json(body);
         if let Some(token) = &self.token {
             req = req.bearer_auth(token);
         }

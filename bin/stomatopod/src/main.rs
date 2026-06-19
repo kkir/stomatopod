@@ -1,5 +1,3 @@
-mod cli;
-
 use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Result;
@@ -22,7 +20,27 @@ use stomatopod_web::{
     state::AppState,
 };
 
-use cli::{Cli, Commands};
+/// The Stomatopod server binary. Analytics querying lives in the separate
+/// `spq` CLI; this binary only runs the server.
+#[derive(Parser)]
+#[command(name = "stomatopod", about = "Stomatopod analytics server")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+
+    /// Config file path.
+    #[arg(long, default_value = "stomatopod.toml")]
+    config: String,
+}
+
+#[derive(clap::Subcommand)]
+enum Commands {
+    /// Start the analytics server.
+    Serve {
+        #[arg(long)]
+        port: Option<u16>,
+    },
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -49,14 +67,6 @@ async fn main() -> Result<()> {
                 cfg
             };
             serve(cfg).await
-        }
-        Commands::Query { cmd, server, human } => {
-            let client = cli::client::ApiClient::new(server.clone());
-            cli::query::run(cmd, &client, *human).await
-        }
-        Commands::Sites { cmd, server } => {
-            let client = cli::client::ApiClient::new(server.clone());
-            cli::sites::run(cmd, &client).await
         }
     }
 }
@@ -157,6 +167,7 @@ async fn serve(cfg: Config) -> Result<()> {
         span_ingest_tx,
         site_cache: Arc::new(DashMap::new()),
         sentinel_token_cache: Arc::new(DashMap::new()),
+        api_key_cache: Arc::new(DashMap::new()),
         redact_keys,
         geo,
         control_channels: dashmap::DashMap::new(),
@@ -221,6 +232,18 @@ fn build_templates() -> Result<JinjaEnv<'static>> {
     env.add_template(
         "site_settings.jinja",
         include_str!("../../../crates/web/templates/site_settings.jinja"),
+    )?;
+    env.add_template(
+        "api_keys.jinja",
+        include_str!("../../../crates/web/templates/api_keys.jinja"),
+    )?;
+    env.add_template(
+        "keys.jinja",
+        include_str!("../../../crates/web/templates/keys.jinja"),
+    )?;
+    env.add_template(
+        "docs.jinja",
+        include_str!("../../../crates/web/templates/docs.jinja"),
     )?;
     env.add_template(
         "events.jinja",

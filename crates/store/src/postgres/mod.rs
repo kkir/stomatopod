@@ -20,6 +20,7 @@ use stomatopod_core::{
     domain::{
         agent::{Agent, AlertChannel, AlertChannelKind, SentinelToken},
         agent_span::AgentSpan,
+        api_key::{ApiKey, ApiKeyScope},
         event::Event,
         incident::{Incident, IncidentStatus, IncidentTrigger},
         org::{Funnel, Organization, Plan, User, UserRole},
@@ -638,6 +639,70 @@ impl MetaStore for PostgresBackend {
         Ok(())
     }
 
+    // ---- API keys ----
+    async fn create_api_key(&self, key: &ApiKey) -> Result<(), StoreError> {
+        sqlx::query(
+            "INSERT INTO api_keys \
+                (id, org_id, site_id, name, scope, key_hash, display_prefix, created_at, last_used_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        )
+        .bind(key.id.to_string())
+        .bind(key.org_id.to_string())
+        .bind(key.site_id.map(|s| s.to_string()))
+        .bind(&key.name)
+        .bind(key.scope.as_str())
+        .bind(&key.key_hash)
+        .bind(&key.display_prefix)
+        .bind(key.created_at)
+        .bind(key.last_used_at)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    async fn list_api_keys(&self, org_id: Ulid) -> Result<Vec<ApiKey>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT id, org_id, site_id, name, scope, key_hash, display_prefix, created_at, last_used_at \
+             FROM api_keys WHERE org_id = $1 ORDER BY created_at DESC",
+        )
+        .bind(org_id.to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        rows.into_iter().map(row_to_api_key).collect()
+    }
+
+    async fn get_api_key_by_hash(&self, key_hash: &str) -> Result<Option<ApiKey>, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, org_id, site_id, name, scope, key_hash, display_prefix, created_at, last_used_at \
+             FROM api_keys WHERE key_hash = $1",
+        )
+        .bind(key_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        row.map(row_to_api_key).transpose()
+    }
+
+    async fn touch_api_key(&self, id: Ulid) -> Result<(), StoreError> {
+        sqlx::query("UPDATE api_keys SET last_used_at = NOW() WHERE id = $1")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    async fn delete_api_key(&self, id: Ulid) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM api_keys WHERE id = $1")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        Ok(())
+    }
+
     async fn create_alert_channel(&self, channel: &AlertChannel) -> Result<(), StoreError> {
         sqlx::query(
             "INSERT INTO alert_channels (id, site_id, kind, url, secret, created_at, last_error_at) \
@@ -1003,6 +1068,24 @@ fn row_to_sentinel_token(row: sqlx::postgres::PgRow) -> Result<SentinelToken, St
     })
 }
 
+fn row_to_api_key(row: sqlx::postgres::PgRow) -> Result<ApiKey, StoreError> {
+    let id: String = row.try_get("id").map_err(StoreError::db)?;
+    let org_id: String = row.try_get("org_id").map_err(StoreError::db)?;
+    let site_id: Option<String> = row.try_get("site_id").map_err(StoreError::db)?;
+    let scope: String = row.try_get("scope").map_err(StoreError::db)?;
+    Ok(ApiKey {
+        id: parse_ulid(&id),
+        org_id: parse_ulid(&org_id),
+        site_id: site_id.as_deref().and_then(|s| Ulid::from_string(s).ok()),
+        name: row.try_get("name").map_err(StoreError::db)?,
+        scope: ApiKeyScope::parse(&scope).unwrap_or(ApiKeyScope::Read),
+        key_hash: row.try_get("key_hash").map_err(StoreError::db)?,
+        display_prefix: row.try_get("display_prefix").map_err(StoreError::db)?,
+        created_at: row.try_get("created_at").map_err(StoreError::db)?,
+        last_used_at: row.try_get("last_used_at").map_err(StoreError::db)?,
+    })
+}
+
 fn row_to_alert_channel(row: sqlx::postgres::PgRow) -> Result<AlertChannel, StoreError> {
     let id: String = row.try_get("id").map_err(StoreError::db)?;
     let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
@@ -1101,7 +1184,7 @@ fn parse_incident_status(s: &str) -> IncidentStatus {
 }
 
 mod ddl {
-    pub fn all_statements() -> [&'static str; 9] {
+    pub fn all_statements() -> [&'static str; 10] {
         [
             ORGS_DDL,
             SITES_DDL,
@@ -1110,6 +1193,7 @@ mod ddl {
             POLICIES_DDL,
             AGENTS_DDL,
             SENTINEL_TOKENS_DDL,
+            API_KEYS_DDL,
             ALERT_CHANNELS_DDL,
             INCIDENTS_DDL,
         ]
@@ -1196,6 +1280,20 @@ mod ddl {
             token_hash    TEXT UNIQUE NOT NULL,
             created_at    TIMESTAMPTZ NOT NULL,
             last_used_at  TIMESTAMPTZ
+        )
+    "#;
+
+    const API_KEYS_DDL: &str = r#"
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id             TEXT PRIMARY KEY,
+            org_id         TEXT NOT NULL REFERENCES orgs(id),
+            site_id        TEXT REFERENCES sites(id),
+            name           TEXT NOT NULL,
+            scope          TEXT NOT NULL,
+            key_hash       TEXT UNIQUE NOT NULL,
+            display_prefix TEXT NOT NULL,
+            created_at     TIMESTAMPTZ NOT NULL,
+            last_used_at   TIMESTAMPTZ
         )
     "#;
 
@@ -1300,6 +1398,7 @@ mod tests {
             "policies",
             "agents",
             "sentinel_tokens",
+            "api_keys",
             "alert_channels",
             "incidents",
         ] {

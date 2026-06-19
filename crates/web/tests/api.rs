@@ -48,6 +48,15 @@ fn build_templates() -> Environment<'static> {
         include_str!("../templates/site_settings.jinja"),
     )
     .unwrap();
+    env.add_template(
+        "api_keys.jinja",
+        include_str!("../templates/api_keys.jinja"),
+    )
+    .unwrap();
+    env.add_template("keys.jinja", include_str!("../templates/keys.jinja"))
+        .unwrap();
+    env.add_template("docs.jinja", include_str!("../templates/docs.jinja"))
+        .unwrap();
     env.add_template("events.jinja", include_str!("../templates/events.jinja"))
         .unwrap();
     env.add_template("funnels.jinja", include_str!("../templates/funnels.jinja"))
@@ -139,6 +148,7 @@ async fn setup() -> TestCtx {
         span_ingest_tx,
         site_cache: Arc::new(DashMap::new()),
         sentinel_token_cache: Arc::new(DashMap::new()),
+        api_key_cache: Arc::new(DashMap::new()),
         redact_keys: Arc::new(vec!["api_key".into(), "authorization".into()]),
         geo: Arc::new(GeoLookup::new(None)),
         control_channels: DashMap::new(),
@@ -1071,4 +1081,278 @@ fn hash_password(password: &str) -> String {
         .hash_password(password.as_bytes(), &salt)
         .unwrap()
         .to_string()
+}
+
+// ---- API keys ----
+
+#[tokio::test]
+async fn ingest_key_accepts_valid_bearer() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let (key, plaintext) =
+        stomatopod_core::domain::api_key::ApiKey::new_ingest(org.id, site.id, "backend".into());
+    ctx.backend.meta.create_api_key(&key).await.unwrap();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/ingest")
+        .header("authorization", format!("Bearer {plaintext}"))
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"name":"signup","properties":{"plan":"pro"}}"#,
+        ))
+        .unwrap();
+
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn ingest_rejects_missing_and_unknown_keys() {
+    let ctx = setup().await;
+
+    // No Authorization header.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/ingest")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"name":"signup"}"#))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+    // Unknown key.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/ingest")
+        .header("authorization", "Bearer sk_live_deadbeef")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"name":"signup"}"#))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn ingest_rejects_read_scope_key() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let (key, plaintext) =
+        stomatopod_core::domain::api_key::ApiKey::new_read(org.id, Some(site.id), "agent".into());
+    ctx.backend.meta.create_api_key(&key).await.unwrap();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/ingest")
+        .header("authorization", format!("Bearer {plaintext}"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"name":"signup"}"#))
+        .unwrap();
+
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn read_key_authorizes_analytics_query() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let (key, plaintext) =
+        stomatopod_core::domain::api_key::ApiKey::new_read(org.id, None, "agent".into());
+    ctx.backend.meta.create_api_key(&key).await.unwrap();
+
+    let req = Request::builder()
+        .uri(format!("/api/v1/sites/{}/events", site.id))
+        .header("authorization", format!("Bearer {plaintext}"))
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn read_key_cross_org_is_forbidden() {
+    let ctx = setup().await;
+    // Site lives in org A.
+    let org_a = make_org();
+    ctx.backend.meta.create_org(&org_a).await.unwrap();
+    let site = make_site(org_a.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    // Read key belongs to a different org B.
+    let org_b = make_org();
+    ctx.backend.meta.create_org(&org_b).await.unwrap();
+    let (key, plaintext) =
+        stomatopod_core::domain::api_key::ApiKey::new_read(org_b.id, None, "intruder".into());
+    ctx.backend.meta.create_api_key(&key).await.unwrap();
+
+    let req = Request::builder()
+        .uri(format!("/api/v1/sites/{}/events", site.id))
+        .header("authorization", format!("Bearer {plaintext}"))
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn read_key_rejects_unknown_key() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/api/v1/sites")
+        .header("authorization", "Bearer rk_deadbeefdeadbeef")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn global_keys_page_lists_and_filters() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    // Names chosen to not collide with static template copy.
+    let (ingest_key, _) = stomatopod_core::domain::api_key::ApiKey::new_ingest(
+        org.id,
+        site.id,
+        "zeta-ingest-svc".into(),
+    );
+    let (read_key, _) =
+        stomatopod_core::domain::api_key::ApiKey::new_read(org.id, None, "omega-read-cli".into());
+    ctx.backend.meta.create_api_key(&ingest_key).await.unwrap();
+    ctx.backend.meta.create_api_key(&read_key).await.unwrap();
+
+    let user_id = Ulid::new().to_string();
+    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
+
+    // Unfiltered: both keys present.
+    let req = Request::builder()
+        .uri("/app/keys")
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    assert!(body.contains("zeta-ingest-svc"));
+    assert!(body.contains("omega-read-cli"));
+
+    // Org-wide filter: only the read key.
+    let req = Request::builder()
+        .uri("/app/keys?filter=org")
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    assert!(body.contains("omega-read-cli"));
+    assert!(!body.contains("zeta-ingest-svc"));
+}
+
+#[tokio::test]
+async fn global_create_ingest_key_requires_site() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+
+    let user_id = Ulid::new().to_string();
+    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
+
+    // Ingest scope with org-wide selection is rejected.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/app/keys")
+        .header("cookie", &cookie)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from("name=backend&scope=ingest&site=org"))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+    // Org-wide read key succeeds and the plaintext is shown once.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/app/keys")
+        .header("cookie", &cookie)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from("name=agent&scope=read&site=org"))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    assert!(body.contains("rk_"));
+}
+
+// ---- Docs ----
+
+#[tokio::test]
+async fn llms_txt_is_public_markdown() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/llms.txt")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .contains("markdown"));
+    let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    assert!(body.contains("Stomatopod Documentation"));
+    assert!(body.contains("/api/v1/ingest"));
+}
+
+#[tokio::test]
+async fn docs_page_renders_html_for_authed_user() {
+    let ctx = setup().await;
+    let user_id = Ulid::new().to_string();
+    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
+    let req = Request::builder()
+        .uri("/app/docs")
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    // Markdown was rendered to HTML (headings became tags, not literal '#').
+    assert!(body.contains("<h2"));
+    assert!(body.contains("Emitting custom events"));
+    // Headings carry anchor ids and the right-side ToC links to them.
+    assert!(body.contains("id=\"emitting-custom-events\""));
+    assert!(body.contains("class=\"doc-toc\""));
+    assert!(body.contains("href=\"#emitting-custom-events\""));
+}
+
+#[tokio::test]
+async fn docs_page_requires_auth() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/app/docs")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    // Dashboard routes redirect unauthenticated users to /login.
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
 }

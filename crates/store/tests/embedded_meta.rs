@@ -454,3 +454,63 @@ async fn embedded_backend_accepts_event_batch() {
 
     backend.ingest_events(vec![event]).await.unwrap();
 }
+
+// ---- API key tests ----
+
+#[tokio::test]
+async fn api_key_crud_round_trip() {
+    use stomatopod_core::domain::api_key::{ApiKey, ApiKeyScope};
+
+    let dir = tempfile::tempdir().unwrap();
+    let meta = open_meta(&dir).await;
+    let org = make_org();
+    meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    meta.create_site(&site).await.unwrap();
+
+    // One org-wide read key, one site-bound ingest key.
+    let (read_key, read_plain) = ApiKey::new_read(org.id, None, "agent".into());
+    let (ingest_key, ingest_plain) = ApiKey::new_ingest(org.id, site.id, "backend".into());
+    meta.create_api_key(&read_key).await.unwrap();
+    meta.create_api_key(&ingest_key).await.unwrap();
+
+    // list is org-scoped and returns both.
+    let listed = meta.list_api_keys(org.id).await.unwrap();
+    assert_eq!(listed.len(), 2);
+
+    // get_by_hash resolves the right key with site/scope preserved.
+    let got_read = meta
+        .get_api_key_by_hash(&ApiKey::hash(&read_plain))
+        .await
+        .unwrap()
+        .expect("read key present");
+    assert_eq!(got_read.scope, ApiKeyScope::Read);
+    assert_eq!(got_read.site_id, None);
+
+    let got_ingest = meta
+        .get_api_key_by_hash(&ApiKey::hash(&ingest_plain))
+        .await
+        .unwrap()
+        .expect("ingest key present");
+    assert_eq!(got_ingest.scope, ApiKeyScope::Ingest);
+    assert_eq!(got_ingest.site_id, Some(site.id));
+    assert!(got_ingest.last_used_at.is_none());
+
+    // touch sets last_used_at.
+    meta.touch_api_key(ingest_key.id).await.unwrap();
+    let touched = meta
+        .get_api_key_by_hash(&ApiKey::hash(&ingest_plain))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(touched.last_used_at.is_some());
+
+    // delete removes it.
+    meta.delete_api_key(ingest_key.id).await.unwrap();
+    assert!(meta
+        .get_api_key_by_hash(&ApiKey::hash(&ingest_plain))
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(meta.list_api_keys(org.id).await.unwrap().len(), 1);
+}

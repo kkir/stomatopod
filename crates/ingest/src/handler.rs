@@ -10,7 +10,7 @@ use tracing::warn;
 use ulid::Ulid;
 
 use stomatopod_core::{
-    domain::event::{Event, EventKind},
+    domain::event::{DeviceType, Event, EventKind},
     traits::MetaStore,
 };
 
@@ -151,6 +151,98 @@ pub async fn handle_ingest_inner(
 
     // 9. Non-blocking channel send; 429 on back-pressure
     match ctx.tx.try_send(event) {
+        Ok(_) => StatusCode::NO_CONTENT,
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => StatusCode::TOO_MANY_REQUESTS,
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE,
+    }
+}
+
+/// JSON body for server-side custom events posted to `POST /api/v1/ingest`
+/// with an ingest API key. Unlike `IngestPayload` (the browser beacon),
+/// fields are full-named and there is no device/network context — the
+/// caller is a backend, not a browser.
+#[derive(Debug, Deserialize)]
+pub struct ServerEventPayload {
+    /// Custom event name, e.g. "signup". Required.
+    pub name: String,
+    /// Optional originating URL (used for UTM extraction + page reports).
+    pub url: Option<String>,
+    /// Custom event properties (JSON object).
+    pub properties: Option<serde_json::Value>,
+    /// Client timestamp (Unix ms). Falls back to server time if absent.
+    pub timestamp: Option<i64>,
+    /// Optional referrer.
+    pub referrer: Option<String>,
+    /// Optional stable session/user identifier. Hashed into the session id
+    /// so server events can participate in session analytics and funnels.
+    /// Absent → each event is its own session.
+    pub session_id: Option<String>,
+}
+
+/// Build and enqueue a server-side custom event. The site is resolved from
+/// the ingest key by the caller, so no body-borne site key is consulted and
+/// none of the browser-specific machinery (IP/UA parsing, bot filtering,
+/// geo, cookieless session derivation) applies.
+pub async fn handle_server_ingest(
+    tx: &mpsc::Sender<Event>,
+    site_id: Ulid,
+    payload: ServerEventPayload,
+) -> StatusCode {
+    if payload.name.is_empty() {
+        return StatusCode::BAD_REQUEST;
+    }
+
+    let timestamp = payload
+        .timestamp
+        .and_then(chrono::DateTime::from_timestamp_millis)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(Utc::now);
+
+    let url = payload.url.unwrap_or_default();
+    let utms = extract_utm(&url);
+
+    // Session: hash a caller-supplied id for stability, else a fresh random
+    // id per event (each server event is then its own session).
+    let session_id: [u8; 16] = match payload.session_id.as_deref() {
+        Some(s) if !s.is_empty() => blake3::hash(s.as_bytes()).as_bytes()[..16]
+            .try_into()
+            .expect("blake3 hash is 32 bytes"),
+        _ => Ulid::new().to_bytes()[..16]
+            .try_into()
+            .expect("ulid is 16 bytes"),
+    };
+
+    let event = Event {
+        id: Ulid::new(),
+        site_id,
+        name: payload.name,
+        kind: EventKind::Custom,
+        timestamp,
+        received_at: Utc::now(),
+        url,
+        referrer: payload.referrer,
+        utm_source: utms.source,
+        utm_medium: utms.medium,
+        utm_campaign: utms.campaign,
+        utm_term: utms.term,
+        utm_content: utms.content,
+        browser: "Server".to_string(),
+        browser_version: String::new(),
+        os: "Server".to_string(),
+        os_version: String::new(),
+        device_type: DeviceType::Unknown,
+        screen_width: None,
+        screen_height: None,
+        language: None,
+        ip_anonymized: "0.0.0.0".to_string(),
+        country_code: None,
+        region: None,
+        city: None,
+        session_id,
+        properties: payload.properties,
+    };
+
+    match tx.try_send(event) {
         Ok(_) => StatusCode::NO_CONTENT,
         Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => StatusCode::TOO_MANY_REQUESTS,
         Err(_) => StatusCode::SERVICE_UNAVAILABLE,

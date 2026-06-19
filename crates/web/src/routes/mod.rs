@@ -1,6 +1,7 @@
 pub mod agents_dashboard;
 pub mod analytics;
 pub mod api;
+pub mod api_keys;
 pub mod auth;
 pub mod dashboard;
 pub mod events;

@@ -5,6 +5,7 @@ use crate::{
     domain::{
         agent::{Agent, AlertChannel, SentinelToken},
         agent_span::AgentSpan,
+        api_key::ApiKey,
         incident::{Incident, IncidentStatus},
         org::{Funnel, Organization, User},
         policy::Policy,
@@ -95,6 +96,13 @@ pub trait MetaStore: Send + Sync + 'static {
     ) -> Result<Option<SentinelToken>, StoreError>;
     async fn touch_sentinel_token(&self, id: Ulid) -> Result<(), StoreError>;
     async fn delete_sentinel_token(&self, id: Ulid) -> Result<(), StoreError>;
+
+    // ---- API keys ----
+    async fn create_api_key(&self, key: &ApiKey) -> Result<(), StoreError>;
+    async fn list_api_keys(&self, org_id: Ulid) -> Result<Vec<ApiKey>, StoreError>;
+    async fn get_api_key_by_hash(&self, key_hash: &str) -> Result<Option<ApiKey>, StoreError>;
+    async fn touch_api_key(&self, id: Ulid) -> Result<(), StoreError>;
+    async fn delete_api_key(&self, id: Ulid) -> Result<(), StoreError>;
 
     // ---- Alert channels ----
     async fn create_alert_channel(&self, channel: &AlertChannel) -> Result<(), StoreError>;
