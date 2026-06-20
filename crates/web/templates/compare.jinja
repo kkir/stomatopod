@@ -1,0 +1,46 @@
+{% extends "base.jinja" %} {% block title %}Compare Sites{% endblock %} {% block
+content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Compare Sites</h1>
+    <p class="page-sub">All sites in your org · {{ range }}</p>
+  </div>
+  <div class="range-tabs">
+    <a href="?range=7d" class="{% if range == '7d' %}active{% endif %}">7d</a>
+    <a href="?range=30d" class="{% if range == '30d' %}active{% endif %}">30d</a>
+    <a href="?range=90d" class="{% if range == '90d' %}active{% endif %}">90d</a>
+    <a href="?range=12m" class="{% if range == '12m' %}active{% endif %}">12m</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="section-header"><h2>Traffic by site · {{ range }}</h2></div>
+  <table>
+    <thead>
+      <tr>
+        <th>Site</th>
+        <th>Pageviews</th>
+        <th>Sessions</th>
+        <th>Bounce</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>
+          <a class="row-link" href="/app/sites/{{ row.id }}?range={{ range }}">{{ row.name }}</a>
+          <div class="page-sub">{{ row.domain }}</div>
+        </td>
+        <td>{{ row.pageviews }}</td>
+        <td>{{ row.sessions }}</td>
+        <td>{{ row.bounce_rate }}%</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4" class="empty-cell">No sites</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -286,6 +286,22 @@ fn build_templates() -> Result<JinjaEnv<'static>> {
         include_str!("../../../crates/web/templates/alerts.jinja"),
     )?;
     env.add_template(
+        "campaigns.jinja",
+        include_str!("../../../crates/web/templates/campaigns.jinja"),
+    )?;
+    env.add_template(
+        "retention.jinja",
+        include_str!("../../../crates/web/templates/retention.jinja"),
+    )?;
+    env.add_template(
+        "paths.jinja",
+        include_str!("../../../crates/web/templates/paths.jinja"),
+    )?;
+    env.add_template(
+        "compare.jinja",
+        include_str!("../../../crates/web/templates/compare.jinja"),
+    )?;
+    env.add_template(
         "partials/top_pages.jinja",
         include_str!("../../../crates/web/templates/partials/top_pages.jinja"),
     )?;

@@ -15,7 +15,8 @@ use stomatopod_core::{
     query::{
         analytics::{
             EntryPageRow, EntryPages, ExitPageRow, ExitPages, GoalBucket, GoalQuery, GoalStats,
-            RawEventRow, RealtimeEvent, RealtimeSnapshot, RealtimeTopPage, SessionRow,
+            PathReport, RawEventRow, RealtimeEvent, RealtimeSnapshot, RealtimeTopPage,
+            RetentionGrid, SessionRow, TopSparklines,
         },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
@@ -890,6 +891,160 @@ impl EmbeddedReader {
             }
         }
         Ok(out)
+    }
+
+    // ---- Tier-3 analytics queries ----
+
+    pub async fn query_top_sparklines(
+        &self,
+        site_id: Ulid,
+        field: TopListField,
+        range: &TimeRange,
+        limit: u32,
+        filters: &[Filter],
+    ) -> Result<TopSparklines, StoreError> {
+        let site = site_id.to_string();
+        if !self.ensure_site_table_available(&site).await? {
+            return Ok(TopSparklines::default());
+        }
+        let table = table_name(&site);
+        let start = range.start.timestamp_micros();
+        let end = range.end.timestamp_micros();
+        let col = field.column();
+        let filter_sql = datafusion_filter_clause(filters);
+        let sql = format!(
+            r#"
+            SELECT COALESCE(CAST({col} AS VARCHAR), 'Direct / None') AS value,
+                   date_trunc('day', "timestamp") AS bucket,
+                   CAST(COUNT(*) AS BIGINT) AS c
+            FROM {table}
+            WHERE site_id = '{site}'
+              AND "timestamp" >= to_timestamp_micros({start})
+              AND "timestamp" <= to_timestamp_micros({end})
+              AND CAST(kind AS VARCHAR) = 'pageview'
+              {filter_sql}
+            GROUP BY 1, 2
+            "#
+        );
+        let batches = self.run(&sql).await?;
+        let mut rows = Vec::new();
+        let mut days = std::collections::BTreeSet::new();
+        for b in &batches {
+            let vals = str_col(b, "value");
+            let buckets = b
+                .column_by_name("bucket")
+                .and_then(|c| c.as_any().downcast_ref::<TimestampNanosecondArray>());
+            let counts = i64_col(b, "c");
+            if let (Some(vals), Some(buckets), Some(counts)) = (vals, buckets, counts) {
+                for i in 0..b.num_rows() {
+                    let day = chrono::DateTime::from_timestamp_nanos(buckets.value(i))
+                        .format("%Y-%m-%d")
+                        .to_string();
+                    days.insert(day.clone());
+                    rows.push((
+                        vals.value(i).to_string(),
+                        day,
+                        counts.value(i).max(0) as u64,
+                    ));
+                }
+            }
+        }
+        Ok(TopSparklines::from_counts(
+            rows,
+            days.into_iter().collect(),
+            limit as usize,
+        ))
+    }
+
+    pub async fn query_retention(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+    ) -> Result<RetentionGrid, StoreError> {
+        let site = site_id.to_string();
+        if !self.ensure_site_table_available(&site).await? {
+            return Ok(RetentionGrid::default());
+        }
+        let table = table_name(&site);
+        let start = range.start.timestamp_micros();
+        let end = range.end.timestamp_micros();
+        let sql = format!(
+            r#"
+            SELECT DISTINCT session_id,
+                   date_trunc('week', "timestamp") AS week
+            FROM {table}
+            WHERE site_id = '{site}'
+              AND "timestamp" >= to_timestamp_micros({start})
+              AND "timestamp" <= to_timestamp_micros({end})
+              AND CAST(kind AS VARCHAR) = 'pageview'
+            "#
+        );
+        let batches = self.run(&sql).await?;
+        let mut pairs = Vec::new();
+        for b in &batches {
+            let sid = fixedbin_col(b, "session_id");
+            let week = b
+                .column_by_name("week")
+                .and_then(|c| c.as_any().downcast_ref::<TimestampNanosecondArray>());
+            if let (Some(sid), Some(week)) = (sid, week) {
+                for i in 0..b.num_rows() {
+                    let w = chrono::DateTime::from_timestamp_nanos(week.value(i))
+                        .format("%Y-%m-%d")
+                        .to_string();
+                    pairs.push((hex_encode(sid.value(i)), w));
+                }
+            }
+        }
+        Ok(RetentionGrid::from_session_weeks(pairs))
+    }
+
+    pub async fn query_paths(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        depth: u32,
+        limit: u32,
+    ) -> Result<PathReport, StoreError> {
+        let site = site_id.to_string();
+        if !self.ensure_site_table_available(&site).await? {
+            return Ok(PathReport::default());
+        }
+        let table = table_name(&site);
+        let start = range.start.timestamp_micros();
+        let end = range.end.timestamp_micros();
+        let depth = depth.clamp(2, 10);
+        let sql = format!(
+            r#"
+            WITH ranked AS (
+                SELECT session_id,
+                    COALESCE(CAST(url AS VARCHAR), '') AS url,
+                    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY "timestamp" ASC, id ASC) AS rn
+                FROM {table}
+                WHERE site_id = '{site}'
+                  AND "timestamp" >= to_timestamp_micros({start})
+                  AND "timestamp" <= to_timestamp_micros({end})
+                  AND CAST(kind AS VARCHAR) = 'pageview'
+            )
+            SELECT session_id, CAST(rn AS BIGINT) AS seq, url FROM ranked WHERE rn <= {depth}
+            "#
+        );
+        let batches = self.run(&sql).await?;
+        let mut steps = Vec::new();
+        for b in &batches {
+            let sid = fixedbin_col(b, "session_id");
+            let seq = i64_col(b, "seq");
+            let url = str_col(b, "url");
+            if let (Some(sid), Some(seq), Some(url)) = (sid, seq, url) {
+                for i in 0..b.num_rows() {
+                    steps.push((
+                        hex_encode(sid.value(i)),
+                        seq.value(i).max(0) as u32,
+                        url.value(i).to_string(),
+                    ));
+                }
+            }
+        }
+        Ok(PathReport::from_steps(steps, limit as usize))
     }
 
     /// Run a SQL string and collect the result batches.

@@ -21,6 +21,7 @@ use stomatopod_core::{
         agent::{Agent, AlertChannel, AlertChannelKind, SentinelToken},
         agent_span::AgentSpan,
         analytics_alert::{AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind},
+        annotation::Annotation,
         api_key::{ApiKey, ApiKeyScope},
         event::Event,
         goal::Goal,
@@ -33,7 +34,8 @@ use stomatopod_core::{
     query::{
         analytics::{
             EntryPageRow, EntryPages, ExitPageRow, ExitPages, GoalBucket, GoalQuery, GoalStats,
-            RawEventRow, RealtimeEvent, RealtimeSnapshot, RealtimeTopPage, SessionRow,
+            PathReport, RawEventRow, RealtimeEvent, RealtimeSnapshot, RealtimeTopPage,
+            RetentionGrid, SessionRow, TopSparklines,
         },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
@@ -685,6 +687,108 @@ impl StorageBackend for PostgresBackend {
         }
         Ok(out)
     }
+
+    async fn query_top_sparklines(
+        &self,
+        site_id: Ulid,
+        field: TopListField,
+        range: &TimeRange,
+        limit: u32,
+        filters: &[Filter],
+    ) -> Result<TopSparklines, StoreError> {
+        let (filter_sql, filter_vals) = pg_filter_clause(filters, 4);
+        let col = field.column();
+        let sql = format!(
+            "SELECT COALESCE({col}, 'Direct / None') AS value, \
+                    to_char(date_trunc('day', timestamp), 'YYYY-MM-DD') AS day, \
+                    COUNT(*)::BIGINT AS c \
+             FROM events \
+             WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
+               AND kind = 'pageview' {filter_sql} \
+             GROUP BY 1, 2"
+        );
+        let mut q = sqlx::query(&sql)
+            .bind(site_id.to_string())
+            .bind(range.start)
+            .bind(range.end);
+        for v in &filter_vals {
+            q = q.bind(v.clone());
+        }
+        let rows = q.fetch_all(&self.pool).await.map_err(StoreError::query)?;
+        let mut out = Vec::with_capacity(rows.len());
+        let mut days = std::collections::BTreeSet::new();
+        for row in rows {
+            let value: String = row.try_get("value").map_err(StoreError::query)?;
+            let day: String = row.try_get("day").map_err(StoreError::query)?;
+            let c: i64 = row.try_get("c").map_err(StoreError::query)?;
+            days.insert(day.clone());
+            out.push((value, day, c.max(0) as u64));
+        }
+        Ok(TopSparklines::from_counts(
+            out,
+            days.into_iter().collect(),
+            limit as usize,
+        ))
+    }
+
+    async fn query_retention(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+    ) -> Result<RetentionGrid, StoreError> {
+        let rows = sqlx::query(
+            "SELECT DISTINCT encode(session_id, 'hex') AS sid, \
+                    to_char(date_trunc('week', timestamp), 'YYYY-MM-DD') AS week \
+             FROM events \
+             WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 AND kind = 'pageview'",
+        )
+        .bind(site_id.to_string())
+        .bind(range.start)
+        .bind(range.end)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::query)?;
+        let mut pairs = Vec::with_capacity(rows.len());
+        for row in rows {
+            let sid: String = row.try_get("sid").map_err(StoreError::query)?;
+            let week: String = row.try_get("week").map_err(StoreError::query)?;
+            pairs.push((sid, week));
+        }
+        Ok(RetentionGrid::from_session_weeks(pairs))
+    }
+
+    async fn query_paths(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        depth: u32,
+        limit: u32,
+    ) -> Result<PathReport, StoreError> {
+        let depth = depth.clamp(2, 10);
+        let sql = format!(
+            "WITH ranked AS (\
+                SELECT encode(session_id, 'hex') AS sid, COALESCE(url, '') AS url, \
+                    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY timestamp ASC, id ASC) AS rn \
+                FROM events \
+                WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 AND kind = 'pageview') \
+             SELECT sid, rn::BIGINT AS seq, url FROM ranked WHERE rn <= {depth}"
+        );
+        let rows = sqlx::query(&sql)
+            .bind(site_id.to_string())
+            .bind(range.start)
+            .bind(range.end)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(StoreError::query)?;
+        let mut steps = Vec::with_capacity(rows.len());
+        for row in rows {
+            let sid: String = row.try_get("sid").map_err(StoreError::query)?;
+            let seq: i64 = row.try_get("seq").map_err(StoreError::query)?;
+            let url: String = row.try_get("url").map_err(StoreError::query)?;
+            steps.push((sid, seq.max(0) as u32, url));
+        }
+        Ok(PathReport::from_steps(steps, limit as usize))
+    }
 }
 
 impl PostgresBackend {
@@ -1029,6 +1133,62 @@ impl MetaStore for PostgresBackend {
 
     async fn delete_goal(&self, id: Ulid) -> Result<(), StoreError> {
         sqlx::query("DELETE FROM goals WHERE id = $1")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    // ---- Annotations ----
+    async fn create_annotation(&self, annotation: &Annotation) -> Result<(), StoreError> {
+        sqlx::query(
+            "INSERT INTO annotations (id, site_id, date, text, created_at) \
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(annotation.id.to_string())
+        .bind(annotation.site_id.to_string())
+        .bind(annotation.date.format("%Y-%m-%d").to_string())
+        .bind(&annotation.text)
+        .bind(annotation.created_at)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    async fn get_annotation(&self, id: Ulid) -> Result<Option<Annotation>, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, site_id, date, text, created_at FROM annotations WHERE id = $1",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        row.map(row_to_annotation).transpose()
+    }
+
+    async fn list_annotations(
+        &self,
+        site_id: Ulid,
+        start: chrono::NaiveDate,
+        end: chrono::NaiveDate,
+    ) -> Result<Vec<Annotation>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT id, site_id, date, text, created_at FROM annotations \
+             WHERE site_id = $1 AND date >= $2 AND date <= $3 ORDER BY date DESC",
+        )
+        .bind(site_id.to_string())
+        .bind(start.format("%Y-%m-%d").to_string())
+        .bind(end.format("%Y-%m-%d").to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        rows.into_iter().map(row_to_annotation).collect()
+    }
+
+    async fn delete_annotation(&self, id: Ulid) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM annotations WHERE id = $1")
             .bind(id.to_string())
             .execute(&self.pool)
             .await
@@ -1672,6 +1832,19 @@ fn row_to_goal(row: sqlx::postgres::PgRow) -> Result<Goal, StoreError> {
     })
 }
 
+fn row_to_annotation(row: sqlx::postgres::PgRow) -> Result<Annotation, StoreError> {
+    let id: String = row.try_get("id").map_err(StoreError::db)?;
+    let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
+    let date: String = row.try_get("date").map_err(StoreError::db)?;
+    Ok(Annotation {
+        id: parse_ulid(&id),
+        site_id: parse_ulid(&site_id),
+        date: chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d").unwrap_or_default(),
+        text: row.try_get("text").map_err(StoreError::db)?,
+        created_at: row.try_get("created_at").map_err(StoreError::db)?,
+    })
+}
+
 fn row_to_analytics_alert(row: sqlx::postgres::PgRow) -> Result<AnalyticsAlert, StoreError> {
     let id: String = row.try_get("id").map_err(StoreError::db)?;
     let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
@@ -1842,7 +2015,7 @@ fn parse_incident_status(s: &str) -> IncidentStatus {
 }
 
 mod ddl {
-    pub fn all_statements() -> [&'static str; 13] {
+    pub fn all_statements() -> [&'static str; 14] {
         [
             ORGS_DDL,
             SITES_DDL,
@@ -1855,6 +2028,7 @@ mod ddl {
             ALERT_CHANNELS_DDL,
             INCIDENTS_DDL,
             GOALS_DDL,
+            ANNOTATIONS_DDL,
             ANALYTICS_ALERTS_DDL,
             ANALYTICS_ALERT_FIRES_DDL,
         ]
@@ -1989,6 +2163,16 @@ mod ddl {
             name        TEXT NOT NULL,
             event_name  TEXT NOT NULL,
             filters     TEXT,
+            created_at  TIMESTAMPTZ NOT NULL
+        )
+    "#;
+
+    const ANNOTATIONS_DDL: &str = r#"
+        CREATE TABLE IF NOT EXISTS annotations (
+            id          TEXT PRIMARY KEY,
+            site_id     TEXT NOT NULL REFERENCES sites(id),
+            date        TEXT NOT NULL,
+            text        TEXT NOT NULL,
             created_at  TIMESTAMPTZ NOT NULL
         )
     "#;

@@ -21,7 +21,8 @@ use stomatopod_core::{
     query::{
         analytics::{
             EntryPageRow, EntryPages, ExitPageRow, ExitPages, GoalBucket, GoalQuery, GoalStats,
-            RawEventRow, RealtimeEvent, RealtimeSnapshot, RealtimeTopPage, SessionRow,
+            PathReport, RawEventRow, RealtimeEvent, RealtimeSnapshot, RealtimeTopPage,
+            RetentionGrid, SessionRow, TopSparklines,
         },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
@@ -530,6 +531,81 @@ impl StorageBackend for ClickhouseBackend {
             })
             .collect())
     }
+
+    async fn query_top_sparklines(
+        &self,
+        site_id: Ulid,
+        field: TopListField,
+        range: &TimeRange,
+        limit: u32,
+        filters: &[Filter],
+    ) -> Result<TopSparklines, StoreError> {
+        #[derive(Deserialize)]
+        struct Row {
+            value: String,
+            day: String,
+            c: String,
+        }
+        let rows: Vec<Row> = self
+            .query_json(&sql::top_sparklines(
+                site_id,
+                range,
+                field.column(),
+                filters,
+            ))
+            .await?;
+        let mut days = std::collections::BTreeSet::new();
+        let counts: Vec<(String, String, u64)> = rows
+            .into_iter()
+            .map(|r| {
+                days.insert(r.day.clone());
+                (r.value, r.day, r.c.parse::<u64>().unwrap_or(0))
+            })
+            .collect();
+        Ok(TopSparklines::from_counts(
+            counts,
+            days.into_iter().collect(),
+            limit as usize,
+        ))
+    }
+
+    async fn query_retention(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+    ) -> Result<RetentionGrid, StoreError> {
+        #[derive(Deserialize)]
+        struct Row {
+            sid: String,
+            week: String,
+        }
+        let rows: Vec<Row> = self.query_json(&sql::retention(site_id, range)).await?;
+        let pairs = rows.into_iter().map(|r| (r.sid, r.week)).collect();
+        Ok(RetentionGrid::from_session_weeks(pairs))
+    }
+
+    async fn query_paths(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        depth: u32,
+        limit: u32,
+    ) -> Result<PathReport, StoreError> {
+        #[derive(Deserialize)]
+        struct Row {
+            sid: String,
+            seq: String,
+            url: String,
+        }
+        let rows: Vec<Row> = self
+            .query_json(&sql::paths(site_id, range, depth.clamp(2, 10)))
+            .await?;
+        let steps = rows
+            .into_iter()
+            .map(|r| (r.sid, r.seq.parse::<u32>().unwrap_or(0), r.url))
+            .collect();
+        Ok(PathReport::from_steps(steps, limit as usize))
+    }
 }
 
 impl ClickhouseBackend {
@@ -991,6 +1067,56 @@ mod sql {
              FROM events \
              WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end} \
              ORDER BY timestamp DESC LIMIT {limit}",
+            site = quote(&site_id.to_string()),
+            start = micros(range.start),
+            end = micros(range.end),
+        )
+    }
+
+    pub fn top_sparklines(
+        site_id: Ulid,
+        range: &TimeRange,
+        field: &str,
+        filters: &[Filter],
+    ) -> String {
+        // `field` is a static identifier from `TopListField::column`.
+        format!(
+            "SELECT coalesce({field}, 'Direct / None') AS value, \
+                    formatDateTime(toStartOfDay(timestamp), '%Y-%m-%d') AS day, \
+                    toString(count()) AS c \
+             FROM events \
+             WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end} \
+               AND kind = 'pageview' {filters} \
+             GROUP BY value, day",
+            site = quote(&site_id.to_string()),
+            start = micros(range.start),
+            end = micros(range.end),
+            filters = filter_clause(filters),
+        )
+    }
+
+    pub fn retention(site_id: Ulid, range: &TimeRange) -> String {
+        format!(
+            "SELECT DISTINCT session_id AS sid, \
+                    formatDateTime(toStartOfWeek(timestamp, 1), '%Y-%m-%d') AS week \
+             FROM events \
+             WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end} \
+               AND kind = 'pageview'",
+            site = quote(&site_id.to_string()),
+            start = micros(range.start),
+            end = micros(range.end),
+        )
+    }
+
+    pub fn paths(site_id: Ulid, range: &TimeRange, depth: u32) -> String {
+        format!(
+            "SELECT sid, toString(rn) AS seq, url FROM (\
+                SELECT session_id AS sid, coalesce(url, '') AS url, \
+                    row_number() OVER (PARTITION BY session_id ORDER BY timestamp ASC, id ASC) AS rn \
+                FROM events \
+                WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end} \
+                  AND kind = 'pageview') \
+             WHERE rn <= {depth}",
             site = quote(&site_id.to_string()),
             start = micros(range.start),
             end = micros(range.end),

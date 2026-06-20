@@ -1,0 +1,67 @@
+{% extends "base.jinja" %} {% block title %}Paths — {{ site.name }}{% endblock
+%} {% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title" style="view-transition-name: s-{{ site.id }}">
+      {{ site.name }}
+    </h1>
+    <p class="page-sub">{{ site.domain }} · user paths</p>
+  </div>
+  {% if sites %}
+  <form method="get" action="{{ scope_path }}">
+    <select name="site" onchange="this.form.submit()" aria-label="Filter by site">
+      {% for s in sites %}<option value="{{ s.id }}" {% if s.id == site.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+    </select>
+  </form>
+  {% endif %}
+</div>
+
+<div class="tabs">
+  <a href="/app/sites/{{ site.id }}?range={{ range }}">Overview</a>
+  <a href="/app/campaigns?site={{ site.id }}&range={{ range }}">Campaigns</a>
+  <a href="/app/retention?site={{ site.id }}&range={{ range }}">Retention</a>
+  <a href="/app/paths?site={{ site.id }}&range={{ range }}" class="active">Paths</a>
+</div>
+
+<div class="card">
+  <div class="section-header">
+    <h2>Top paths · first {{ depth }} steps · {{ range }}</h2>
+    <form method="get" action="/app/paths">
+      <input type="hidden" name="site" value="{{ site.id }}" />
+      <input type="hidden" name="range" value="{{ range }}" />
+      <select name="depth" onchange="this.form.submit()" aria-label="Steps">
+        {% for d in [2, 3, 4, 5, 6] %}<option value="{{ d }}" {% if d == depth %}selected{% endif %}>{{ d }} steps</option>{% endfor %}
+      </select>
+    </form>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Path</th>
+        <th>Sessions</th>
+        <th>%</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in report.rows %}
+      <tr>
+        <td class="cell-truncate">
+          {% for step in row.steps %}{% if loop.index0 > 0 %} <span class="path-arrow">→</span> {% endif %}<code>{{ step }}</code>{% endfor %}
+        </td>
+        <td>{{ row.sessions }}</td>
+        <td>
+          <div class="bar-cell">
+            <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
+            {{ "%.1f" | format(row.pct) }}%
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="3" class="empty-cell">No data</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

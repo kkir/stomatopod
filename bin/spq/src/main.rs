@@ -5,6 +5,7 @@
 //! API key (`rk_...`) from `STOMATOPOD_TOKEN` or
 //! `~/.config/stomatopod/credentials`.
 
+mod annotations;
 mod client;
 mod query;
 mod sites;
@@ -45,6 +46,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: sites::SitesCommand,
     },
+    /// Manage chart annotations.
+    Annotations {
+        #[command(subcommand)]
+        cmd: annotations::AnnotationsCommand,
+    },
     /// Print a machine-readable description of every command (for LLM agents).
     Describe,
     /// Manage Claude Code skills bundled with spq.
@@ -62,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
     match &cli.command {
         Commands::Query { cmd, human } => query::run(cmd, &client, *human).await,
         Commands::Sites { cmd } => sites::run(cmd, &client).await,
+        Commands::Annotations { cmd } => annotations::run(cmd, &client).await,
         Commands::Describe => {
             println!("{}", serde_json::to_string_pretty(&describe())?);
             Ok(())
@@ -163,6 +170,64 @@ fn describe() -> serde_json::Value {
                     { "name": "--from", "required": false },
                     { "name": "--to", "required": false },
                     { "name": "--limit", "default": "20" }
+                ]
+            },
+            {
+                "name": "query campaigns",
+                "description": "UTM campaign breakdowns (source/medium/campaign/term/content).",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" }
+                ]
+            },
+            {
+                "name": "query retention",
+                "description": "Weekly retention cohort grid.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "90d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false }
+                ]
+            },
+            {
+                "name": "query paths",
+                "description": "Top user paths (page-navigation sequences).",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--depth", "default": "3", "note": "Steps per sequence (2-10)." },
+                    { "name": "--limit", "default": "25" }
+                ]
+            },
+            {
+                "name": "annotations list",
+                "description": "List chart annotations for a site.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "90d" }
+                ]
+            },
+            {
+                "name": "annotations create",
+                "description": "Create a chart annotation (requires a write-capable key).",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--date", "required": true, "note": "YYYY-MM-DD." },
+                    { "name": "--text", "required": true }
+                ]
+            },
+            {
+                "name": "annotations delete",
+                "description": "Delete a chart annotation by id.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--id", "required": true }
                 ]
             },
             {

@@ -311,6 +311,12 @@ pub enum TopListField {
     Device,
     Os,
     Region,
+    // UTM dimensions — surfaced by the campaign report, not the main grid.
+    UtmSource,
+    UtmMedium,
+    UtmCampaign,
+    UtmTerm,
+    UtmContent,
 }
 
 impl TopListField {
@@ -325,6 +331,15 @@ impl TopListField {
         TopListField::Region,
     ];
 
+    /// UTM dimensions surfaced on the campaign report, in drill-down order.
+    pub const UTM: [TopListField; 5] = [
+        TopListField::UtmSource,
+        TopListField::UtmMedium,
+        TopListField::UtmCampaign,
+        TopListField::UtmTerm,
+        TopListField::UtmContent,
+    ];
+
     /// Events-table column to group by.
     pub fn column(&self) -> &'static str {
         match self {
@@ -335,10 +350,16 @@ impl TopListField {
             TopListField::Device => "device_type",
             TopListField::Os => "os",
             TopListField::Region => "region",
+            TopListField::UtmSource => "utm_source",
+            TopListField::UtmMedium => "utm_medium",
+            TopListField::UtmCampaign => "utm_campaign",
+            TopListField::UtmTerm => "utm_term",
+            TopListField::UtmContent => "utm_content",
         }
     }
 
-    /// Filename of the htmx partial that renders this dimension.
+    /// Filename of the htmx partial that renders this dimension. UTM
+    /// dimensions reuse the generic value/sessions/pct table.
     pub fn template_partial(&self) -> &'static str {
         match self {
             TopListField::Page => "partials/top_pages.jinja",
@@ -348,6 +369,30 @@ impl TopListField {
             TopListField::Device => "partials/top_devices.jinja",
             TopListField::Os => "partials/top_os.jinja",
             TopListField::Region => "partials/top_regions.jinja",
+            TopListField::UtmSource
+            | TopListField::UtmMedium
+            | TopListField::UtmCampaign
+            | TopListField::UtmTerm
+            | TopListField::UtmContent => "partials/top_referrers.jinja",
+        }
+    }
+
+    /// Canonical wire token, used by the JSON API and CLI to name a UTM
+    /// breakdown in the campaign report.
+    pub fn token(&self) -> &'static str {
+        match self {
+            TopListField::Page => "page",
+            TopListField::Referrer => "referrer",
+            TopListField::Country => "country",
+            TopListField::Browser => "browser",
+            TopListField::Device => "device",
+            TopListField::Os => "os",
+            TopListField::Region => "region",
+            TopListField::UtmSource => "utm_source",
+            TopListField::UtmMedium => "utm_medium",
+            TopListField::UtmCampaign => "utm_campaign",
+            TopListField::UtmTerm => "utm_term",
+            TopListField::UtmContent => "utm_content",
         }
     }
 }

@@ -1,9 +1,26 @@
 {% extends "base.jinja" %} {% block title %}{{ site.name }} — Stomatopod{%
 endblock %} {% block content %}
 
+{# Tiny inline sparkline from a list of daily counts. #}
+{% macro sparkline(points) %}
+{% if points and (points | length) > 1 %}
+{% set mx = points | max | default(1) %}
+{% set n = points | length %}
+{% set ns = namespace(pts="") %}
+{% for p in points %}
+{% set x = (loop.index0 / (n - 1)) * 60 %}
+{% set y = 16 - (p / (mx if mx > 0 else 1)) * 14 %}
+{% if loop.index0 > 0 %}{% set ns.pts = ns.pts ~ " " %}{% endif %}
+{% set ns.pts = ns.pts ~ x ~ "," ~ y %}
+{% endfor %}
+<svg class="spark" viewBox="0 0 60 18" preserveAspectRatio="none" aria-hidden="true"><polyline points="{{ ns.pts }}" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" /></svg>
+{% endif %}
+{% endmacro %}
+
 {# Reusable top-N table. `field` is the filter token to add when a row's value
-   is clicked (empty string = not clickable). `metric` picks the count column. #}
-{% macro toptable(title, header, rows, field, metric, base, site_id, endpoint) %}
+   is clicked (empty string = not clickable). `metric` picks the count column.
+   `sparks` (optional) is a value→daily-series map adding a trend column. #}
+{% macro toptable(title, header, rows, field, metric, base, site_id, endpoint, sparks=none) %}
 <div class="card">
   <div class="section-header">
     <h2>{{ title }}</h2>
@@ -19,6 +36,7 @@ endblock %} {% block content %}
       <tr>
         <th>{{ header }}</th>
         <th>{{ "Views" if metric == "pageviews" else "Visitors" }}</th>
+        {% if sparks %}<th>Trend</th>{% endif %}
         <th>%</th>
       </tr>
     </thead>
@@ -33,6 +51,7 @@ endblock %} {% block content %}
           >{% else %}{{ row.value }}{% endif %}
         </td>
         <td>{{ row.pageviews if metric == "pageviews" else row.sessions }}</td>
+        {% if sparks %}<td>{{ sparkline(sparks[row.value]) }}</td>{% endif %}
         <td>
           <div class="bar-cell">
             <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
@@ -42,7 +61,7 @@ endblock %} {% block content %}
       </tr>
       {% else %}
       <tr>
-        <td colspan="3" class="empty-cell">No data</td>
+        <td colspan="{{ 4 if sparks else 3 }}" class="empty-cell">No data</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -198,15 +217,19 @@ endblock %} {% block content %}
       stroke-linecap="round"
     />
     {% endif %}
+    {% for a in annotations %}
+    <line x1="{{ a.x }}" y1="0" x2="{{ a.x }}" y2="120" stroke="rgba(248,113,113,0.55)" stroke-width="1" stroke-dasharray="3 3"><title>{{ a.date }}: {{ a.text }}</title></line>
+    {% endfor %}
   </svg>
   {% endif %}
 </div>
 
 <!-- Top tables grid -->
-<div class="grid-2">
+<div class="grid-2 mb-2">
   {{ toptable("Top Pages", "Page", top_pages, "url", "pageviews", base, site.id,
-  "top-pages") }} {{ toptable("Top Referrers", "Source", top_referrers,
-  "referrer", "sessions", base, site.id, "top-referrers") }} {{
+  "top-pages", spark_pages) }} {{ toptable("Top Referrers", "Source",
+  top_referrers, "referrer", "sessions", base, site.id, "top-referrers",
+  spark_referrers) }} {{
   toptable("Countries", "Country", top_countries, "country", "sessions", base,
   site.id, "top-countries") }} {{ toptable("Regions", "Region", top_regions,
   "region", "sessions", base, site.id, "top-regions") }} {{ toptable("Browsers",
@@ -217,7 +240,7 @@ endblock %} {% block content %}
 </div>
 
 <!-- Entry / exit pages: session start/end with bounce + exit rates. -->
-<div class="grid-2">
+<div class="grid-2 mb-2">
   <div class="card">
     <div class="section-header">
       <h2>Entry Pages</h2>
@@ -303,6 +326,44 @@ endblock %} {% block content %}
       </tbody>
     </table>
   </div>
+</div>
+
+<!-- Annotations: dated notes drawn as markers on the chart above. -->
+<div class="card mb-2">
+  <div class="section-header"><h2>Annotations</h2></div>
+  <form method="post" action="/app/sites/{{ site.id }}/annotations" class="form-row mb-2">
+    <input type="date" name="date" required aria-label="Annotation date" />
+    <input type="text" name="text" placeholder="e.g. Deployed v2" required autocomplete="off" />
+    <button type="submit" class="btn btn-primary">Add</button>
+  </form>
+  {% if annotations %}
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Note</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in annotations %}
+      <tr>
+        <td>{{ a.date }}</td>
+        <td class="cell-truncate">{{ a.text }}</td>
+        <td>
+          <form
+            method="post"
+            action="/app/sites/{{ site.id }}/annotations/{{ a.id }}/delete"
+            onsubmit="return confirm('Delete this annotation?')"
+          >
+            <button type="submit" class="btn btn-ghost">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
 </div>
 
 <!-- Raw data export -->

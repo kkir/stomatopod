@@ -21,7 +21,8 @@ use stomatopod_core::{
     error::StoreError,
     query::{
         analytics::{
-            EntryPages, ExitPages, GoalQuery, GoalStats, RawEventRow, RealtimeSnapshot, SessionRow,
+            EntryPages, ExitPages, GoalQuery, GoalStats, PathReport, RawEventRow, RealtimeSnapshot,
+            RetentionGrid, SessionRow, TopSparklines,
         },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
@@ -193,6 +194,37 @@ impl StorageBackend for EmbeddedBackend {
     ) -> Result<Vec<RawEventRow>, StoreError> {
         self.reader.query_events_list(site_id, range, limit).await
     }
+
+    async fn query_top_sparklines(
+        &self,
+        site_id: Ulid,
+        field: TopListField,
+        range: &TimeRange,
+        limit: u32,
+        filters: &[Filter],
+    ) -> Result<TopSparklines, StoreError> {
+        self.reader
+            .query_top_sparklines(site_id, field, range, limit, filters)
+            .await
+    }
+
+    async fn query_retention(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+    ) -> Result<RetentionGrid, StoreError> {
+        self.reader.query_retention(site_id, range).await
+    }
+
+    async fn query_paths(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        depth: u32,
+        limit: u32,
+    ) -> Result<PathReport, StoreError> {
+        self.reader.query_paths(site_id, range, depth, limit).await
+    }
 }
 
 // Forward MetaStore calls to the SQLite meta store
@@ -326,6 +358,33 @@ impl MetaStore for EmbeddedBackend {
 
     async fn delete_goal(&self, id: Ulid) -> Result<(), StoreError> {
         self.meta.delete_goal(id).await
+    }
+
+    async fn create_annotation(
+        &self,
+        annotation: &stomatopod_core::domain::annotation::Annotation,
+    ) -> Result<(), StoreError> {
+        self.meta.create_annotation(annotation).await
+    }
+
+    async fn get_annotation(
+        &self,
+        id: Ulid,
+    ) -> Result<Option<stomatopod_core::domain::annotation::Annotation>, StoreError> {
+        self.meta.get_annotation(id).await
+    }
+
+    async fn list_annotations(
+        &self,
+        site_id: Ulid,
+        start: chrono::NaiveDate,
+        end: chrono::NaiveDate,
+    ) -> Result<Vec<stomatopod_core::domain::annotation::Annotation>, StoreError> {
+        self.meta.list_annotations(site_id, start, end).await
+    }
+
+    async fn delete_annotation(&self, id: Ulid) -> Result<(), StoreError> {
+        self.meta.delete_annotation(id).await
     }
 
     async fn create_analytics_alert(

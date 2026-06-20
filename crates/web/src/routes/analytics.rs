@@ -12,6 +12,7 @@ use ulid::Ulid;
 use stomatopod_core::{
     domain::{
         analytics_alert::{AnalyticsAlert, AnalyticsAlertConfig, AnalyticsAlertKind},
+        annotation::Annotation,
         goal::Goal,
         org::Funnel,
     },
@@ -145,6 +146,8 @@ pub struct AnalyticsParams {
     pub format: Option<String>,
     /// Real-time window in minutes (defaults to 30).
     pub window: Option<u32>,
+    /// Path-report depth (number of steps per sequence; defaults to 3).
+    pub depth: Option<u32>,
 }
 
 impl AnalyticsParams {
@@ -562,6 +565,11 @@ fn field_filename(field: TopListField) -> &'static str {
         TopListField::Device => "top-devices",
         TopListField::Os => "top-os",
         TopListField::Region => "top-regions",
+        TopListField::UtmSource => "utm-source",
+        TopListField::UtmMedium => "utm-medium",
+        TopListField::UtmCampaign => "utm-campaign",
+        TopListField::UtmTerm => "utm-term",
+        TopListField::UtmContent => "utm-content",
     }
 }
 
@@ -1089,5 +1097,189 @@ referrer,country_code,browser,os,device_type,utm_source,utm_medium,utm_campaign,
         csv_response("sessions.csv", csv)
     } else {
         Json(serde_json::json!({ "rows": rows })).into_response()
+    }
+}
+
+// ---- Tier-3: campaign report, retention, paths ----
+
+/// GET /api/v1/sites/:site/campaigns — UTM breakdowns (source/medium/
+/// campaign/term/content) in a single response.
+pub async fn campaigns(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let range = params.range();
+    let filters = params.filters();
+    let limit = params.limit_or_default();
+    let mut out = serde_json::Map::new();
+    for field in TopListField::UTM {
+        match state
+            .backend
+            .query_top_list(site_id, field, &range, limit, &filters)
+            .await
+        {
+            Ok(tl) => {
+                out.insert(field.token().to_string(), serde_json::to_value(tl).unwrap());
+            }
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        }
+    }
+    Json(serde_json::Value::Object(out)).into_response()
+}
+
+/// GET /api/v1/sites/:site/retention — weekly cohort grid.
+pub async fn retention(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    match state
+        .backend
+        .query_retention(site_id, &params.range())
+        .await
+    {
+        Ok(grid) => Json(serde_json::to_value(grid).unwrap()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// GET /api/v1/sites/:site/paths — top page-navigation sequences.
+pub async fn paths(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let depth = params.depth.unwrap_or(3);
+    let limit = params.limit_or_default();
+    match state
+        .backend
+        .query_paths(site_id, &params.range(), depth, limit)
+        .await
+    {
+        Ok(report) => Json(serde_json::to_value(report).unwrap()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// ---- Tier-3: annotations ----
+
+#[derive(Deserialize)]
+pub struct CreateAnnotationBody {
+    /// `YYYY-MM-DD`.
+    pub date: String,
+    pub text: String,
+}
+
+/// GET /api/v1/sites/:site/annotations — annotations within the range.
+pub async fn list_annotations(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let range = params.range();
+    match state
+        .meta
+        .list_annotations(site_id, range.start.date_naive(), range.end.date_naive())
+        .await
+    {
+        Ok(rows) => Json(serde_json::json!({ "annotations": rows })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// POST /api/v1/sites/:site/annotations — create an annotation.
+pub async fn create_annotation(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Json(body): Json<CreateAnnotationBody>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let date = match chrono::NaiveDate::parse_from_str(body.date.trim(), "%Y-%m-%d") {
+        Ok(d) => d,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "date must be YYYY-MM-DD"})),
+            )
+                .into_response()
+        }
+    };
+    if body.text.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "text is required"})),
+        )
+            .into_response();
+    }
+    let annotation = Annotation {
+        id: Ulid::new(),
+        site_id,
+        date,
+        text: body.text,
+        created_at: chrono::Utc::now(),
+    };
+    match state.meta.create_annotation(&annotation).await {
+        Ok(_) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(&annotation).unwrap()),
+        )
+            .into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// DELETE /api/v1/sites/:site/annotations/:id
+pub async fn delete_annotation(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path((site, annotation_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let id = match Ulid::from_string(&annotation_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid annotation id"})),
+            )
+                .into_response()
+        }
+    };
+    match state.meta.get_annotation(id).await {
+        Ok(Some(a)) if a.site_id == site_id => {}
+        Ok(_) => return not_found(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+    match state.meta.delete_annotation(id).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

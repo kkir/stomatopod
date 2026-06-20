@@ -6,6 +6,7 @@ use crate::{
         agent::{Agent, AlertChannel, SentinelToken},
         agent_span::AgentSpan,
         analytics_alert::{AnalyticsAlert, AnalyticsAlertFire},
+        annotation::Annotation,
         api_key::ApiKey,
         goal::Goal,
         incident::{Incident, IncidentStatus},
@@ -16,7 +17,8 @@ use crate::{
     error::StoreError,
     query::{
         analytics::{
-            EntryPages, ExitPages, GoalQuery, GoalStats, RawEventRow, RealtimeSnapshot, SessionRow,
+            EntryPages, ExitPages, GoalQuery, GoalStats, PathReport, RawEventRow, RealtimeSnapshot,
+            RetentionGrid, SessionRow, TopSparklines,
         },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
@@ -104,6 +106,35 @@ pub trait StorageBackend: Send + Sync + 'static {
         range: &TimeRange,
         limit: u32,
     ) -> Result<Vec<RawEventRow>, StoreError>;
+
+    // ---- Tier-3 analytics queries ----
+
+    /// Per-value daily mini timeseries for the top `limit` values of a
+    /// dimension over `range`. Powers the sparklines next to top-N rows.
+    async fn query_top_sparklines(
+        &self,
+        site_id: Ulid,
+        field: TopListField,
+        range: &TimeRange,
+        limit: u32,
+        filters: &[Filter],
+    ) -> Result<TopSparklines, StoreError>;
+
+    /// Weekly retention cohort grid over `range`.
+    async fn query_retention(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+    ) -> Result<RetentionGrid, StoreError>;
+
+    /// Top page-navigation sequences (first `depth` pageviews per session).
+    async fn query_paths(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        depth: u32,
+        limit: u32,
+    ) -> Result<PathReport, StoreError>;
 }
 
 /// Metadata CRUD: sites, orgs, users, funnels.
@@ -140,6 +171,19 @@ pub trait MetaStore: Send + Sync + 'static {
     async fn get_goal(&self, id: Ulid) -> Result<Option<Goal>, StoreError>;
     async fn list_goals(&self, site_id: Ulid) -> Result<Vec<Goal>, StoreError>;
     async fn delete_goal(&self, id: Ulid) -> Result<(), StoreError>;
+
+    // ---- Annotations ----
+    async fn create_annotation(&self, annotation: &Annotation) -> Result<(), StoreError>;
+    async fn get_annotation(&self, id: Ulid) -> Result<Option<Annotation>, StoreError>;
+    /// Annotations whose date falls within `[start, end]` (inclusive),
+    /// newest-dated first.
+    async fn list_annotations(
+        &self,
+        site_id: Ulid,
+        start: chrono::NaiveDate,
+        end: chrono::NaiveDate,
+    ) -> Result<Vec<Annotation>, StoreError>;
+    async fn delete_annotation(&self, id: Ulid) -> Result<(), StoreError>;
 
     // ---- Analytics alerts ----
     async fn create_analytics_alert(&self, alert: &AnalyticsAlert) -> Result<(), StoreError>;

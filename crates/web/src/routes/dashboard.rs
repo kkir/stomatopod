@@ -4,7 +4,7 @@ use axum::{
 };
 use std::sync::Arc;
 
-use stomatopod_core::query::pageviews::{Filter, FilterOp, PageviewsQuery};
+use stomatopod_core::query::pageviews::{Filter, FilterOp, PageviewsQuery, TopListField};
 use stomatopod_query::reports::fetch_dashboard;
 
 use crate::{
@@ -58,6 +58,53 @@ pub async fn site_overview(
         .query_exit_pages(site_id, &dq.range, 20, &dq.filters)
         .await
         .unwrap_or_default();
+
+    // Sparklines for the top-pages/referrers tables: value → daily series.
+    let spark_pages = state
+        .backend
+        .query_top_sparklines(site_id, TopListField::Page, &dq.range, 20, &dq.filters)
+        .await
+        .unwrap_or_default();
+    let spark_referrers = state
+        .backend
+        .query_top_sparklines(site_id, TopListField::Referrer, &dq.range, 20, &dq.filters)
+        .await
+        .unwrap_or_default();
+    let spark_map = |s: &stomatopod_core::query::analytics::TopSparklines| {
+        let m: serde_json::Map<String, serde_json::Value> = s
+            .rows
+            .iter()
+            .map(|r| (r.value.clone(), serde_json::to_value(&r.points).unwrap()))
+            .collect();
+        serde_json::Value::Object(m)
+    };
+    let spark_pages = spark_map(&spark_pages);
+    let spark_referrers = spark_map(&spark_referrers);
+
+    // Annotations within the window, projected onto the 0–800 chart x-axis.
+    let annotations = state
+        .meta
+        .list_annotations(
+            site_id,
+            dq.range.start.date_naive(),
+            dq.range.end.date_naive(),
+        )
+        .await
+        .unwrap_or_default();
+    let span_secs = (dq.range.end - dq.range.start).num_seconds().max(1) as f64;
+    let annotations_view: Vec<serde_json::Value> = annotations
+        .iter()
+        .map(|a| {
+            let at = a.date.and_hms_opt(12, 0, 0).unwrap_or_default().and_utc();
+            let frac = ((at - dq.range.start).num_seconds() as f64 / span_secs).clamp(0.0, 1.0);
+            serde_json::json!({
+                "id": a.id.to_string(),
+                "date": a.date.format("%Y-%m-%d").to_string(),
+                "text": a.text,
+                "x": frac * 800.0,
+            })
+        })
+        .collect();
 
     let site = state
         .meta
@@ -162,6 +209,9 @@ pub async fn site_overview(
             entry_pages => serde_json::to_value(&entry_pages.rows).unwrap(),
             exit_pages => serde_json::to_value(&exit_pages.rows).unwrap(),
             buckets => serde_json::to_value(&report.pageviews.buckets).unwrap(),
+            spark_pages => spark_pages,
+            spark_referrers => spark_referrers,
+            annotations => annotations_view,
         },
     )?;
 
