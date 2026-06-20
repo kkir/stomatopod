@@ -10,8 +10,13 @@ use std::sync::Arc;
 use ulid::Ulid;
 
 use stomatopod_core::{
-    domain::org::Funnel,
+    domain::{
+        analytics_alert::{AnalyticsAlert, AnalyticsAlertConfig, AnalyticsAlertKind},
+        goal::Goal,
+        org::Funnel,
+    },
     query::{
+        analytics::GoalQuery,
         events::EventQuery,
         funnel::{FunnelQuery, FunnelStep},
         pageviews::{Filter, Granularity, PageviewsQuery, TimeRange, TopListField},
@@ -136,6 +141,10 @@ pub struct AnalyticsParams {
     pub limit: Option<u32>,
     #[serde(default)]
     pub filter: Vec<String>,
+    /// `csv` triggers a CSV download; anything else (or absent) is JSON.
+    pub format: Option<String>,
+    /// Real-time window in minutes (defaults to 30).
+    pub window: Option<u32>,
 }
 
 impl AnalyticsParams {
@@ -151,6 +160,9 @@ impl AnalyticsParams {
     }
     fn limit_or_default(&self) -> u32 {
         self.limit.unwrap_or(20)
+    }
+    fn wants_csv(&self) -> bool {
+        matches!(self.format.as_deref(), Some("csv"))
     }
 }
 
@@ -242,6 +254,19 @@ pub async fn pageviews(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
 
+    if params.wants_csv() {
+        let mut csv = String::from("ts,pageviews,sessions\n");
+        for b in &result.buckets {
+            csv.push_str(&format!(
+                "{},{},{}\n",
+                b.ts.to_rfc3339(),
+                b.pageviews,
+                b.sessions
+            ));
+        }
+        return csv_response("pageviews.csv", csv);
+    }
+
     // Period-over-period comparison: when requested, attach the prior
     // equal-length window's totals under `comparison`.
     if compare_enabled(params.compare.as_deref()) {
@@ -275,18 +300,34 @@ async fn top_list_response(
         Err(resp) => return resp,
     };
     let range = params.range();
+    // CSV export has no row cap; the JSON view keeps the dashboard's default.
+    let limit = if params.wants_csv() {
+        params.limit.unwrap_or(100_000)
+    } else {
+        params.limit_or_default()
+    };
     match state
         .backend
-        .query_top_list(
-            site_id,
-            field,
-            &range,
-            params.limit_or_default(),
-            &params.filters(),
-        )
+        .query_top_list(site_id, field, &range, limit, &params.filters())
         .await
     {
-        Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),
+        Ok(result) => {
+            if params.wants_csv() {
+                let mut csv = String::from("value,pageviews,sessions,pct\n");
+                for r in &result.rows {
+                    csv.push_str(&format!(
+                        "{},{},{},{:.2}\n",
+                        csv_field(&r.value),
+                        r.pageviews,
+                        r.sessions,
+                        r.pct
+                    ));
+                }
+                csv_response(&format!("{}.csv", field_filename(field)), csv)
+            } else {
+                Json(serde_json::to_value(result).unwrap()).into_response()
+            }
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -482,5 +523,571 @@ pub async fn funnel_result(
     match state.backend.query_funnel(&q).await {
         Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// ---- CSV helpers ----
+
+/// Quote a CSV field if it contains a comma, quote, or newline (RFC 4180).
+fn csv_field(s: &str) -> String {
+    if s.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// Build a `text/csv` attachment response with the given filename + body.
+fn csv_response(filename: &str, body: String) -> Response {
+    (
+        StatusCode::OK,
+        [
+            (axum::http::header::CONTENT_TYPE, "text/csv".to_string()),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+fn field_filename(field: TopListField) -> &'static str {
+    match field {
+        TopListField::Page => "top-pages",
+        TopListField::Referrer => "top-referrers",
+        TopListField::Country => "top-countries",
+        TopListField::Browser => "top-browsers",
+        TopListField::Device => "top-devices",
+        TopListField::Os => "top-os",
+        TopListField::Region => "top-regions",
+    }
+}
+
+// ---- Entry / exit pages ----
+
+/// GET /api/v1/sites/:site/top-entry-pages
+pub async fn top_entry_pages(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let range = params.range();
+    match state
+        .backend
+        .query_entry_pages(
+            site_id,
+            &range,
+            params.limit_or_default(),
+            &params.filters(),
+        )
+        .await
+    {
+        Ok(result) => {
+            if params.wants_csv() {
+                let mut csv = String::from("url,sessions,pct,bounce_rate\n");
+                for r in &result.rows {
+                    csv.push_str(&format!(
+                        "{},{},{:.2},{:.2}\n",
+                        csv_field(&r.url),
+                        r.sessions,
+                        r.pct,
+                        r.bounce_rate
+                    ));
+                }
+                csv_response("top-entry-pages.csv", csv)
+            } else {
+                Json(serde_json::to_value(result).unwrap()).into_response()
+            }
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// GET /api/v1/sites/:site/top-exit-pages
+pub async fn top_exit_pages(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let range = params.range();
+    match state
+        .backend
+        .query_exit_pages(
+            site_id,
+            &range,
+            params.limit_or_default(),
+            &params.filters(),
+        )
+        .await
+    {
+        Ok(result) => {
+            if params.wants_csv() {
+                let mut csv = String::from("url,exits,pct,exit_rate\n");
+                for r in &result.rows {
+                    csv.push_str(&format!(
+                        "{},{},{:.2},{:.2}\n",
+                        csv_field(&r.url),
+                        r.exits,
+                        r.pct,
+                        r.exit_rate
+                    ));
+                }
+                csv_response("top-exit-pages.csv", csv)
+            } else {
+                Json(serde_json::to_value(result).unwrap()).into_response()
+            }
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// ---- Real-time ----
+
+/// GET /api/v1/sites/:site/realtime
+pub async fn realtime(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    // Window capped to 1 hour; defaults to the spec's 30 minutes.
+    let window = params.window.unwrap_or(30).clamp(1, 60);
+    match state.backend.query_realtime(site_id, window).await {
+        Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// ---- Goals ----
+
+#[derive(Deserialize)]
+pub struct CreateGoalBody {
+    pub name: String,
+    pub event_name: String,
+    #[serde(default)]
+    pub filters: Vec<Filter>,
+}
+
+/// GET /api/v1/sites/:site/goals
+pub async fn list_goals(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    match state.meta.list_goals(site_id).await {
+        Ok(goals) => Json(serde_json::json!({ "goals": goals })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// POST /api/v1/sites/:site/goals
+pub async fn create_goal(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Json(body): Json<CreateGoalBody>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    if body.name.trim().is_empty() || body.event_name.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "name and event_name are required"})),
+        )
+            .into_response();
+    }
+    let filters = if body.filters.is_empty() {
+        None
+    } else {
+        serde_json::to_string(&body.filters).ok()
+    };
+    let goal = Goal {
+        id: Ulid::new(),
+        site_id,
+        name: body.name,
+        event_name: body.event_name,
+        filters,
+        created_at: chrono::Utc::now(),
+    };
+    match state.meta.create_goal(&goal).await {
+        Ok(_) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(&goal).unwrap()),
+        )
+            .into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// DELETE /api/v1/sites/:site/goals/:goal_id
+pub async fn delete_goal(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path((site, goal_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let id = match Ulid::from_string(&goal_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid goal id"})),
+            )
+                .into_response()
+        }
+    };
+    // Confirm the goal belongs to this site before deleting.
+    match state.meta.get_goal(id).await {
+        Ok(Some(g)) if g.site_id == site_id => {}
+        Ok(_) => return not_found(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+    match state.meta.delete_goal(id).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// GET /api/v1/sites/:site/goals/:goal_id/stats
+pub async fn goal_stats(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path((site, goal_id)): Path<(String, String)>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let id = match Ulid::from_string(&goal_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid goal id"})),
+            )
+                .into_response()
+        }
+    };
+    let goal = match state.meta.get_goal(id).await {
+        Ok(Some(g)) if g.site_id == site_id => g,
+        Ok(_) => return not_found(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    let range = params.range();
+    let q = GoalQuery {
+        site_id,
+        event_name: goal.event_name.clone(),
+        filters: goal.parsed_filters(),
+        granularity: Granularity::auto_for_range(&range),
+        range,
+    };
+    match state.backend.query_goal(&q).await {
+        Ok(stats) => {
+            let mut body = serde_json::to_value(&stats).unwrap();
+            body["goal_id"] = serde_json::Value::String(goal.id.to_string());
+            body["name"] = serde_json::Value::String(goal.name);
+            Json(body).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// ---- Analytics alerts ----
+
+#[derive(Deserialize)]
+pub struct CreateAlertBody {
+    #[serde(rename = "type")]
+    pub alert_type: String,
+    pub threshold: f64,
+    #[serde(default)]
+    pub window_minutes: u32,
+    #[serde(default)]
+    pub goal_event_name: Option<String>,
+    pub channel_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct PatchAlertBody {
+    pub enabled: bool,
+}
+
+/// GET /api/v1/sites/:site/analytics-alerts
+pub async fn list_analytics_alerts(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    match state.meta.list_analytics_alerts(site_id).await {
+        Ok(alerts) => Json(serde_json::json!({ "alerts": alerts })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// POST /api/v1/sites/:site/analytics-alerts
+pub async fn create_analytics_alert(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Json(body): Json<CreateAlertBody>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let kind = match AnalyticsAlertKind::from_str(&body.alert_type) {
+        Some(k) => k,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "unknown alert type"})),
+            )
+                .into_response()
+        }
+    };
+    let channel_id = match Ulid::from_string(&body.channel_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid channel id"})),
+            )
+                .into_response()
+        }
+    };
+    // The alert channel must belong to the same site.
+    let channels = state
+        .meta
+        .list_alert_channels(site_id)
+        .await
+        .unwrap_or_default();
+    if !channels.iter().any(|c| c.id == channel_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "channel does not belong to this site"})),
+        )
+            .into_response();
+    }
+    let alert = AnalyticsAlert {
+        id: Ulid::new(),
+        site_id,
+        kind,
+        config: AnalyticsAlertConfig {
+            threshold: body.threshold,
+            window_minutes: if body.window_minutes == 0 {
+                60
+            } else {
+                body.window_minutes
+            },
+            goal_event_name: body.goal_event_name,
+        },
+        channel_id,
+        enabled: true,
+        created_at: chrono::Utc::now(),
+    };
+    match state.meta.create_analytics_alert(&alert).await {
+        Ok(_) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(&alert).unwrap()),
+        )
+            .into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// PATCH /api/v1/sites/:site/analytics-alerts/:id  — enable/disable
+pub async fn patch_analytics_alert(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path((site, alert_id)): Path<(String, String)>,
+    Json(body): Json<PatchAlertBody>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let id = match Ulid::from_string(&alert_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid alert id"})),
+            )
+                .into_response()
+        }
+    };
+    match state.meta.get_analytics_alert(id).await {
+        Ok(Some(a)) if a.site_id == site_id => {}
+        Ok(_) => return not_found(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+    match state
+        .meta
+        .set_analytics_alert_enabled(id, body.enabled)
+        .await
+    {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// DELETE /api/v1/sites/:site/analytics-alerts/:id
+pub async fn delete_analytics_alert(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path((site, alert_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let id = match Ulid::from_string(&alert_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid alert id"})),
+            )
+                .into_response()
+        }
+    };
+    match state.meta.get_analytics_alert(id).await {
+        Ok(Some(a)) if a.site_id == site_id => {}
+        Ok(_) => return not_found(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+    match state.meta.delete_analytics_alert(id).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// ---- Raw data export ----
+
+/// Cap on rows returned per export request (spec: 100k).
+const EXPORT_MAX_ROWS: u32 = 100_000;
+
+/// GET /api/v1/sites/:site/export/events
+pub async fn export_events(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let range = params.range();
+    let limit = params.limit.unwrap_or(EXPORT_MAX_ROWS).min(EXPORT_MAX_ROWS);
+    let rows = match state
+        .backend
+        .query_events_list(site_id, &range, limit)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    if params.wants_csv() {
+        let mut csv = String::from(
+            "id,name,kind,timestamp,url,referrer,country_code,browser,os,device_type,properties\n",
+        );
+        for r in &rows {
+            csv.push_str(&format!(
+                "{},{},{},{},{},{},{},{},{},{},{}\n",
+                csv_field(&r.id),
+                csv_field(&r.name),
+                csv_field(&r.kind),
+                r.timestamp.to_rfc3339(),
+                csv_field(&r.url),
+                csv_field(r.referrer.as_deref().unwrap_or("")),
+                csv_field(r.country_code.as_deref().unwrap_or("")),
+                csv_field(&r.browser),
+                csv_field(&r.os),
+                csv_field(&r.device_type),
+                csv_field(r.properties.as_deref().unwrap_or("")),
+            ));
+        }
+        csv_response("events.csv", csv)
+    } else {
+        Json(serde_json::json!({ "rows": rows })).into_response()
+    }
+}
+
+/// GET /api/v1/sites/:site/export/sessions
+pub async fn export_sessions(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let range = params.range();
+    let limit = params.limit.unwrap_or(EXPORT_MAX_ROWS).min(EXPORT_MAX_ROWS);
+    let rows = match state.backend.query_sessions(site_id, &range, limit).await {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    if params.wants_csv() {
+        let mut csv = String::from(
+            "session_id,started_at,ended_at,duration_secs,pageviews,entry_url,exit_url,\
+referrer,country_code,browser,os,device_type,utm_source,utm_medium,utm_campaign,is_bounce\n",
+        );
+        for r in &rows {
+            csv.push_str(&format!(
+                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+                csv_field(&r.session_id),
+                r.started_at.to_rfc3339(),
+                r.ended_at.to_rfc3339(),
+                r.duration_secs,
+                r.pageviews,
+                csv_field(&r.entry_url),
+                csv_field(&r.exit_url),
+                csv_field(r.referrer.as_deref().unwrap_or("")),
+                csv_field(r.country_code.as_deref().unwrap_or("")),
+                csv_field(&r.browser),
+                csv_field(&r.os),
+                csv_field(&r.device_type),
+                csv_field(r.utm_source.as_deref().unwrap_or("")),
+                csv_field(r.utm_medium.as_deref().unwrap_or("")),
+                csv_field(r.utm_campaign.as_deref().unwrap_or("")),
+                r.is_bounce,
+            ));
+        }
+        csv_response("sessions.csv", csv)
+    } else {
+        Json(serde_json::json!({ "rows": rows })).into_response()
     }
 }

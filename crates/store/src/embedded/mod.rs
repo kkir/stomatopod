@@ -20,6 +20,9 @@ use stomatopod_core::{
     domain::{agent_span::AgentSpan, event::Event},
     error::StoreError,
     query::{
+        analytics::{
+            EntryPages, ExitPages, GoalQuery, GoalStats, RawEventRow, RealtimeSnapshot, SessionRow,
+        },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
         pageviews::{Filter, PageviewsQuery, PageviewsResult, TimeRange, TopList, TopListField},
@@ -136,6 +139,60 @@ impl StorageBackend for EmbeddedBackend {
     async fn query_funnel(&self, q: &FunnelQuery) -> Result<FunnelResult, StoreError> {
         self.reader.query_funnel(q).await
     }
+
+    async fn query_entry_pages(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+        filters: &[Filter],
+    ) -> Result<EntryPages, StoreError> {
+        self.reader
+            .query_entry_pages(site_id, range, limit, filters)
+            .await
+    }
+
+    async fn query_exit_pages(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+        filters: &[Filter],
+    ) -> Result<ExitPages, StoreError> {
+        self.reader
+            .query_exit_pages(site_id, range, limit, filters)
+            .await
+    }
+
+    async fn query_realtime(
+        &self,
+        site_id: Ulid,
+        window_minutes: u32,
+    ) -> Result<RealtimeSnapshot, StoreError> {
+        self.reader.query_realtime(site_id, window_minutes).await
+    }
+
+    async fn query_goal(&self, q: &GoalQuery) -> Result<GoalStats, StoreError> {
+        self.reader.query_goal(q).await
+    }
+
+    async fn query_sessions(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+    ) -> Result<Vec<SessionRow>, StoreError> {
+        self.reader.query_sessions(site_id, range, limit).await
+    }
+
+    async fn query_events_list(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+    ) -> Result<Vec<RawEventRow>, StoreError> {
+        self.reader.query_events_list(site_id, range, limit).await
+    }
 }
 
 // Forward MetaStore calls to the SQLite meta store
@@ -244,6 +301,81 @@ impl MetaStore for EmbeddedBackend {
 
     async fn delete_funnel(&self, id: Ulid) -> Result<(), StoreError> {
         self.meta.delete_funnel(id).await
+    }
+
+    async fn create_goal(
+        &self,
+        goal: &stomatopod_core::domain::goal::Goal,
+    ) -> Result<(), StoreError> {
+        self.meta.create_goal(goal).await
+    }
+
+    async fn get_goal(
+        &self,
+        id: Ulid,
+    ) -> Result<Option<stomatopod_core::domain::goal::Goal>, StoreError> {
+        self.meta.get_goal(id).await
+    }
+
+    async fn list_goals(
+        &self,
+        site_id: Ulid,
+    ) -> Result<Vec<stomatopod_core::domain::goal::Goal>, StoreError> {
+        self.meta.list_goals(site_id).await
+    }
+
+    async fn delete_goal(&self, id: Ulid) -> Result<(), StoreError> {
+        self.meta.delete_goal(id).await
+    }
+
+    async fn create_analytics_alert(
+        &self,
+        alert: &stomatopod_core::domain::analytics_alert::AnalyticsAlert,
+    ) -> Result<(), StoreError> {
+        self.meta.create_analytics_alert(alert).await
+    }
+
+    async fn get_analytics_alert(
+        &self,
+        id: Ulid,
+    ) -> Result<Option<stomatopod_core::domain::analytics_alert::AnalyticsAlert>, StoreError> {
+        self.meta.get_analytics_alert(id).await
+    }
+
+    async fn list_analytics_alerts(
+        &self,
+        site_id: Ulid,
+    ) -> Result<Vec<stomatopod_core::domain::analytics_alert::AnalyticsAlert>, StoreError> {
+        self.meta.list_analytics_alerts(site_id).await
+    }
+
+    async fn list_enabled_analytics_alerts(
+        &self,
+    ) -> Result<Vec<stomatopod_core::domain::analytics_alert::AnalyticsAlert>, StoreError> {
+        self.meta.list_enabled_analytics_alerts().await
+    }
+
+    async fn set_analytics_alert_enabled(&self, id: Ulid, enabled: bool) -> Result<(), StoreError> {
+        self.meta.set_analytics_alert_enabled(id, enabled).await
+    }
+
+    async fn delete_analytics_alert(&self, id: Ulid) -> Result<(), StoreError> {
+        self.meta.delete_analytics_alert(id).await
+    }
+
+    async fn record_analytics_alert_fire(
+        &self,
+        fire: &stomatopod_core::domain::analytics_alert::AnalyticsAlertFire,
+    ) -> Result<(), StoreError> {
+        self.meta.record_analytics_alert_fire(fire).await
+    }
+
+    async fn last_analytics_alert_fire(
+        &self,
+        alert_id: Ulid,
+    ) -> Result<Option<stomatopod_core::domain::analytics_alert::AnalyticsAlertFire>, StoreError>
+    {
+        self.meta.last_analytics_alert_fire(alert_id).await
     }
 
     async fn upsert_agent(

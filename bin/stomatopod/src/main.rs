@@ -156,6 +156,18 @@ async fn serve(cfg: Config) -> Result<()> {
         run_alert_dispatcher(alerts_rx, meta_for_alerts).await;
     });
 
+    // Analytics alert evaluator: poll enabled alerts once a minute.
+    let meta_for_eval = meta.clone();
+    let backend_for_eval = backend.clone();
+    tokio::spawn(async move {
+        stomatopod_web::alerts::run_analytics_alert_evaluator(
+            meta_for_eval,
+            backend_for_eval,
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+    });
+
     let state = Arc::new(AppState {
         backend,
         agent_store,
@@ -256,6 +268,22 @@ fn build_templates() -> Result<JinjaEnv<'static>> {
     env.add_template(
         "funnels.jinja",
         include_str!("../../../crates/web/templates/funnels.jinja"),
+    )?;
+    env.add_template(
+        "realtime.jinja",
+        include_str!("../../../crates/web/templates/realtime.jinja"),
+    )?;
+    env.add_template(
+        "partials/realtime_panel.jinja",
+        include_str!("../../../crates/web/templates/partials/realtime_panel.jinja"),
+    )?;
+    env.add_template(
+        "goals.jinja",
+        include_str!("../../../crates/web/templates/goals.jinja"),
+    )?;
+    env.add_template(
+        "alerts.jinja",
+        include_str!("../../../crates/web/templates/alerts.jinja"),
     )?;
     env.add_template(
         "partials/top_pages.jinja",

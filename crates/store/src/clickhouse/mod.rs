@@ -19,6 +19,10 @@ use stomatopod_core::{
     domain::{agent_span::AgentSpan, event::Event},
     error::StoreError,
     query::{
+        analytics::{
+            EntryPageRow, EntryPages, ExitPageRow, ExitPages, GoalBucket, GoalQuery, GoalStats,
+            RawEventRow, RealtimeEvent, RealtimeSnapshot, RealtimeTopPage, SessionRow,
+        },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
         pageviews::{
@@ -190,6 +194,342 @@ impl StorageBackend for ClickhouseBackend {
         }
         Ok(FunnelResult { steps: steps_out })
     }
+
+    async fn query_entry_pages(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+        filters: &[Filter],
+    ) -> Result<EntryPages, StoreError> {
+        let sql = sql::entry_pages(site_id, range, limit, filters);
+        #[derive(Deserialize)]
+        struct Row {
+            value: Option<String>,
+            sessions: String,
+            bounces: String,
+        }
+        let rows: Vec<Row> = self.query_json(&sql).await?;
+        let mut out = Vec::with_capacity(rows.len());
+        let mut total = 0u64;
+        for r in rows {
+            let sessions = r.sessions.parse::<u64>().unwrap_or(0);
+            let bounces = r.bounces.parse::<u64>().unwrap_or(0);
+            total += sessions;
+            let bounce_rate = if sessions > 0 {
+                bounces as f64 / sessions as f64 * 100.0
+            } else {
+                0.0
+            };
+            out.push(EntryPageRow {
+                url: r.value.unwrap_or_default(),
+                sessions,
+                pct: 0.0,
+                bounce_rate,
+            });
+        }
+        if total > 0 {
+            for r in &mut out {
+                r.pct = r.sessions as f64 / total as f64 * 100.0;
+            }
+        }
+        Ok(EntryPages { rows: out })
+    }
+
+    async fn query_exit_pages(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+        filters: &[Filter],
+    ) -> Result<ExitPages, StoreError> {
+        let sql = sql::exit_pages(site_id, range, limit, filters);
+        #[derive(Deserialize)]
+        struct Row {
+            value: Option<String>,
+            exits: String,
+            pageviews: String,
+        }
+        let rows: Vec<Row> = self.query_json(&sql).await?;
+        let mut out = Vec::with_capacity(rows.len());
+        let mut total = 0u64;
+        for r in rows {
+            let exits = r.exits.parse::<u64>().unwrap_or(0);
+            let pv = r.pageviews.parse::<u64>().unwrap_or(0);
+            if exits == 0 {
+                continue;
+            }
+            total += exits;
+            let exit_rate = if pv > 0 {
+                exits as f64 / pv as f64 * 100.0
+            } else {
+                0.0
+            };
+            out.push(ExitPageRow {
+                url: r.value.unwrap_or_default(),
+                exits,
+                pct: 0.0,
+                exit_rate,
+            });
+        }
+        if total > 0 {
+            for r in &mut out {
+                r.pct = r.exits as f64 / total as f64 * 100.0;
+            }
+        }
+        Ok(ExitPages { rows: out })
+    }
+
+    async fn query_realtime(
+        &self,
+        site_id: Ulid,
+        window_minutes: u32,
+    ) -> Result<RealtimeSnapshot, StoreError> {
+        let window = window_minutes.max(1);
+        #[derive(Deserialize)]
+        struct Head {
+            active: String,
+            pvs: String,
+        }
+        let head: Vec<Head> = self
+            .query_json(&sql::realtime_head(site_id, window))
+            .await?;
+        let (active_sessions, pageviews) = head
+            .first()
+            .map(|h| {
+                (
+                    h.active.parse::<u64>().unwrap_or(0),
+                    h.pvs.parse::<u64>().unwrap_or(0),
+                )
+            })
+            .unwrap_or((0, 0));
+        let pageviews_per_minute = pageviews as f64 / window as f64;
+
+        #[derive(Deserialize)]
+        struct Page {
+            value: Option<String>,
+            active: String,
+        }
+        let pages: Vec<Page> = self
+            .query_json(&sql::realtime_pages(site_id, window))
+            .await?;
+        let top_pages = pages
+            .into_iter()
+            .map(|p| {
+                let a = p.active.parse::<u64>().unwrap_or(0);
+                let pct = if active_sessions > 0 {
+                    a as f64 / active_sessions as f64 * 100.0
+                } else {
+                    0.0
+                };
+                RealtimeTopPage {
+                    url: p.value.unwrap_or_default(),
+                    active_sessions: a,
+                    pct,
+                }
+            })
+            .collect();
+
+        #[derive(Deserialize)]
+        struct Ev {
+            name: String,
+            url: Option<String>,
+            seconds_ago: String,
+            props: Option<String>,
+        }
+        let evs: Vec<Ev> = self
+            .query_json(&sql::realtime_events(site_id, window))
+            .await?;
+        let recent_events = evs
+            .into_iter()
+            .map(|e| RealtimeEvent {
+                name: e.name,
+                url: e.url.unwrap_or_default(),
+                seconds_ago: e.seconds_ago.parse::<i64>().unwrap_or(0),
+                properties: e
+                    .props
+                    .and_then(|p| serde_json::from_str(&p).ok())
+                    .unwrap_or(serde_json::Value::Null),
+            })
+            .collect();
+
+        Ok(RealtimeSnapshot {
+            active_sessions,
+            pageviews_per_minute,
+            top_pages,
+            recent_events,
+        })
+    }
+
+    async fn query_goal(&self, q: &GoalQuery) -> Result<GoalStats, StoreError> {
+        #[derive(Deserialize)]
+        struct Totals {
+            completions: String,
+            uniq: String,
+        }
+        let totals: Vec<Totals> = self.query_json(&sql::goal_totals(q)).await?;
+        let (completions, unique_completions) = totals
+            .first()
+            .map(|t| {
+                (
+                    t.completions.parse::<u64>().unwrap_or(0),
+                    t.uniq.parse::<u64>().unwrap_or(0),
+                )
+            })
+            .unwrap_or((0, 0));
+
+        #[derive(Deserialize)]
+        struct Sessions {
+            sessions: String,
+        }
+        let sess: Vec<Sessions> = self
+            .query_json(&sql::range_sessions(q.site_id, &q.range))
+            .await?;
+        let total_sessions = sess
+            .first()
+            .and_then(|s| s.sessions.parse::<u64>().ok())
+            .unwrap_or(0);
+        let conversion_rate = if total_sessions > 0 {
+            unique_completions as f64 / total_sessions as f64 * 100.0
+        } else {
+            0.0
+        };
+
+        #[derive(Deserialize)]
+        struct Bucket {
+            date: String,
+            uniq: String,
+            sessions: String,
+        }
+        let buckets: Vec<Bucket> = self.query_json(&sql::goal_timeseries(q)).await?;
+        let timeseries = buckets
+            .into_iter()
+            .map(|b| {
+                let c = b.uniq.parse::<u64>().unwrap_or(0);
+                let s = b.sessions.parse::<u64>().unwrap_or(0);
+                let cr = if s > 0 {
+                    c as f64 / s as f64 * 100.0
+                } else {
+                    0.0
+                };
+                GoalBucket {
+                    date: b.date,
+                    completions: c,
+                    conversion_rate: cr,
+                }
+            })
+            .collect();
+
+        Ok(GoalStats {
+            completions,
+            unique_completions,
+            conversion_rate,
+            timeseries,
+        })
+    }
+
+    async fn query_sessions(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+    ) -> Result<Vec<SessionRow>, StoreError> {
+        #[derive(Deserialize)]
+        struct Row {
+            session_id: String,
+            started: String,
+            ended: String,
+            pageviews: String,
+            entry_url: Option<String>,
+            exit_url: Option<String>,
+            referrer: Option<String>,
+            country_code: Option<String>,
+            browser: Option<String>,
+            os: Option<String>,
+            device_type: Option<String>,
+            utm_source: Option<String>,
+            utm_medium: Option<String>,
+            utm_campaign: Option<String>,
+        }
+        let rows: Vec<Row> = self
+            .query_json(&sql::sessions(site_id, range, limit))
+            .await?;
+        let parse_ts = |s: &str| {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .map(|d| d.with_timezone(&chrono::Utc))
+                .unwrap_or_default()
+        };
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                let started_at = parse_ts(&r.started);
+                let ended_at = parse_ts(&r.ended);
+                let pageviews = r.pageviews.parse::<u64>().unwrap_or(0);
+                let duration_secs = (ended_at - started_at).num_seconds();
+                SessionRow {
+                    session_id: r.session_id,
+                    started_at,
+                    ended_at,
+                    duration_secs,
+                    pageviews,
+                    entry_url: r.entry_url.unwrap_or_default(),
+                    exit_url: r.exit_url.unwrap_or_default(),
+                    referrer: r.referrer,
+                    country_code: r.country_code,
+                    browser: r.browser.unwrap_or_default(),
+                    os: r.os.unwrap_or_default(),
+                    device_type: r.device_type.unwrap_or_default(),
+                    utm_source: r.utm_source,
+                    utm_medium: r.utm_medium,
+                    utm_campaign: r.utm_campaign,
+                    is_bounce: pageviews == 1 && duration_secs < 30,
+                }
+            })
+            .collect())
+    }
+
+    async fn query_events_list(
+        &self,
+        site_id: Ulid,
+        range: &TimeRange,
+        limit: u32,
+    ) -> Result<Vec<RawEventRow>, StoreError> {
+        #[derive(Deserialize)]
+        struct Row {
+            id: String,
+            name: String,
+            kind: String,
+            ts: String,
+            url: Option<String>,
+            referrer: Option<String>,
+            country_code: Option<String>,
+            browser: Option<String>,
+            os: Option<String>,
+            device_type: Option<String>,
+            props: Option<String>,
+        }
+        let rows: Vec<Row> = self
+            .query_json(&sql::events_list(site_id, range, limit))
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| RawEventRow {
+                id: r.id,
+                name: r.name,
+                kind: r.kind,
+                timestamp: chrono::DateTime::parse_from_rfc3339(&r.ts)
+                    .map(|d| d.with_timezone(&chrono::Utc))
+                    .unwrap_or_default(),
+                url: r.url.unwrap_or_default(),
+                referrer: r.referrer,
+                country_code: r.country_code,
+                browser: r.browser.unwrap_or_default(),
+                os: r.os.unwrap_or_default(),
+                device_type: r.device_type.unwrap_or_default(),
+                properties: r.props,
+            })
+            .collect())
+    }
 }
 
 impl ClickhouseBackend {
@@ -355,6 +695,7 @@ mod sql {
     use ulid::Ulid;
 
     use stomatopod_core::query::{
+        analytics::GoalQuery,
         events::EventQuery,
         funnel::FunnelQuery,
         pageviews::{Filter, FilterOp, Granularity, PageviewsQuery, TimeRange},
@@ -494,6 +835,165 @@ mod sql {
             start = micros(q.range.start),
             end = micros(q.range.end),
             name = quote(event_name),
+        )
+    }
+
+    pub fn entry_pages(site_id: Ulid, range: &TimeRange, limit: u32, filters: &[Filter]) -> String {
+        format!(
+            "SELECT value, toString(count()) AS sessions, toString(countIf(pv_count = 1)) AS bounces \
+             FROM (\
+                SELECT coalesce(url, '') AS value, session_id, \
+                    row_number() OVER (PARTITION BY session_id ORDER BY timestamp ASC) AS rn, \
+                    count() OVER (PARTITION BY session_id) AS pv_count \
+                FROM events \
+                WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end} \
+                  AND kind = 'pageview' {filters}) \
+             WHERE rn = 1 GROUP BY value ORDER BY count() DESC LIMIT {limit}",
+            site = quote(&site_id.to_string()),
+            start = micros(range.start),
+            end = micros(range.end),
+            filters = filter_clause(filters),
+        )
+    }
+
+    pub fn exit_pages(site_id: Ulid, range: &TimeRange, limit: u32, filters: &[Filter]) -> String {
+        format!(
+            "SELECT value, toString(countIf(rn = 1)) AS exits, toString(count()) AS pageviews \
+             FROM (\
+                SELECT coalesce(url, '') AS value, \
+                    row_number() OVER (PARTITION BY session_id ORDER BY timestamp DESC) AS rn \
+                FROM events \
+                WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end} \
+                  AND kind = 'pageview' {filters}) \
+             GROUP BY value ORDER BY exits DESC LIMIT {limit}",
+            site = quote(&site_id.to_string()),
+            start = micros(range.start),
+            end = micros(range.end),
+            filters = filter_clause(filters),
+        )
+    }
+
+    pub fn realtime_head(site_id: Ulid, window_minutes: u32) -> String {
+        format!(
+            "SELECT toString(uniqExact(session_id)) AS active, \
+                    toString(countIf(kind = 'pageview')) AS pvs \
+             FROM events \
+             WHERE site_id = {site} AND timestamp >= now() - INTERVAL {w} MINUTE",
+            site = quote(&site_id.to_string()),
+            w = window_minutes,
+        )
+    }
+
+    pub fn realtime_pages(site_id: Ulid, window_minutes: u32) -> String {
+        format!(
+            "SELECT value, toString(uniqExact(session_id)) AS active FROM (\
+                SELECT coalesce(url, '') AS value, session_id, \
+                    row_number() OVER (PARTITION BY session_id ORDER BY timestamp DESC) AS rn \
+                FROM events \
+                WHERE site_id = {site} AND timestamp >= now() - INTERVAL {w} MINUTE \
+                  AND kind = 'pageview') \
+             WHERE rn = 1 GROUP BY value ORDER BY active DESC LIMIT 10",
+            site = quote(&site_id.to_string()),
+            w = window_minutes,
+        )
+    }
+
+    pub fn realtime_events(site_id: Ulid, window_minutes: u32) -> String {
+        format!(
+            "SELECT name, coalesce(url, '') AS url, \
+                    toString(toInt64(now() - timestamp)) AS seconds_ago, properties AS props \
+             FROM events \
+             WHERE site_id = {site} AND timestamp >= now() - INTERVAL {w} MINUTE AND kind = 'custom' \
+             ORDER BY timestamp DESC LIMIT 50",
+            site = quote(&site_id.to_string()),
+            w = window_minutes,
+        )
+    }
+
+    pub fn goal_totals(q: &GoalQuery) -> String {
+        format!(
+            "SELECT toString(count()) AS completions, toString(uniqExact(session_id)) AS uniq \
+             FROM events \
+             WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end} \
+               AND kind = 'custom' AND name = {name} {filters}",
+            site = quote(&q.site_id.to_string()),
+            start = micros(q.range.start),
+            end = micros(q.range.end),
+            name = quote(&q.event_name),
+            filters = filter_clause(&q.filters),
+        )
+    }
+
+    pub fn range_sessions(site_id: Ulid, range: &TimeRange) -> String {
+        format!(
+            "SELECT toString(uniqExact(session_id)) AS sessions FROM events \
+             WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end}",
+            site = quote(&site_id.to_string()),
+            start = micros(range.start),
+            end = micros(range.end),
+        )
+    }
+
+    pub fn goal_timeseries(q: &GoalQuery) -> String {
+        let trunc = date_trunc(&q.granularity);
+        format!(
+            "SELECT comp.date AS date, toString(comp.uniq) AS uniq, \
+                    toString(coalesce(sess.sessions, 0)) AS sessions FROM (\
+                SELECT formatDateTime({trunc}(timestamp), '%Y-%m-%d') AS date, \
+                    uniqExact(session_id) AS uniq \
+                FROM events WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end} \
+                  AND kind = 'custom' AND name = {name} {filters} GROUP BY date) AS comp \
+             LEFT JOIN (\
+                SELECT formatDateTime({trunc}(timestamp), '%Y-%m-%d') AS date, \
+                    uniqExact(session_id) AS sessions \
+                FROM events WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end} \
+                GROUP BY date) AS sess USING (date) \
+             ORDER BY date",
+            site = quote(&q.site_id.to_string()),
+            start = micros(q.range.start),
+            end = micros(q.range.end),
+            name = quote(&q.event_name),
+            filters = filter_clause(&q.filters),
+        )
+    }
+
+    pub fn sessions(site_id: Ulid, range: &TimeRange, limit: u32) -> String {
+        format!(
+            "SELECT lower(hex(session_id)) AS session_id, \
+                    formatDateTime(min(timestamp), '%Y-%m-%dT%H:%M:%S.000000Z') AS started, \
+                    formatDateTime(max(timestamp), '%Y-%m-%dT%H:%M:%S.000000Z') AS ended, \
+                    toString(count()) AS pageviews, \
+                    argMin(url, timestamp) AS entry_url, \
+                    argMax(url, timestamp) AS exit_url, \
+                    argMin(referrer, timestamp) AS referrer, \
+                    argMin(country_code, timestamp) AS country_code, \
+                    argMin(browser, timestamp) AS browser, \
+                    argMin(os, timestamp) AS os, \
+                    argMin(device_type, timestamp) AS device_type, \
+                    argMin(utm_source, timestamp) AS utm_source, \
+                    argMin(utm_medium, timestamp) AS utm_medium, \
+                    argMin(utm_campaign, timestamp) AS utm_campaign \
+             FROM events \
+             WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end} AND kind = 'pageview' \
+             GROUP BY session_id ORDER BY started DESC LIMIT {limit}",
+            site = quote(&site_id.to_string()),
+            start = micros(range.start),
+            end = micros(range.end),
+        )
+    }
+
+    pub fn events_list(site_id: Ulid, range: &TimeRange, limit: u32) -> String {
+        format!(
+            "SELECT id, name, kind, \
+                    formatDateTime(timestamp, '%Y-%m-%dT%H:%M:%S.000000Z') AS ts, \
+                    coalesce(url, '') AS url, referrer, country_code, browser, os, device_type, \
+                    properties AS props \
+             FROM events \
+             WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end} \
+             ORDER BY timestamp DESC LIMIT {limit}",
+            site = quote(&site_id.to_string()),
+            start = micros(range.start),
+            end = micros(range.end),
         )
     }
 

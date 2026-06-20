@@ -1,0 +1,86 @@
+{% extends "base.jinja" %} {% block title %}Goals — {{ site.name }}{% endblock
+%} {% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title" style="view-transition-name: s-{{ site.id }}">
+      {{ site.name }}
+    </h1>
+    <p class="page-sub">{{ site.domain }}</p>
+  </div>
+  {% if sites %}
+  <form method="get" action="{{ scope_path }}">
+    <select name="site" onchange="this.form.submit()" aria-label="Filter by site">
+      {% for s in sites %}<option value="{{ s.id }}" {% if s.id == site.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+    </select>
+  </form>
+  {% endif %}
+</div>
+
+<div class="tabs">
+  <a href="/app/sites/{{ site.id }}?range={{ range }}">Overview</a>
+  <a href="/app/sites/{{ site.id }}/realtime">Real-time</a>
+  <a href="/app/sites/{{ site.id }}/events?range={{ range }}">Events</a>
+  <a href="/app/sites/{{ site.id }}/goals?range={{ range }}" class="active"
+    >Goals</a
+  >
+  <a href="/app/sites/{{ site.id }}/funnels?range={{ range }}">Funnels</a>
+  <a href="/app/sites/{{ site.id }}/alerts?range={{ range }}">Alerts</a>
+  <a href="/app/sites/{{ site.id }}/keys?range={{ range }}">API Keys</a>
+  <a href="/app/sites/{{ site.id }}/settings?range={{ range }}">Settings</a>
+</div>
+
+<div class="card mb-3">
+  <div class="section-header"><h2>Goals · {{ range }}</h2></div>
+  <table>
+    <thead>
+      <tr>
+        <th>Goal</th>
+        <th>Event</th>
+        <th>Completions</th>
+        <th>Unique</th>
+        <th>Conversion</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for g in goals %}
+      <tr>
+        <td>{{ g.name }}</td>
+        <td class="cell-truncate"><code>{{ g.event_name }}</code></td>
+        <td>{{ g.completions }}</td>
+        <td>{{ g.unique_completions }}</td>
+        <td>{{ g.conversion_rate }}%</td>
+        <td>
+          <form
+            method="post"
+            action="/app/sites/{{ site.id }}/goals/{{ g.id }}/delete"
+            onsubmit="return confirm('Delete this goal?')"
+          >
+            <button type="submit" class="btn btn-ghost">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="6" class="empty-cell">No goals yet</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2 class="mb-2">Create Goal</h2>
+  <form method="post" action="/app/sites/{{ site.id }}/goals" class="form-row">
+    <div class="field">
+      <label for="goal-name">Name</label>
+      <input id="goal-name" name="name" placeholder="e.g. Signup" required autocomplete="off" />
+    </div>
+    <div class="field">
+      <label for="goal-event">Event name</label>
+      <input id="goal-event" name="event_name" placeholder="e.g. user_signed_up" required autocomplete="off" />
+    </div>
+    <button type="submit" class="btn btn-primary">Create Goal</button>
+  </form>
+</div>
+{% endblock %}

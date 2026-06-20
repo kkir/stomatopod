@@ -62,6 +62,20 @@ fn build_templates() -> Environment<'static> {
     env.add_template("funnels.jinja", include_str!("../templates/funnels.jinja"))
         .unwrap();
     env.add_template(
+        "realtime.jinja",
+        include_str!("../templates/realtime.jinja"),
+    )
+    .unwrap();
+    env.add_template(
+        "partials/realtime_panel.jinja",
+        include_str!("../templates/partials/realtime_panel.jinja"),
+    )
+    .unwrap();
+    env.add_template("goals.jinja", include_str!("../templates/goals.jinja"))
+        .unwrap();
+    env.add_template("alerts.jinja", include_str!("../templates/alerts.jinja"))
+        .unwrap();
+    env.add_template(
         "partials/top_pages.jinja",
         include_str!("../templates/partials/top_pages.jinja"),
     )
@@ -1515,4 +1529,967 @@ async fn docs_page_requires_auth() {
     let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
     // Dashboard routes redirect unauthenticated users to /login.
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+}
+
+// ---- Tier-2 analytics endpoints ----
+
+/// Send an authorized request with an optional JSON body; return (status, json).
+async fn send_json(
+    state: Arc<AppState>,
+    method: &str,
+    uri: &str,
+    token: &str,
+    body: Option<serde_json::Value>,
+) -> (StatusCode, serde_json::Value) {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("authorization", format!("Bearer {token}"));
+    let req = match body {
+        Some(b) => builder
+            .header("content-type", "application/json")
+            .body(Body::from(b.to_string()))
+            .unwrap(),
+        None => {
+            builder = builder.header("content-type", "application/json");
+            builder.body(Body::empty()).unwrap()
+        }
+    };
+    let resp = make_app(state).oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = body_bytes(resp).await;
+    let json = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, json)
+}
+
+#[tokio::test]
+async fn entry_exit_realtime_routes_resolve() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    for path in ["top-entry-pages", "top-exit-pages"] {
+        let (status, json) = get_json(
+            ctx.state.clone(),
+            &format!("/api/v1/sites/{}/{path}", site.id),
+            &token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{path} should resolve");
+        assert!(json.get("rows").is_some(), "{path} carries rows");
+    }
+
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/realtime", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Zero active sessions is a valid empty state, not an error.
+    assert_eq!(json["active_sessions"], 0);
+    assert!(json.get("top_pages").is_some());
+    assert!(json.get("recent_events").is_some());
+}
+
+#[tokio::test]
+async fn top_pages_csv_export_sets_attachment_header() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    let req = Request::builder()
+        .uri(format!("/api/v1/sites/{}/top-pages?format=csv", site.id))
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .contains("csv"));
+    assert!(resp
+        .headers()
+        .get("content-disposition")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .contains("top-pages.csv"));
+    let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    assert!(body.starts_with("value,pageviews,sessions,pct"));
+}
+
+#[tokio::test]
+async fn export_endpoints_serve_csv_and_json() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    // JSON shape.
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/export/sessions", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(json.get("rows").is_some());
+
+    // CSV header row for events export.
+    let req = Request::builder()
+        .uri(format!(
+            "/api/v1/sites/{}/export/events?format=csv",
+            site.id
+        ))
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    assert!(body.starts_with("id,name,kind,timestamp"));
+}
+
+#[tokio::test]
+async fn goals_crud_lifecycle() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    // Create.
+    let (status, json) = send_json(
+        ctx.state.clone(),
+        "POST",
+        &format!("/api/v1/sites/{}/goals", site.id),
+        &token,
+        Some(serde_json::json!({"name": "Signup", "event_name": "user_signed_up"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "goal create, got {json}");
+    let goal_id = json["id"].as_str().unwrap().to_string();
+
+    // List shows it.
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/goals", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["goals"].as_array().unwrap().len(), 1);
+
+    // Stats resolve and carry the conversion fields.
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/goals/{goal_id}/stats", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["goal_id"], goal_id);
+    assert_eq!(json["name"], "Signup");
+    assert!(json.get("conversion_rate").is_some());
+
+    // Delete.
+    let (status, _) = send_json(
+        ctx.state.clone(),
+        "DELETE",
+        &format!("/api/v1/sites/{}/goals/{goal_id}", site.id),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/goals", site.id),
+        &token,
+    )
+    .await;
+    assert!(json["goals"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn create_goal_rejects_blank_event_name() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+    let (status, _) = send_json(
+        ctx.state.clone(),
+        "POST",
+        &format!("/api/v1/sites/{}/goals", site.id),
+        &token,
+        Some(serde_json::json!({"name": "Bad", "event_name": ""})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn analytics_alert_requires_valid_channel_then_round_trips() {
+    use stomatopod_core::domain::agent::{AlertChannel, AlertChannelKind};
+
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    // Without a real channel, creation is rejected.
+    let (status, _) = send_json(
+        ctx.state.clone(),
+        "POST",
+        &format!("/api/v1/sites/{}/analytics-alerts", site.id),
+        &token,
+        Some(serde_json::json!({
+            "type": "traffic_spike",
+            "threshold": 200.0,
+            "window_minutes": 60,
+            "channel_id": Ulid::new().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Register a channel, then creation succeeds.
+    let channel = AlertChannel {
+        id: Ulid::new(),
+        site_id: site.id,
+        kind: AlertChannelKind::Webhook,
+        url: "http://example.invalid/hook".into(),
+        secret: None,
+        created_at: Utc::now(),
+        last_error_at: None,
+    };
+    ctx.backend
+        .meta
+        .create_alert_channel(&channel)
+        .await
+        .unwrap();
+
+    let (status, json) = send_json(
+        ctx.state.clone(),
+        "POST",
+        &format!("/api/v1/sites/{}/analytics-alerts", site.id),
+        &token,
+        Some(serde_json::json!({
+            "type": "traffic_spike",
+            "threshold": 200.0,
+            "window_minutes": 60,
+            "channel_id": channel.id.to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "got {json}");
+    let alert_id = json["id"].as_str().unwrap().to_string();
+
+    // List, disable, delete.
+    let (_, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/analytics-alerts", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(json["alerts"].as_array().unwrap().len(), 1);
+
+    let (status, _) = send_json(
+        ctx.state.clone(),
+        "PATCH",
+        &format!("/api/v1/sites/{}/analytics-alerts/{alert_id}", site.id),
+        &token,
+        Some(serde_json::json!({"enabled": false})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let disabled = ctx
+        .backend
+        .meta
+        .get_analytics_alert(Ulid::from_string(&alert_id).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!disabled.enabled);
+
+    let (status, _) = send_json(
+        ctx.state.clone(),
+        "DELETE",
+        &format!("/api/v1/sites/{}/analytics-alerts/{alert_id}", site.id),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+#[test]
+fn analytics_alert_decide_logic() {
+    use stomatopod_core::domain::analytics_alert::AnalyticsAlertKind::*;
+    use stomatopod_web::alerts::decide;
+
+    // Spike fires when current is >threshold% above baseline.
+    assert!(decide(TrafficSpike, 50.0, 200.0, 100.0).is_some());
+    assert!(decide(TrafficSpike, 50.0, 120.0, 100.0).is_none());
+    // No baseline (new site) → never fires.
+    assert!(decide(TrafficSpike, 50.0, 200.0, 0.0).is_none());
+    // Drop fires when current is far below baseline.
+    assert!(decide(TrafficDrop, 50.0, 30.0, 100.0).is_some());
+    assert!(decide(TrafficDrop, 50.0, 80.0, 100.0).is_none());
+    // Goal threshold is an absolute crossing.
+    assert!(decide(GoalThreshold, 100.0, 100.0, 0.0).is_some());
+    assert!(decide(GoalThreshold, 100.0, 99.0, 0.0).is_none());
+    // Referrer spike: share above threshold percent.
+    assert!(decide(NewReferrerSpike, 40.0, 55.0, 0.0).is_some());
+    assert!(decide(NewReferrerSpike, 40.0, 12.0, 0.0).is_none());
+}
+
+#[tokio::test]
+async fn analytics_alert_fires_records_and_respects_cooldown() {
+    use std::sync::Mutex;
+    use stomatopod_core::domain::{
+        agent::{AlertChannel, AlertChannelKind},
+        analytics_alert::{AnalyticsAlert, AnalyticsAlertConfig, AnalyticsAlertKind},
+    };
+    use stomatopod_web::alerts::{
+        process_alert,
+        sinks::{SlackSink, TelegramSink, WebhookSink},
+    };
+
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    // Capture webhook deliveries.
+    let received: Arc<Mutex<usize>> = Arc::new(Mutex::new(0));
+    let counter = received.clone();
+    let app = axum::Router::new().route(
+        "/hook",
+        axum::routing::post(move || {
+            let counter = counter.clone();
+            async move {
+                *counter.lock().unwrap() += 1;
+                StatusCode::OK
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let channel = AlertChannel {
+        id: Ulid::new(),
+        site_id: site.id,
+        kind: AlertChannelKind::Webhook,
+        url: format!("http://{addr}/hook"),
+        secret: None,
+        created_at: Utc::now(),
+        last_error_at: None,
+    };
+    ctx.backend
+        .meta
+        .create_alert_channel(&channel)
+        .await
+        .unwrap();
+
+    // A goal-threshold alert with threshold 0 fires unconditionally
+    // (0 completions >= 0), exercising the full fire + dispatch path.
+    let alert = AnalyticsAlert {
+        id: Ulid::new(),
+        site_id: site.id,
+        kind: AnalyticsAlertKind::GoalThreshold,
+        config: AnalyticsAlertConfig {
+            threshold: 0.0,
+            window_minutes: 60,
+            goal_event_name: Some("signup".into()),
+        },
+        channel_id: channel.id,
+        enabled: true,
+        created_at: Utc::now(),
+    };
+    ctx.backend
+        .meta
+        .create_analytics_alert(&alert)
+        .await
+        .unwrap();
+
+    let backend: Arc<dyn stomatopod_core::traits::StorageBackend> = ctx.backend.clone();
+    let meta: Arc<dyn stomatopod_core::traits::MetaStore> = ctx.backend.clone();
+    let client = reqwest::Client::new();
+    let webhook = WebhookSink::new(client.clone());
+    let slack = SlackSink::new(client.clone());
+    let telegram = TelegramSink::new(client);
+    let now = Utc::now();
+
+    // First evaluation fires + records.
+    let fired = process_alert(&alert, &backend, &meta, &webhook, &slack, &telegram, now).await;
+    assert!(fired, "threshold-0 goal alert should fire");
+    let last = ctx
+        .backend
+        .meta
+        .last_analytics_alert_fire(alert.id)
+        .await
+        .unwrap();
+    assert!(last.is_some(), "fire should be recorded");
+
+    // Wait for the async webhook delivery.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while *received.lock().unwrap() == 0 && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(*received.lock().unwrap(), 1, "webhook delivered once");
+
+    // Second evaluation within the hour is suppressed by cooldown.
+    let again = process_alert(&alert, &backend, &meta, &webhook, &slack, &telegram, now).await;
+    assert!(!again, "cooldown should suppress a re-fire within the hour");
+}
+
+// ---- Tier-2 dashboard pages ----
+
+/// Authenticated GET returning (status, html-string).
+async fn get_html(state: Arc<AppState>, uri: &str, cookie: &str) -> (StatusCode, String) {
+    let req = Request::builder()
+        .uri(uri)
+        .header("cookie", cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(state).oneshot(req).await.unwrap();
+    let status = resp.status();
+    let html = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    (status, html)
+}
+
+#[tokio::test]
+async fn dashboard_overview_shows_entry_exit_and_export() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let cookie = format!(
+        "sp_session={}",
+        sign_session(&ctx.secret, &Ulid::new().to_string())
+    );
+
+    let (status, html) = get_html(
+        ctx.state.clone(),
+        &format!("/app/sites/{}", site.id),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(html.contains("Entry Pages"), "entry pages panel missing");
+    assert!(html.contains("Exit Pages"), "exit pages panel missing");
+    assert!(
+        html.contains("/export/events?"),
+        "events export link missing"
+    );
+    assert!(html.contains("top-pages?") && html.contains("format=csv"));
+    // New nav tabs are present.
+    assert!(html.contains(">Real-time</a>"));
+    assert!(html.contains(">Goals</a>"));
+    assert!(html.contains(">Alerts</a>"));
+}
+
+#[tokio::test]
+async fn realtime_page_and_panel_render() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let cookie = format!(
+        "sp_session={}",
+        sign_session(&ctx.secret, &Ulid::new().to_string())
+    );
+
+    let (status, html) = get_html(
+        ctx.state.clone(),
+        &format!("/app/sites/{}/realtime", site.id),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        html.contains("hx-get=\"/app/sites/"),
+        "panel should self-poll"
+    );
+
+    let (status, html) = get_html(
+        ctx.state.clone(),
+        &format!("/app/sites/{}/partials/realtime", site.id),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(html.contains("Active Sessions"));
+    assert!(html.contains("Recent Events"));
+}
+
+#[tokio::test]
+async fn goals_page_create_and_delete_via_dashboard() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let cookie = format!(
+        "sp_session={}",
+        sign_session(&ctx.secret, &Ulid::new().to_string())
+    );
+
+    // Empty state renders.
+    let (status, html) = get_html(
+        ctx.state.clone(),
+        &format!("/app/sites/{}/goals", site.id),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(html.contains("Create Goal"));
+
+    // Create via form POST.
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/app/sites/{}/goals", site.id))
+        .header("cookie", &cookie)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from("name=Signup&event_name=user_signed_up"))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+
+    let goals = ctx.backend.meta.list_goals(site.id).await.unwrap();
+    assert_eq!(goals.len(), 1);
+    assert_eq!(goals[0].name, "Signup");
+
+    // The list page now shows it.
+    let (_, html) = get_html(
+        ctx.state.clone(),
+        &format!("/app/sites/{}/goals", site.id),
+        &cookie,
+    )
+    .await;
+    assert!(html.contains("Signup"));
+    assert!(html.contains("user_signed_up"));
+
+    // Delete via form POST.
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!(
+            "/app/sites/{}/goals/{}/delete",
+            site.id, goals[0].id
+        ))
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    assert!(ctx
+        .backend
+        .meta
+        .list_goals(site.id)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn alerts_page_lists_channel_and_creates_alert() {
+    use stomatopod_core::domain::agent::{AlertChannel, AlertChannelKind};
+
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let cookie = format!(
+        "sp_session={}",
+        sign_session(&ctx.secret, &Ulid::new().to_string())
+    );
+
+    // No channels yet → page shows the "create a channel first" hint.
+    let (status, html) = get_html(
+        ctx.state.clone(),
+        &format!("/app/sites/{}/alerts", site.id),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(html.contains("No alert channels configured"));
+
+    // Register a channel, then the create form appears.
+    let channel = AlertChannel {
+        id: Ulid::new(),
+        site_id: site.id,
+        kind: AlertChannelKind::Webhook,
+        url: "http://example.invalid/hook".into(),
+        secret: None,
+        created_at: Utc::now(),
+        last_error_at: None,
+    };
+    ctx.backend
+        .meta
+        .create_alert_channel(&channel)
+        .await
+        .unwrap();
+
+    let (_, html) = get_html(
+        ctx.state.clone(),
+        &format!("/app/sites/{}/alerts", site.id),
+        &cookie,
+    )
+    .await;
+    assert!(html.contains("Create Alert"));
+    assert!(html.contains("Traffic spike"));
+
+    // Create an alert via form POST.
+    let body = format!(
+        "type=traffic_spike&threshold=200&window_minutes=60&channel_id={}",
+        channel.id
+    );
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/app/sites/{}/alerts", site.id))
+        .header("cookie", &cookie)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(body))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+
+    let alerts = ctx
+        .backend
+        .meta
+        .list_analytics_alerts(site.id)
+        .await
+        .unwrap();
+    assert_eq!(alerts.len(), 1);
+    assert_eq!(alerts[0].config.threshold, 200.0);
+}
+
+#[tokio::test]
+async fn global_pages_render_with_site_selector() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let cookie = format!(
+        "sp_session={}",
+        sign_session(&ctx.secret, &Ulid::new().to_string())
+    );
+
+    // Each global page renders the selected site plus a site-filter dropdown
+    // whose form action points back at the global path.
+    for (path, marker) in [
+        ("/app/realtime", "Real-time"),
+        ("/app/goals", "Create Goal"),
+        ("/app/alerts", "Analytics Alerts"),
+    ] {
+        let (status, html) = get_html(ctx.state.clone(), path, &cookie).await;
+        assert_eq!(status, StatusCode::OK, "{path} should render");
+        // A site-filter dropdown with the current site as the selected option.
+        assert!(
+            html.contains("name=\"site\""),
+            "{path} needs a site selector"
+        );
+        assert!(
+            html.contains(&format!("<option value=\"{}\" selected>", site.id)),
+            "{path} should mark the active site selected"
+        );
+        assert!(html.contains(&site.name), "{path} shows the selected site");
+        assert!(html.contains(marker), "{path} missing {marker}");
+    }
+}
+
+#[tokio::test]
+async fn global_page_filters_to_requested_site() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site_a = make_site(org.id);
+    ctx.backend.meta.create_site(&site_a).await.unwrap();
+    let mut site_b = make_site(org.id);
+    site_b.name = "Second Site".into();
+    site_b.domain = "second.example.com".into();
+    ctx.backend.meta.create_site(&site_b).await.unwrap();
+    let cookie = format!(
+        "sp_session={}",
+        sign_session(&ctx.secret, &Ulid::new().to_string())
+    );
+
+    // ?site= selects that site even though it isn't the first.
+    let (status, html) = get_html(
+        ctx.state.clone(),
+        &format!("/app/goals?site={}", site_b.id),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(html.contains("Second Site"));
+    assert!(html.contains("second.example.com"));
+}
+
+#[tokio::test]
+async fn global_pages_redirect_when_no_sites() {
+    let ctx = setup().await;
+    let cookie = format!(
+        "sp_session={}",
+        sign_session(&ctx.secret, &Ulid::new().to_string())
+    );
+    let req = Request::builder()
+        .uri("/app/goals")
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        resp.headers().get("location").and_then(|v| v.to_str().ok()),
+        Some("/app/sites")
+    );
+}
+
+#[tokio::test]
+async fn alert_channels_create_list_delete_all_kinds() {
+    use stomatopod_core::domain::agent::AlertChannelKind;
+
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let cookie = format!(
+        "sp_session={}",
+        sign_session(&ctx.secret, &Ulid::new().to_string())
+    );
+
+    // Webhook, Slack, and Telegram channels all create via the form.
+    for (kind, url, secret) in [
+        ("webhook", "https://hooks.example/wh", ""),
+        ("slack", "https://hooks.slack.com/abc", ""),
+        ("telegram", "123456789", "bot-token-xyz"),
+    ] {
+        let body = format!(
+            "kind={kind}&url={}&secret={secret}",
+            url.replace(':', "%3A").replace('/', "%2F")
+        );
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/app/sites/{}/channels", site.id))
+            .header("cookie", &cookie)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::SEE_OTHER,
+            "{kind} channel create"
+        );
+    }
+
+    let channels = ctx.backend.meta.list_alert_channels(site.id).await.unwrap();
+    assert_eq!(channels.len(), 3);
+    let tg = channels
+        .iter()
+        .find(|c| c.kind == AlertChannelKind::Telegram)
+        .expect("telegram channel persisted");
+    assert_eq!(tg.url, "123456789");
+    assert_eq!(tg.secret.as_deref(), Some("bot-token-xyz"));
+
+    // The alerts page lists all three and offers the channel picker.
+    let (status, html) = get_html(
+        ctx.state.clone(),
+        &format!("/app/sites/{}/alerts", site.id),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(html.contains("Alert Channels"));
+    assert!(html.contains("telegram"));
+    assert!(html.contains("Add Channel"));
+
+    // Delete one channel.
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/app/sites/{}/channels/{}/delete", site.id, tg.id))
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        ctx.backend
+            .meta
+            .list_alert_channels(site.id)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn telegram_channel_requires_bot_token() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let cookie = format!(
+        "sp_session={}",
+        sign_session(&ctx.secret, &Ulid::new().to_string())
+    );
+
+    // Telegram without a token (secret) is rejected.
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/app/sites/{}/channels", site.id))
+        .header("cookie", &cookie)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from("kind=telegram&url=123&secret="))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert!(ctx
+        .backend
+        .meta
+        .list_alert_channels(site.id)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn test_channel_button_delivers_sample_and_flashes_result() {
+    use std::sync::Mutex;
+    use stomatopod_core::domain::agent::{AlertChannel, AlertChannelKind};
+
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let cookie = format!(
+        "sp_session={}",
+        sign_session(&ctx.secret, &Ulid::new().to_string())
+    );
+
+    // Mock webhook receiver that records the test payload.
+    let got: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+    let captured = got.clone();
+    let app = axum::Router::new().route(
+        "/hook",
+        axum::routing::post(move |axum::Json(v): axum::Json<serde_json::Value>| {
+            let captured = captured.clone();
+            async move {
+                *captured.lock().unwrap() = Some(v);
+                StatusCode::OK
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let channel = AlertChannel {
+        id: Ulid::new(),
+        site_id: site.id,
+        kind: AlertChannelKind::Webhook,
+        url: format!("http://{addr}/hook"),
+        secret: None,
+        created_at: Utc::now(),
+        last_error_at: None,
+    };
+    ctx.backend
+        .meta
+        .create_alert_channel(&channel)
+        .await
+        .unwrap();
+
+    // Hit the Test button → redirect to ?tested=ok.
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!(
+            "/app/sites/{}/channels/{}/test",
+            site.id, channel.id
+        ))
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        resp.headers().get("location").and_then(|v| v.to_str().ok()),
+        Some(format!("/app/sites/{}/alerts?tested=ok", site.id).as_str())
+    );
+
+    // The mock received a sample notification payload.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while got.lock().unwrap().is_none() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let payload = got
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("test notification delivered");
+    assert_eq!(payload["trigger_kind"], "analytics_alert");
+
+    // The alerts page renders the success flash from ?tested=ok.
+    let (status, html) = get_html(
+        ctx.state.clone(),
+        &format!("/app/sites/{}/alerts?tested=ok", site.id),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(html.contains("Test notification sent"));
+}
+
+#[tokio::test]
+async fn test_channel_unreachable_flashes_fail() {
+    use stomatopod_core::domain::agent::{AlertChannel, AlertChannelKind};
+
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let cookie = format!(
+        "sp_session={}",
+        sign_session(&ctx.secret, &Ulid::new().to_string())
+    );
+
+    // Channel points at an unroutable address → delivery fails.
+    let channel = AlertChannel {
+        id: Ulid::new(),
+        site_id: site.id,
+        kind: AlertChannelKind::Webhook,
+        url: "http://127.0.0.1:1/hook".into(),
+        secret: None,
+        created_at: Utc::now(),
+        last_error_at: None,
+    };
+    ctx.backend
+        .meta
+        .create_alert_channel(&channel)
+        .await
+        .unwrap();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!(
+            "/app/sites/{}/channels/{}/test",
+            site.id, channel.id
+        ))
+        .header("cookie", &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        resp.headers().get("location").and_then(|v| v.to_str().ok()),
+        Some(format!("/app/sites/{}/alerts?tested=fail", site.id).as_str())
+    );
 }

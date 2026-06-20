@@ -612,6 +612,37 @@ a.card-link {
   margin-bottom: 1rem;
 }
 
+/* Compact CSV download button in a panel header. */
+.csv-btn {
+  padding: 2px 9px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+}
+
+/* Inline action buttons (e.g. Test + Delete in a channel row). */
+.row-actions {
+  display: flex;
+  gap: 8px;
+}
+.row-actions form {
+  display: inline;
+}
+
+/* Flash banners for the test-channel result. */
+.flash {
+  font-size: 13px;
+  font-weight: 600;
+}
+.flash-ok {
+  border-color: rgba(45, 212, 191, 0.5);
+  color: #5eead4;
+}
+.flash-err {
+  border-color: rgba(248, 113, 113, 0.5);
+  color: #fca5a5;
+}
+
 h2 {
   display: inline-flex;
   align-items: center;

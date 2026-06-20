@@ -48,6 +48,8 @@ pub struct AlertChannel {
 pub enum AlertChannelKind {
     Webhook,
     Slack,
+    /// Telegram bot: `url` holds the chat id, `secret` the bot token.
+    Telegram,
 }
 
 impl AlertChannelKind {
@@ -55,6 +57,18 @@ impl AlertChannelKind {
         match self {
             AlertChannelKind::Webhook => "webhook",
             AlertChannelKind::Slack => "slack",
+            AlertChannelKind::Telegram => "telegram",
+        }
+    }
+
+    /// Parse the stored token; unknown values fall back to `Webhook` (the
+    /// most permissive sink), matching the backend row decoders.
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "slack" => AlertChannelKind::Slack,
+            "telegram" => AlertChannelKind::Telegram,
+            _ => AlertChannelKind::Webhook,
         }
     }
 }

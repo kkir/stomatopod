@@ -3,9 +3,17 @@ endblock %} {% block content %}
 
 {# Reusable top-N table. `field` is the filter token to add when a row's value
    is clicked (empty string = not clickable). `metric` picks the count column. #}
-{% macro toptable(title, header, rows, field, metric, base) %}
+{% macro toptable(title, header, rows, field, metric, base, site_id, endpoint) %}
 <div class="card">
-  <div class="section-header"><h2>{{ title }}</h2></div>
+  <div class="section-header">
+    <h2>{{ title }}</h2>
+    {% if endpoint %}<a
+      class="btn btn-ghost csv-btn"
+      href="/api/v1/sites/{{ site_id }}/{{ endpoint }}?{{ base }}&format=csv"
+      title="Download CSV"
+      >CSV</a
+    >{% endif %}
+  </div>
   <table>
     <thead>
       <tr>
@@ -85,8 +93,11 @@ endblock %} {% block content %}
 
 <div class="tabs">
   <a href="/app/sites/{{ site.id }}?range={{ range }}" class="active">Overview</a>
+  <a href="/app/sites/{{ site.id }}/realtime">Real-time</a>
   <a href="/app/sites/{{ site.id }}/events?range={{ range }}">Events</a>
+  <a href="/app/sites/{{ site.id }}/goals?range={{ range }}">Goals</a>
   <a href="/app/sites/{{ site.id }}/funnels?range={{ range }}">Funnels</a>
+  <a href="/app/sites/{{ site.id }}/alerts?range={{ range }}">Alerts</a>
   <a href="/app/sites/{{ site.id }}/keys?range={{ range }}">API Keys</a>
   <a href="/app/sites/{{ site.id }}/settings?range={{ range }}">Settings</a>
 </div>
@@ -193,14 +204,115 @@ endblock %} {% block content %}
 
 <!-- Top tables grid -->
 <div class="grid-2">
-  {{ toptable("Top Pages", "Page", top_pages, "url", "pageviews", base) }} {{
-  toptable("Top Referrers", "Source", top_referrers, "referrer", "sessions",
-  base) }} {{ toptable("Countries", "Country", top_countries, "country",
-  "sessions", base) }} {{ toptable("Regions", "Region", top_regions, "region",
-  "sessions", base) }} {{ toptable("Browsers", "Browser", top_browsers,
-  "browser", "sessions", base) }} {{ toptable("Operating Systems", "OS", top_os,
-  "os", "sessions", base) }} {{ toptable("Devices", "Device", top_devices,
-  "device_type", "sessions", base) }}
+  {{ toptable("Top Pages", "Page", top_pages, "url", "pageviews", base, site.id,
+  "top-pages") }} {{ toptable("Top Referrers", "Source", top_referrers,
+  "referrer", "sessions", base, site.id, "top-referrers") }} {{
+  toptable("Countries", "Country", top_countries, "country", "sessions", base,
+  site.id, "top-countries") }} {{ toptable("Regions", "Region", top_regions,
+  "region", "sessions", base, site.id, "top-regions") }} {{ toptable("Browsers",
+  "Browser", top_browsers, "browser", "sessions", base, site.id, "top-browsers")
+  }} {{ toptable("Operating Systems", "OS", top_os, "os", "sessions", base,
+  site.id, "top-os") }} {{ toptable("Devices", "Device", top_devices,
+  "device_type", "sessions", base, site.id, "top-devices") }}
+</div>
+
+<!-- Entry / exit pages: session start/end with bounce + exit rates. -->
+<div class="grid-2">
+  <div class="card">
+    <div class="section-header">
+      <h2>Entry Pages</h2>
+      <a
+        class="btn btn-ghost csv-btn"
+        href="/api/v1/sites/{{ site.id }}/top-entry-pages?{{ base }}&format=csv"
+        title="Download CSV"
+        >CSV</a
+      >
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Page</th>
+          <th>Sessions</th>
+          <th>Bounce</th>
+          <th>%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in entry_pages %}
+        <tr>
+          <td class="cell-truncate">
+            <a class="row-link" href="?{{ base }}&filter=url:eq:{{ row.url | urlencode }}">{{ row.url }}</a>
+          </td>
+          <td>{{ row.sessions }}</td>
+          <td>{{ "%.1f" | format(row.bounce_rate) }}%</td>
+          <td>
+            <div class="bar-cell">
+              <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
+              {{ "%.1f" | format(row.pct) }}%
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="4" class="empty-cell">No data</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="section-header">
+      <h2>Exit Pages</h2>
+      <a
+        class="btn btn-ghost csv-btn"
+        href="/api/v1/sites/{{ site.id }}/top-exit-pages?{{ base }}&format=csv"
+        title="Download CSV"
+        >CSV</a
+      >
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Page</th>
+          <th>Exits</th>
+          <th>Exit rate</th>
+          <th>%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in exit_pages %}
+        <tr>
+          <td class="cell-truncate">
+            <a class="row-link" href="?{{ base }}&filter=url:eq:{{ row.url | urlencode }}">{{ row.url }}</a>
+          </td>
+          <td>{{ row.exits }}</td>
+          <td>{{ "%.1f" | format(row.exit_rate) }}%</td>
+          <td>
+            <div class="bar-cell">
+              <div class="bar" style="--w:{{ [row.pct, 100] | min }}%"></div>
+              {{ "%.1f" | format(row.pct) }}%
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="4" class="empty-cell">No data</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Raw data export -->
+<div class="card mb-2">
+  <div class="section-header"><h2>Export</h2></div>
+  <p class="mb-2">
+    <a class="btn btn-ghost" href="/api/v1/sites/{{ site.id }}/export/events?{{ base }}&format=csv">Events CSV</a>
+    <a class="btn btn-ghost" href="/api/v1/sites/{{ site.id }}/export/sessions?{{ base }}&format=csv">Sessions CSV</a>
+    <a class="btn btn-ghost" href="/api/v1/sites/{{ site.id }}/pageviews?{{ base }}&format=csv">Pageviews CSV</a>
+  </p>
 </div>
 
 <script>
