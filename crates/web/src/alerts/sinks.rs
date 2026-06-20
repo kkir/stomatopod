@@ -106,17 +106,23 @@ impl AlertSink for TelegramSink {
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("telegram channel missing bot token"))?;
         let chat_id = &channel.url;
+        // Plain text — no `parse_mode`. Trigger/agent strings can contain
+        // Markdown metacharacters (e.g. `_` in event names), which the
+        // Telegram entity parser rejects with a 400.
         let text = format!(
-            "*Stomatopod alert*\nAgent: `{}`\nTrigger: {}\nStatus: {}",
+            "Stomatopod alert\nAgent: {}\nTrigger: {}\nStatus: {}",
             incident.agent_id,
             format_trigger(&incident.trigger),
             incident.status.as_str()
         );
         let api = format!("https://api.telegram.org/bot{token}/sendMessage");
-        let body = json!({ "chat_id": chat_id, "text": text, "parse_mode": "Markdown" });
+        let body = json!({ "chat_id": chat_id, "text": text });
         let resp = self.client.post(api).json(&body).send().await?;
-        if !resp.status().is_success() {
-            anyhow::bail!("telegram returned {}", resp.status());
+        let status = resp.status();
+        if !status.is_success() {
+            // Surface Telegram's `description` so config errors are diagnosable.
+            let detail = resp.text().await.unwrap_or_default();
+            anyhow::bail!("telegram returned {status}: {detail}");
         }
         Ok(())
     }

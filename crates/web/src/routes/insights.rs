@@ -518,10 +518,12 @@ pub async fn test_channel(
         AlertChannelKind::Slack => &slack,
         AlertChannelKind::Telegram => &telegram,
     };
-    let outcome = if sink.dispatch(&channel, &incident).await.is_ok() {
-        "ok"
-    } else {
-        "fail"
+    let outcome = match sink.dispatch(&channel, &incident).await {
+        Ok(()) => "ok",
+        Err(e) => {
+            tracing::warn!(channel = %channel.id, kind = channel.kind.as_str(), "test channel failed: {e}");
+            "fail"
+        }
     };
     Ok(Redirect::to(&format!("/app/sites/{site_id}/alerts?tested={outcome}")).into_response())
 }
