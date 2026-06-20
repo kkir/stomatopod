@@ -100,6 +100,17 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             axum::routing::patch(analytics::patch_analytics_alert)
                 .delete(analytics::delete_analytics_alert),
         )
+        .route("/api/v1/sites/:site/campaigns", get(analytics::campaigns))
+        .route("/api/v1/sites/:site/retention", get(analytics::retention))
+        .route("/api/v1/sites/:site/paths", get(analytics::paths))
+        .route(
+            "/api/v1/sites/:site/annotations",
+            get(analytics::list_annotations).post(analytics::create_annotation),
+        )
+        .route(
+            "/api/v1/sites/:site/annotations/:id",
+            axum::routing::delete(analytics::delete_annotation),
+        )
         .route(
             "/api/v1/sites/:site/funnels",
             get(analytics::list_funnels).post(analytics::create_funnel),
@@ -126,6 +137,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/app/realtime", get(insights::realtime_global))
         .route("/app/goals", get(insights::goals_global))
         .route("/app/alerts", get(insights::alerts_global))
+        .route("/app/campaigns", get(insights::campaigns_global))
+        .route("/app/retention", get(insights::retention_global))
+        .route("/app/paths", get(insights::paths_global))
+        .route("/app/compare", get(insights::compare_global))
         .route(
             "/app/sites",
             get(sites::sites_list).post(sites::create_site),
@@ -165,6 +180,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/app/sites/:site_id/goals/:goal_id/delete",
             post(insights::delete_goal),
+        )
+        .route(
+            "/app/sites/:site_id/annotations",
+            post(insights::create_annotation),
+        )
+        .route(
+            "/app/sites/:site_id/annotations/:annotation_id/delete",
+            post(insights::delete_annotation),
         )
         .route(
             "/app/sites/:site_id/alerts",

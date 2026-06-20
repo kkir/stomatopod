@@ -76,6 +76,20 @@ fn build_templates() -> Environment<'static> {
     env.add_template("alerts.jinja", include_str!("../templates/alerts.jinja"))
         .unwrap();
     env.add_template(
+        "campaigns.jinja",
+        include_str!("../templates/campaigns.jinja"),
+    )
+    .unwrap();
+    env.add_template(
+        "retention.jinja",
+        include_str!("../templates/retention.jinja"),
+    )
+    .unwrap();
+    env.add_template("paths.jinja", include_str!("../templates/paths.jinja"))
+        .unwrap();
+    env.add_template("compare.jinja", include_str!("../templates/compare.jinja"))
+        .unwrap();
+    env.add_template(
         "partials/top_pages.jinja",
         include_str!("../templates/partials/top_pages.jinja"),
     )
@@ -2492,4 +2506,140 @@ async fn test_channel_unreachable_flashes_fail() {
         resp.headers().get("location").and_then(|v| v.to_str().ok()),
         Some(format!("/app/sites/{}/alerts?tested=fail", site.id).as_str())
     );
+}
+
+// ---- Tier-3 analytics endpoints: campaigns, retention, paths, annotations ----
+
+#[tokio::test]
+async fn api_campaigns_returns_utm_breakdowns() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/campaigns", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    for dim in [
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+    ] {
+        assert!(
+            json.get(dim).and_then(|d| d.get("rows")).is_some(),
+            "campaigns response should include {dim}.rows, got {json}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn api_retention_returns_cohort_grid() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/retention?range=90d", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        json.get("cohorts").map(|c| c.is_array()).unwrap_or(false),
+        "retention response should carry a cohorts array, got {json}"
+    );
+}
+
+#[tokio::test]
+async fn api_paths_returns_report() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/paths?depth=3", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        json.get("rows").map(|r| r.is_array()).unwrap_or(false),
+        "paths response should carry a rows array, got {json}"
+    );
+    assert!(json.get("total_sessions").is_some());
+}
+
+#[tokio::test]
+async fn api_annotations_create_list_delete_round_trip() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    // Create.
+    let body = serde_json::json!({ "date": "2026-06-01", "text": "Deployed v2" });
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/sites/{}/annotations", site.id))
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let created: serde_json::Value = serde_json::from_slice(&body_bytes(resp).await).unwrap();
+    let id = created["id"].as_str().unwrap().to_string();
+
+    // List (within range).
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!(
+            "/api/v1/sites/{}/annotations?from=2026-05-01&to=2026-06-30",
+            site.id
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let anns = json["annotations"].as_array().unwrap();
+    assert_eq!(anns.len(), 1);
+    assert_eq!(anns[0]["text"], "Deployed v2");
+
+    // Delete.
+    let req = Request::builder()
+        .method("DELETE")
+        .uri(format!("/api/v1/sites/{}/annotations/{id}", site.id))
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn dashboard_tier3_pages_render() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let user_id = Ulid::new().to_string();
+    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
+
+    for path in [
+        "/app/campaigns",
+        "/app/retention",
+        "/app/paths",
+        "/app/compare",
+    ] {
+        let req = Request::builder()
+            .uri(path)
+            .header("cookie", &cookie)
+            .body(Body::empty())
+            .unwrap();
+        let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{path} should render");
+    }
 }

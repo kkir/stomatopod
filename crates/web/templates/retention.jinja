@@ -1,0 +1,64 @@
+{% extends "base.jinja" %} {% block title %}Retention — {{ site.name }}{%
+endblock %} {% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title" style="view-transition-name: s-{{ site.id }}">
+      {{ site.name }}
+    </h1>
+    <p class="page-sub">{{ site.domain }} · weekly retention</p>
+  </div>
+  {% if sites %}
+  <form method="get" action="{{ scope_path }}">
+    <select name="site" onchange="this.form.submit()" aria-label="Filter by site">
+      {% for s in sites %}<option value="{{ s.id }}" {% if s.id == site.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+    </select>
+  </form>
+  {% endif %}
+</div>
+
+<div class="tabs">
+  <a href="/app/sites/{{ site.id }}?range={{ range }}">Overview</a>
+  <a href="/app/campaigns?site={{ site.id }}&range={{ range }}">Campaigns</a>
+  <a href="/app/retention?site={{ site.id }}&range={{ range }}" class="active">Retention</a>
+  <a href="/app/paths?site={{ site.id }}&range={{ range }}">Paths</a>
+</div>
+
+<div class="card">
+  <div class="section-header"><h2>Weekly cohorts · {{ range }}</h2></div>
+  <p class="page-sub mb-2">
+    Each row is the week a session was first seen; columns show how many of
+    those sessions returned in later weeks. Cookieless sessions rotate, so
+    cross-week returns are naturally sparse.
+  </p>
+  <table class="retention-grid">
+    <thead>
+      <tr>
+        <th>Cohort</th>
+        <th>Sessions</th>
+        {% for k in offsets %}<th>+{{ k }}w</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in grid.cohorts %}
+      <tr>
+        <td>{{ c.week }}</td>
+        <td>{{ c.size }}</td>
+        {% for cell in c.cells %}
+        <td
+          class="ret-cell"
+          style="--p:{{ [cell.pct, 100] | min }}%"
+          title="{{ cell.returning }} sessions"
+        >
+          {{ "%.0f" | format(cell.pct) }}%
+        </td>
+        {% endfor %}
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="2" class="empty-cell">No data</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

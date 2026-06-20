@@ -16,10 +16,14 @@ use stomatopod_core::{
     domain::{
         agent::{AlertChannel, AlertChannelKind},
         analytics_alert::{AnalyticsAlert, AnalyticsAlertConfig, AnalyticsAlertKind},
+        annotation::Annotation,
         goal::Goal,
         incident::{Incident, IncidentStatus, IncidentTrigger},
     },
-    query::{analytics::GoalQuery, pageviews::Granularity},
+    query::{
+        analytics::GoalQuery,
+        pageviews::{Granularity, PageviewsQuery, TopListField},
+    },
 };
 
 use crate::{
@@ -413,6 +417,215 @@ pub async fn delete_alert(
         }
     }
     Ok(Redirect::to(&format!("/app/sites/{site_id}/alerts")).into_response())
+}
+
+// ---- Tier-3: campaigns, retention, paths, multi-site compare ----
+
+/// GET /app/campaigns — UTM campaign drill-down, filtered by a site selector.
+pub async fn campaigns_global(
+    State(state): State<Arc<AppState>>,
+    Query(sel): Query<SiteSel>,
+    Range { range, label }: Range,
+) -> Result<Response, AppError> {
+    let Some((site, sites)) = resolve_scope(&state, sel.site.as_deref()).await? else {
+        return Ok(Redirect::to("/app/sites").into_response());
+    };
+    // One labelled top-list per UTM dimension, rendered as a stack of tables.
+    let titles = [
+        ("utm_source", "Source"),
+        ("utm_medium", "Medium"),
+        ("utm_campaign", "Campaign"),
+        ("utm_term", "Term"),
+        ("utm_content", "Content"),
+    ];
+    let mut reports = Vec::with_capacity(TopListField::UTM.len());
+    for (field, (_, title)) in TopListField::UTM.iter().zip(titles) {
+        let tl = state
+            .backend
+            .query_top_list(site.id, *field, &range, 50, &[])
+            .await
+            .unwrap_or_default();
+        reports.push(serde_json::json!({
+            "title": title,
+            "rows": tl.rows,
+        }));
+    }
+    let html = templates::render(
+        &state,
+        "campaigns.jinja",
+        minijinja::context! {
+            site => serde_json::to_value(&site).unwrap(),
+            reports => reports,
+            range => label,
+            sites => sites,
+            scope_path => "/app/campaigns",
+        },
+    )?;
+    Ok(html.into_response())
+}
+
+/// GET /app/retention — weekly cohort grid, filtered by a site selector.
+pub async fn retention_global(
+    State(state): State<Arc<AppState>>,
+    Query(sel): Query<SiteSel>,
+    Range { range, label }: Range,
+) -> Result<Response, AppError> {
+    let Some((site, sites)) = resolve_scope(&state, sel.site.as_deref()).await? else {
+        return Ok(Redirect::to("/app/sites").into_response());
+    };
+    let grid = state
+        .backend
+        .query_retention(site.id, &range)
+        .await
+        .unwrap_or_default();
+    let html = templates::render(
+        &state,
+        "retention.jinja",
+        minijinja::context! {
+            site => serde_json::to_value(&site).unwrap(),
+            grid => serde_json::to_value(&grid).unwrap(),
+            offsets => (0..=grid.max_offset).collect::<Vec<_>>(),
+            range => label,
+            sites => sites,
+            scope_path => "/app/retention",
+        },
+    )?;
+    Ok(html.into_response())
+}
+
+/// `?depth=` selector on the paths page (number of steps per sequence).
+#[derive(Deserialize)]
+pub struct PathsSel {
+    site: Option<String>,
+    depth: Option<u32>,
+}
+
+/// GET /app/paths — top page-navigation sequences, by site.
+pub async fn paths_global(
+    State(state): State<Arc<AppState>>,
+    Query(sel): Query<PathsSel>,
+    Range { range, label }: Range,
+) -> Result<Response, AppError> {
+    let Some((site, sites)) = resolve_scope(&state, sel.site.as_deref()).await? else {
+        return Ok(Redirect::to("/app/sites").into_response());
+    };
+    let depth = sel.depth.unwrap_or(3).clamp(2, 6);
+    let report = state
+        .backend
+        .query_paths(site.id, &range, depth, 25)
+        .await
+        .unwrap_or_default();
+    let html = templates::render(
+        &state,
+        "paths.jinja",
+        minijinja::context! {
+            site => serde_json::to_value(&site).unwrap(),
+            report => serde_json::to_value(&report).unwrap(),
+            depth => depth,
+            range => label,
+            sites => sites,
+            scope_path => "/app/paths",
+        },
+    )?;
+    Ok(html.into_response())
+}
+
+/// GET /app/compare — pageviews/sessions across every site in the org.
+pub async fn compare_global(
+    State(state): State<Arc<AppState>>,
+    Range { range, label }: Range,
+) -> Result<Response, AppError> {
+    let orgs = state.meta.list_orgs().await?;
+    let sites = match orgs.first() {
+        Some(org) => state.meta.list_sites(org.id).await?,
+        None => vec![],
+    };
+    if sites.is_empty() {
+        return Ok(Redirect::to("/app/sites").into_response());
+    }
+    let mut rows = Vec::with_capacity(sites.len());
+    for s in &sites {
+        let pv = state
+            .backend
+            .query_pageviews(&PageviewsQuery {
+                site_id: s.id,
+                range: range.clone(),
+                granularity: Granularity::auto_for_range(&range),
+                filters: vec![],
+            })
+            .await
+            .unwrap_or_default();
+        rows.push(serde_json::json!({
+            "id": s.id.to_string(),
+            "name": s.name,
+            "domain": s.domain,
+            "pageviews": pv.total_pageviews,
+            "sessions": pv.total_sessions,
+            "bounce_rate": format!("{:.1}", pv.bounce_rate * 100.0),
+        }));
+    }
+    rows.sort_by(|a, b| {
+        b["pageviews"]
+            .as_u64()
+            .unwrap_or(0)
+            .cmp(&a["pageviews"].as_u64().unwrap_or(0))
+    });
+    let html = templates::render(
+        &state,
+        "compare.jinja",
+        minijinja::context! {
+            rows => rows,
+            range => label,
+        },
+    )?;
+    Ok(html.into_response())
+}
+
+// ---- Tier-3: annotations (dashboard forms on the overview) ----
+
+#[derive(Deserialize)]
+pub struct CreateAnnotationForm {
+    pub date: String,
+    pub text: String,
+}
+
+/// POST /app/sites/:site_id/annotations — add a chart annotation.
+pub async fn create_annotation(
+    State(state): State<Arc<AppState>>,
+    SiteId(site_id): SiteId,
+    Form(form): Form<CreateAnnotationForm>,
+) -> Result<Response, AppError> {
+    let date = chrono::NaiveDate::parse_from_str(form.date.trim(), "%Y-%m-%d")
+        .map_err(|_| AppError::BadRequest("date must be YYYY-MM-DD"))?;
+    if form.text.trim().is_empty() {
+        return Err(AppError::BadRequest("text is required"));
+    }
+    let annotation = Annotation {
+        id: Ulid::new(),
+        site_id,
+        date,
+        text: form.text,
+        created_at: Utc::now(),
+    };
+    state.meta.create_annotation(&annotation).await?;
+    Ok(Redirect::to(&format!("/app/sites/{site_id}")).into_response())
+}
+
+/// POST /app/sites/:site_id/annotations/:id/delete
+pub async fn delete_annotation(
+    State(state): State<Arc<AppState>>,
+    Path((site_id_str, annotation_id_str)): Path<(String, String)>,
+) -> Result<Response, AppError> {
+    let site_id =
+        Ulid::from_string(&site_id_str).map_err(|_| AppError::BadRequest("invalid site id"))?;
+    let annotation_id = Ulid::from_string(&annotation_id_str)
+        .map_err(|_| AppError::BadRequest("invalid annotation id"))?;
+    if let Some(a) = state.meta.get_annotation(annotation_id).await? {
+        if a.site_id == site_id {
+            state.meta.delete_annotation(annotation_id).await?;
+        }
+    }
+    Ok(Redirect::to(&format!("/app/sites/{site_id}")).into_response())
 }
 
 // ---- Alert channels ----
