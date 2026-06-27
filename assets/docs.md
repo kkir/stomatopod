@@ -103,6 +103,93 @@ curl -H "Authorization: Bearer rk_xxxxxxxx" \
   "https://your-host/api/v1/sites/example.com/top-pages?range=7d&limit=10"
 ```
 
+## Tier-4 analytics
+
+These read endpoints surface the data captured by the bundled tracker's
+auto-emitted events (see [Auto-captured browser events](#auto-captured-browser-events)).
+All accept the common query parameters above and authenticate with a read key.
+
+| Method & path                                       | Returns                                                        |
+|-----------------------------------------------------|----------------------------------------------------------------|
+| `GET /api/v1/sites/:site/vitals`                    | Core Web Vitals (LCP/CLS/INP) p50/p75/p95. `url=` narrows.     |
+| `GET /api/v1/sites/:site/vitals/pages`              | Per-page vitals (`metric=lcp\|cls\|inp`).                      |
+| `GET /api/v1/sites/:site/scroll`                    | Scroll-depth reach (25/50/75/100%). `url=` narrows.           |
+| `GET /api/v1/sites/:site/scroll/pages`              | Per-page scroll engagement.                                    |
+| `GET /api/v1/sites/:site/search`                    | Top internal site-search terms.                                |
+| `GET /api/v1/sites/:site/search/zero-results`       | Searches that returned no results.                             |
+| `GET /api/v1/sites/:site/search/timeseries`         | Search volume over time.                                       |
+| `GET /api/v1/sites/:site/revenue`                   | Revenue totals, orders, AOV, revenue-per-session.              |
+| `GET /api/v1/sites/:site/revenue/timeseries`        | Revenue over time.                                             |
+| `GET /api/v1/sites/:site/revenue/pages`             | Revenue attributed by page.                                    |
+| `GET /api/v1/sites/:site/revenue/breakdown`         | Revenue by `dimension=` (page/referrer/country/...).           |
+| `GET /api/v1/sites/:site/experiments`               | A/B experiments seen (variant `properties`).                   |
+| `GET /api/v1/sites/:site/experiments/:experiment`   | Per-variant conversion comparison (`goal=`).                   |
+| `GET /api/v1/sites/:site/heatmaps/clicks`           | Click heatmap points for a page (`url=` required).             |
+| `GET /api/v1/sites/:site/heatmaps/scroll`           | Scroll heatmap buckets for a page (`url=` required).           |
+
+## Auto-captured browser events
+
+The bundled tracker (`/tracker.js`) automatically emits reserved custom events
+in addition to pageviews. Each can be disabled per-site with a `data-no-*`
+attribute on the script tag (`data-no-vitals`, `data-no-scroll`,
+`data-no-clicks`, `data-no-search`) without affecting pageview analytics.
+
+| Event        | Trigger                          | Key properties                                   |
+|--------------|----------------------------------|--------------------------------------------------|
+| `__vital__`  | Core Web Vital measured          | `metric` (LCP/CLS/INP), `value`, `rating`        |
+| `__scroll__` | A scroll-depth milestone reached | `depth` (25/50/75/100), `url`                    |
+| `__click__`  | A non-form-field click           | `x`/`y` (% of viewport/page), `url`, `element`   |
+| `__search__` | A search query param detected    | `query`                                          |
+
+Revenue and A/B testing reuse ordinary custom events: tag any event with a
+`revenue` property (a number) to feed the revenue reports, and with a
+`variant` (plus an `experiment` name) property to feed A/B comparisons.
+
+These names are reserved — sending them yourself via the ingest API is
+rejected so the tracker remains the single source.
+
+## Public share links
+
+Mint a token-scoped, read-only public dashboard for a single site — no login
+required. Manage links with a read key:
+
+| Method & path                                      | Action                          |
+|----------------------------------------------------|---------------------------------|
+| `POST /api/v1/sites/:site/share-links`             | Create (body: `label?`, `expires_at?` RFC3339). |
+| `GET /api/v1/sites/:site/share-links`              | List links (with public `url`). |
+| `PATCH /api/v1/sites/:site/share-links/:id`        | Update `label`/`expires_at`.    |
+| `DELETE /api/v1/sites/:site/share-links/:id`       | Revoke.                         |
+
+The public surface needs no auth:
+
+- `GET /share/:token` — read-only HTML dashboard shell.
+- `GET /share/:token/api/pageviews` — pageview timeseries.
+- `GET /share/:token/api/top/:dimension` — `pages`, `referrers`, `countries`, `browsers`, `devices`, `os`, `regions`.
+- `GET /share/:token/api/events` — custom event summary.
+- `GET /share/:token/api/goals` — goal completions + conversion rate.
+
+Share links expose only aggregate reports — never raw events, sessions, API
+keys, or settings. A revoked token returns `404` (existence is never leaked);
+an expired token returns `410 Gone`.
+
+## Email digests
+
+Opt in to weekly and/or monthly summary emails per site. Subscriptions are
+per-user; manage the current user's subscription with a user-scoped token:
+
+| Method & path                                          | Action                                  |
+|--------------------------------------------------------|-----------------------------------------|
+| `GET /api/v1/sites/:site/digest-subscription`          | Current subscription (or `null`).       |
+| `PUT /api/v1/sites/:site/digest-subscription`          | Create/update (`frequency`: `weekly`/`monthly`/`both`, `enabled?`). |
+| `DELETE /api/v1/sites/:site/digest-subscription`       | Unsubscribe.                            |
+| `POST /api/v1/sites/:site/digest-subscription/test`    | Send a digest immediately.              |
+
+Weekly digests are sent Monday 08:00 (UTC fallback); monthly on the 1st at
+08:00. Every email carries a one-click `GET /digest/unsubscribe/:token` link
+that needs no login. Configure delivery under `[email]` in `stomatopod.toml`
+(`provider`, `api_key`, `from`) and the public link host via `base_url`; with
+no provider the scheduler renders digests but does not send.
+
 ## Creating funnels
 
 A funnel is a named, ordered list of steps used to measure conversion. Create

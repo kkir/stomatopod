@@ -24,6 +24,7 @@ use stomatopod_core::{
             Filter, FilterOp, Granularity, PageviewsQuery, PageviewsResult, TimeBucket, TimeRange,
             TopList, TopListField, TopRow,
         },
+        tier4::EventPropRow,
     },
 };
 
@@ -887,6 +888,85 @@ impl EmbeddedReader {
                     os: opt_str(os, i).unwrap_or_default(),
                     device_type: opt_str(device, i).unwrap_or_default(),
                     properties: opt_str(props, i),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Raw custom-event rows for Tier-4 aggregation. Includes the property
+    /// JSON plus the dimensions revenue/breakdown reports group by. `names`
+    /// (when non-empty) restricts to those event names.
+    pub async fn query_event_props(
+        &self,
+        site_id: Ulid,
+        names: &[String],
+        range: &TimeRange,
+        limit: u32,
+    ) -> Result<Vec<EventPropRow>, StoreError> {
+        let site = site_id.to_string();
+        if !self.ensure_site_table_available(&site).await? {
+            return Ok(vec![]);
+        }
+        let table = table_name(&site);
+        let start = range.start.timestamp_micros();
+        let end = range.end.timestamp_micros();
+        let name_filter = if names.is_empty() {
+            String::new()
+        } else {
+            let list = names
+                .iter()
+                .map(|n| format!("'{}'", n.replace('\'', "''")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("AND CAST(name AS VARCHAR) IN ({list})")
+        };
+        let sql = format!(
+            r#"
+            SELECT CAST(name AS VARCHAR) AS name,
+                   COALESCE(CAST(url AS VARCHAR), '') AS url,
+                   session_id,
+                   "timestamp" AS ts,
+                   CAST(referrer AS VARCHAR) AS referrer,
+                   CAST(country_code AS VARCHAR) AS country,
+                   CAST(utm_source AS VARCHAR) AS utm_source,
+                   CAST(properties AS VARCHAR) AS props
+            FROM {table}
+            WHERE site_id = '{site}'
+              AND "timestamp" >= to_timestamp_micros({start})
+              AND "timestamp" <= to_timestamp_micros({end})
+              AND CAST(kind AS VARCHAR) = 'custom'
+              {name_filter}
+            ORDER BY "timestamp" ASC
+            LIMIT {limit}
+            "#
+        );
+        let batches = self.run(&sql).await?;
+        let mut out = Vec::new();
+        for b in &batches {
+            let name = str_col(b, "name");
+            let url = str_col(b, "url");
+            let sid = fixedbin_col(b, "session_id");
+            let ts = ts_micros_col(b, "ts");
+            let referrer = str_col(b, "referrer");
+            let country = str_col(b, "country");
+            let utm_source = str_col(b, "utm_source");
+            let props = str_col(b, "props");
+            for i in 0..b.num_rows() {
+                let properties = props
+                    .filter(|p| p.is_valid(i))
+                    .and_then(|p| serde_json::from_str(p.value(i)).ok());
+                out.push(EventPropRow {
+                    name: opt_str(name, i).unwrap_or_default(),
+                    url: opt_str(url, i).unwrap_or_default(),
+                    session_id: sid.map(|c| hex_encode(c.value(i))).unwrap_or_default(),
+                    timestamp: ts
+                        .and_then(|c| chrono::DateTime::from_timestamp_micros(c.value(i)))
+                        .unwrap_or_default(),
+                    referrer: opt_str(referrer, i),
+                    country_code: opt_str(country, i),
+                    utm_source: opt_str(utm_source, i),
+                    properties,
                 });
             }
         }

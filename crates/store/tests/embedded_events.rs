@@ -947,3 +947,364 @@ async fn annotations_round_trip_through_meta() {
     backend.delete_annotation(ann.id).await.unwrap();
     assert!(backend.get_annotation(ann.id).await.unwrap().is_none());
 }
+
+// ---------------------------------------------------------------------------
+// Tier-4 analytics: raw custom-event fetch + in-process aggregations for
+// Core Web Vitals, scroll/engagement, A/B, revenue, heatmaps, and search.
+// These drive real DataFusion SQL on a flushed parquet store end to end.
+// ---------------------------------------------------------------------------
+
+use stomatopod_core::query::tier4::{
+    ClickHeatmap, EventPropRow, ExperimentList, ExperimentResult, RevenueBreakdown,
+    RevenueDimension, RevenueSummary, ScrollHeatmap, ScrollReport, SearchReport, VitalsReport,
+};
+
+/// Build a custom event with the given name, session, url, and JSON props.
+#[allow(clippy::too_many_arguments)]
+fn custom_event(
+    site_id: Ulid,
+    ts: DateTime<Utc>,
+    name: &str,
+    session: [u8; 16],
+    url: &str,
+    props: serde_json::Value,
+) -> Event {
+    Event {
+        id: Ulid::new(),
+        site_id,
+        name: name.into(),
+        kind: EventKind::Custom,
+        timestamp: ts,
+        received_at: ts,
+        url: url.into(),
+        referrer: None,
+        utm_source: None,
+        utm_medium: None,
+        utm_campaign: None,
+        utm_term: None,
+        utm_content: None,
+        browser: "Chrome".into(),
+        browser_version: "1".into(),
+        os: "macOS".into(),
+        os_version: "1".into(),
+        device_type: DeviceType::Desktop,
+        screen_width: None,
+        screen_height: None,
+        language: None,
+        ip_anonymized: "127.0.0.0".into(),
+        country_code: Some("US".into()),
+        region: None,
+        city: None,
+        session_id: session,
+        properties: Some(props),
+    }
+}
+
+fn sid(n: u8) -> [u8; 16] {
+    let mut b = [0u8; 16];
+    b[0] = n;
+    b
+}
+
+async fn fetch_props(
+    backend: &EmbeddedBackend,
+    site_id: Ulid,
+    names: &[&str],
+) -> Vec<EventPropRow> {
+    let names: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+    backend
+        .query_event_props(site_id, &names, &around_now(), 100_000)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn tier4_event_props_roundtrip_and_name_filter() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let site_id = Ulid::new();
+    let now = Utc::now();
+    backend
+        .ingest_events(vec![
+            custom_event(
+                site_id,
+                now,
+                "__vital__",
+                sid(1),
+                "/a",
+                serde_json::json!({"metric":"LCP","value":1200,"rating":"good","url":"/a"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "__scroll__",
+                sid(1),
+                "/a",
+                serde_json::json!({"depth":50,"url":"/a"}),
+            ),
+        ])
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Name filter returns only the requested event kind.
+    let vitals = fetch_props(&backend, site_id, &["__vital__"]).await;
+    assert_eq!(vitals.len(), 1);
+    assert_eq!(vitals[0].name, "__vital__");
+    assert_eq!(
+        vitals[0].properties.as_ref().unwrap()["metric"],
+        serde_json::json!("LCP")
+    );
+
+    // Empty names returns all custom events.
+    let all = fetch_props(&backend, site_id, &[]).await;
+    assert_eq!(all.len(), 2);
+}
+
+#[tokio::test]
+async fn tier4_core_web_vitals_percentiles() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let site_id = Ulid::new();
+    let now = Utc::now();
+    let mut events = vec![];
+    for (i, v) in [1000.0, 2000.0, 3000.0, 4000.0].into_iter().enumerate() {
+        let rating = if v < 2500.0 { "good" } else { "poor" };
+        events.push(custom_event(
+            site_id,
+            now,
+            "__vital__",
+            sid(i as u8),
+            "/p",
+            serde_json::json!({"metric":"LCP","value":v,"rating":rating,"url":"/p"}),
+        ));
+    }
+    backend.ingest_events(events).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let rows = fetch_props(&backend, site_id, &["__vital__"]).await;
+    let report = VitalsReport::from_rows(&rows, None);
+    assert_eq!(report.lcp.samples, 4);
+    assert_eq!(report.lcp.p50, 2000.0);
+    assert_eq!(report.lcp.p75, 3000.0);
+    assert_eq!(report.lcp.good_pct, 50.0);
+}
+
+#[tokio::test]
+async fn tier4_scroll_engagement_per_session_max() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let site_id = Ulid::new();
+    let now = Utc::now();
+    backend
+        .ingest_events(vec![
+            custom_event(
+                site_id,
+                now,
+                "__scroll__",
+                sid(1),
+                "/blog",
+                serde_json::json!({"depth":25,"url":"/blog"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "__scroll__",
+                sid(1),
+                "/blog",
+                serde_json::json!({"depth":75,"url":"/blog"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "__scroll__",
+                sid(2),
+                "/blog",
+                serde_json::json!({"depth":25,"url":"/blog"}),
+            ),
+        ])
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let rows = fetch_props(&backend, site_id, &["__scroll__"]).await;
+    let report = ScrollReport::from_rows(&rows, Some("/blog"));
+    assert_eq!(report.sessions_with_scroll_data, 2);
+    assert_eq!(report.reached_25pct, 100.0);
+    assert_eq!(report.reached_75pct, 50.0);
+    assert_eq!(report.reached_100pct, 0.0);
+
+    let heatmap = ScrollHeatmap::from_rows(&rows, "/blog");
+    assert_eq!(heatmap.sessions, 2);
+    assert_eq!(heatmap.scroll_distribution[0].reached_pct, 100.0);
+}
+
+#[tokio::test]
+async fn tier4_revenue_summary_and_breakdown() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let site_id = Ulid::new();
+    let now = Utc::now();
+    backend
+        .ingest_events(vec![
+            custom_event(
+                site_id,
+                now,
+                "purchase",
+                sid(1),
+                "/checkout",
+                serde_json::json!({"revenue":50.0,"order_id":"o1"}),
+            ),
+            // Duplicate order — must not double-count.
+            custom_event(
+                site_id,
+                now,
+                "purchase",
+                sid(1),
+                "/checkout",
+                serde_json::json!({"revenue":50.0,"order_id":"o1"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "purchase",
+                sid(2),
+                "/checkout",
+                serde_json::json!({"revenue":30.0,"order_id":"o2"}),
+            ),
+        ])
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let rows = fetch_props(&backend, site_id, &[]).await;
+    let summary = RevenueSummary::from_rows(&rows, 10, "USD");
+    assert_eq!(summary.orders, 2);
+    assert_eq!(summary.total_revenue, 80.0);
+    assert_eq!(summary.aov, 40.0);
+    assert_eq!(summary.revenue_per_session, 8.0);
+
+    let breakdown = RevenueBreakdown::from_rows(&rows, RevenueDimension::Country, "USD", 10);
+    assert_eq!(breakdown.rows[0].value, "US");
+    assert_eq!(breakdown.rows[0].revenue, 80.0);
+}
+
+#[tokio::test]
+async fn tier4_experiment_conversion_winner() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let site_id = Ulid::new();
+    let now = Utc::now();
+    let mut events = vec![];
+    // Variant A: 2 exposures, 0 conversions; Variant B: 2 exposures, 2 conversions.
+    for i in 0..2u8 {
+        let s = sid(10 + i);
+        events.push(custom_event(
+            site_id,
+            now,
+            "experiment_viewed",
+            s,
+            "/",
+            serde_json::json!({"experiment":"cta","variant":"A"}),
+        ));
+    }
+    for i in 0..2u8 {
+        let s = sid(20 + i);
+        events.push(custom_event(
+            site_id,
+            now,
+            "experiment_viewed",
+            s,
+            "/",
+            serde_json::json!({"experiment":"cta","variant":"B"}),
+        ));
+        events.push(custom_event(
+            site_id,
+            now + chrono::Duration::seconds(5),
+            "signup",
+            s,
+            "/",
+            serde_json::json!({}),
+        ));
+    }
+    backend.ingest_events(events).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let rows = fetch_props(&backend, site_id, &[]).await;
+    let list = ExperimentList::from_rows(&rows);
+    assert_eq!(list.experiments.len(), 1);
+    assert_eq!(list.experiments[0].variants, vec!["A", "B"]);
+
+    let result = ExperimentResult::from_rows(&rows, "cta", Some("signup"));
+    let a = result.variants.iter().find(|v| v.variant == "A").unwrap();
+    let b = result.variants.iter().find(|v| v.variant == "B").unwrap();
+    assert_eq!(a.conversions, 0);
+    assert_eq!(b.conversions, 2);
+    assert_eq!(result.winner.as_deref(), Some("B"));
+}
+
+#[tokio::test]
+async fn tier4_search_and_click_heatmap() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let site_id = Ulid::new();
+    let now = Utc::now();
+    backend
+        .ingest_events(vec![
+            custom_event(
+                site_id,
+                now,
+                "__search__",
+                sid(1),
+                "/search",
+                serde_json::json!({"query":"pricing"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "__search__",
+                sid(2),
+                "/search",
+                serde_json::json!({"query":"pricing"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "__search__",
+                sid(3),
+                "/search",
+                serde_json::json!({"query":"docs"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "__click__",
+                sid(1),
+                "/p",
+                serde_json::json!({"x":50,"y":30,"url":"/p","element":"BUTTON#buy"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "__click__",
+                sid(2),
+                "/p",
+                serde_json::json!({"x":51,"y":31,"url":"/p","element":"BUTTON#buy"}),
+            ),
+        ])
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let search_rows = fetch_props(&backend, site_id, &["__search__"]).await;
+    let search = SearchReport::from_rows(&search_rows, 10);
+    assert_eq!(search.total_searches, 3);
+    assert_eq!(search.rows[0].query, "pricing");
+    assert_eq!(search.rows[0].count, 2);
+
+    let click_rows = fetch_props(&backend, site_id, &["__click__"]).await;
+    let heatmap = ClickHeatmap::from_rows(&click_rows, "/p", 2, 1);
+    assert_eq!(heatmap.total_clicks, 2);
+    assert_eq!(heatmap.elements[0].element, "BUTTON#buy");
+    assert_eq!(heatmap.elements[0].count, 2);
+}

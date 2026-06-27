@@ -21,6 +21,11 @@ use stomatopod_core::{
         events::EventQuery,
         funnel::{FunnelQuery, FunnelStep},
         pageviews::{Filter, Granularity, PageviewsQuery, TimeRange, TopListField},
+        tier4::{
+            ClickHeatmap, EventPropRow, ExperimentList, ExperimentResult, RevenueBreakdown,
+            RevenueDimension, RevenueSummary, RevenueTimeseries, ScrollHeatmap, ScrollPagesReport,
+            ScrollReport, SearchReport, SearchTimeseries, VitalPagesReport, VitalsReport,
+        },
     },
 };
 
@@ -398,7 +403,14 @@ pub async fn events(
         limit: params.limit,
     };
     match state.backend.query_custom_events(&q).await {
-        Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),
+        Ok(mut result) => {
+            // Reserved Tier-4 tracker events back dedicated reports and must
+            // not pollute the generic custom-events list.
+            result
+                .rows
+                .retain(|r| !stomatopod_core::query::tier4::is_reserved_event(&r.value));
+            Json(serde_json::to_value(result).unwrap()).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -1282,4 +1294,400 @@ pub async fn delete_annotation(
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Tier-4 analytics: Core Web Vitals, scroll/engagement, A/B, revenue,
+// heatmaps, and site search. All read from raw custom-event rows aggregated
+// in-process by `stomatopod_core::query::tier4`.
+// ---------------------------------------------------------------------------
+
+/// Row cap for Tier-4 raw fetches. Generous enough for real ranges while
+/// bounding worst-case memory.
+const TIER4_ROW_LIMIT: u32 = 500_000;
+
+#[derive(Deserialize, Default)]
+pub struct Tier4Params {
+    pub range: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    #[serde(default)]
+    pub granularity: Granularity,
+    pub limit: Option<u32>,
+    pub url: Option<String>,
+    pub metric: Option<String>,
+    pub dimension: Option<String>,
+    pub goal: Option<String>,
+    pub currency: Option<String>,
+}
+
+impl Tier4Params {
+    fn range(&self) -> TimeRange {
+        resolve_range(
+            self.range.as_deref(),
+            self.from.as_deref(),
+            self.to.as_deref(),
+        )
+    }
+    fn limit_or(&self, d: u32) -> u32 {
+        self.limit.unwrap_or(d)
+    }
+}
+
+/// Fetch raw custom-event rows for the given names over the resolved range.
+async fn fetch_event_rows(
+    state: &AppState,
+    site_id: Ulid,
+    names: &[&str],
+    range: &TimeRange,
+) -> Result<Vec<EventPropRow>, Response> {
+    let names: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+    state
+        .backend
+        .query_event_props(site_id, &names, range, TIER4_ROW_LIMIT)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
+}
+
+macro_rules! authz {
+    ($state:expr, $principal:expr, $site:expr) => {
+        match resolve_authorized_site($state, $principal, $site).await {
+            Ok(id) => id,
+            Err(resp) => return resp,
+        }
+    };
+}
+
+// ---- Core Web Vitals ----
+
+/// GET /api/v1/sites/:site/vitals
+pub async fn vitals(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let range = params.range();
+    let rows = match fetch_event_rows(&state, site_id, &["__vital__"], &range).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let report = VitalsReport::from_rows(&rows, params.url.as_deref());
+    Json(serde_json::to_value(report).unwrap()).into_response()
+}
+
+/// GET /api/v1/sites/:site/vitals/pages
+pub async fn vitals_pages(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let range = params.range();
+    let rows = match fetch_event_rows(&state, site_id, &["__vital__"], &range).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let metric = params.metric.as_deref().unwrap_or("lcp");
+    let report = VitalPagesReport::from_rows(&rows, metric, params.limit_or(20) as usize);
+    Json(serde_json::to_value(report).unwrap()).into_response()
+}
+
+// ---- Scroll depth / engagement ----
+
+/// GET /api/v1/sites/:site/scroll
+pub async fn scroll(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let range = params.range();
+    let rows = match fetch_event_rows(&state, site_id, &["__scroll__"], &range).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let report = ScrollReport::from_rows(&rows, params.url.as_deref());
+    Json(serde_json::to_value(report).unwrap()).into_response()
+}
+
+/// GET /api/v1/sites/:site/scroll/pages
+pub async fn scroll_pages(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let range = params.range();
+    let rows = match fetch_event_rows(&state, site_id, &["__scroll__"], &range).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let report = ScrollPagesReport::from_rows(&rows, params.limit_or(20) as usize);
+    Json(serde_json::to_value(report).unwrap()).into_response()
+}
+
+// ---- Site search ----
+
+/// GET /api/v1/sites/:site/search
+pub async fn search(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let range = params.range();
+    let rows = match fetch_event_rows(&state, site_id, &["__search__", "site_search"], &range).await
+    {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let report = SearchReport::from_rows(&rows, params.limit_or(20) as usize);
+    Json(serde_json::to_value(report).unwrap()).into_response()
+}
+
+/// GET /api/v1/sites/:site/search/zero-results
+pub async fn search_zero_results(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let range = params.range();
+    let rows = match fetch_event_rows(&state, site_id, &["__search__", "site_search"], &range).await
+    {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let report = SearchReport::zero_results(&rows, params.limit_or(20) as usize);
+    Json(serde_json::to_value(report).unwrap()).into_response()
+}
+
+/// GET /api/v1/sites/:site/search/timeseries
+pub async fn search_timeseries(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let range = params.range();
+    let rows = match fetch_event_rows(&state, site_id, &["__search__", "site_search"], &range).await
+    {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let report = SearchTimeseries::from_rows(&rows);
+    Json(serde_json::to_value(report).unwrap()).into_response()
+}
+
+// ---- Revenue ----
+
+/// Distinct site-wide sessions over the range — the revenue-per-session
+/// denominator.
+async fn site_session_count(state: &AppState, site_id: Ulid, range: &TimeRange) -> u64 {
+    state
+        .backend
+        .query_pageviews(&PageviewsQuery {
+            site_id,
+            range: range.clone(),
+            granularity: Granularity::Day,
+            filters: vec![],
+        })
+        .await
+        .map(|r| r.total_sessions)
+        .unwrap_or(0)
+}
+
+/// GET /api/v1/sites/:site/revenue
+pub async fn revenue(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let range = params.range();
+    let rows = match fetch_event_rows(&state, site_id, &[], &range).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let sessions = site_session_count(&state, site_id, &range).await;
+    let currency = params.currency.as_deref().unwrap_or("USD");
+    let report = RevenueSummary::from_rows(&rows, sessions, currency);
+    Json(serde_json::to_value(report).unwrap()).into_response()
+}
+
+/// GET /api/v1/sites/:site/revenue/timeseries
+pub async fn revenue_timeseries(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let range = params.range();
+    let rows = match fetch_event_rows(&state, site_id, &[], &range).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let currency = params.currency.as_deref().unwrap_or("USD");
+    let report = RevenueTimeseries::from_rows(&rows, currency, params.granularity);
+    Json(serde_json::to_value(report).unwrap()).into_response()
+}
+
+/// GET /api/v1/sites/:site/revenue/pages
+pub async fn revenue_pages(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let range = params.range();
+    let rows = match fetch_event_rows(&state, site_id, &[], &range).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let currency = params.currency.as_deref().unwrap_or("USD");
+    let report = RevenueBreakdown::from_rows(
+        &rows,
+        RevenueDimension::Page,
+        currency,
+        params.limit_or(20) as usize,
+    );
+    Json(serde_json::to_value(report).unwrap()).into_response()
+}
+
+/// GET /api/v1/sites/:site/revenue/breakdown
+pub async fn revenue_breakdown(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let range = params.range();
+    let dimension = match params
+        .dimension
+        .as_deref()
+        .and_then(RevenueDimension::parse)
+    {
+        Some(d) => d,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "dimension must be one of: referrer, country, utm_source, page"
+                })),
+            )
+                .into_response()
+        }
+    };
+    let rows = match fetch_event_rows(&state, site_id, &[], &range).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let currency = params.currency.as_deref().unwrap_or("USD");
+    let report =
+        RevenueBreakdown::from_rows(&rows, dimension, currency, params.limit_or(20) as usize);
+    Json(serde_json::to_value(report).unwrap()).into_response()
+}
+
+// ---- A/B experiments ----
+
+/// GET /api/v1/sites/:site/experiments
+pub async fn experiments(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let range = params.range();
+    let rows = match fetch_event_rows(&state, site_id, &[], &range).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let report = ExperimentList::from_rows(&rows);
+    Json(serde_json::to_value(report).unwrap()).into_response()
+}
+
+/// GET /api/v1/sites/:site/experiments/:experiment
+pub async fn experiment_result(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path((site, experiment)): Path<(String, String)>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let range = params.range();
+    let rows = match fetch_event_rows(&state, site_id, &[], &range).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let report = ExperimentResult::from_rows(&rows, &experiment, params.goal.as_deref());
+    Json(serde_json::to_value(report).unwrap()).into_response()
+}
+
+// ---- Heatmaps ----
+
+#[allow(clippy::result_large_err)]
+fn require_url(params: &Tier4Params) -> Result<&str, Response> {
+    params.url.as_deref().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "url query parameter is required"})),
+        )
+            .into_response()
+    })
+}
+
+/// GET /api/v1/sites/:site/heatmaps/clicks
+pub async fn heatmap_clicks(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let url = match require_url(&params) {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let range = params.range();
+    let rows = match fetch_event_rows(&state, site_id, &["__click__"], &range).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    // 2% horizontal × 1% vertical grid (50×100 cells).
+    let report = ClickHeatmap::from_rows(&rows, url, 2, 1);
+    Json(serde_json::to_value(report).unwrap()).into_response()
+}
+
+/// GET /api/v1/sites/:site/heatmaps/scroll
+pub async fn heatmap_scroll(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Query(params): Query<Tier4Params>,
+) -> Response {
+    let site_id = authz!(&state, &principal, &site);
+    let url = match require_url(&params) {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let range = params.range();
+    let rows = match fetch_event_rows(&state, site_id, &["__scroll__"], &range).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let report = ScrollHeatmap::from_rows(&rows, url);
+    Json(serde_json::to_value(report).unwrap()).into_response()
 }

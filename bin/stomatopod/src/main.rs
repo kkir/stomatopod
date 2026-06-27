@@ -168,6 +168,29 @@ async fn serve(cfg: Config) -> Result<()> {
         .await;
     });
 
+    // Email digest sender + hourly scheduler. The default LogSender keeps
+    // self-hosted deployments side-effect free until a provider is wired.
+    let digest_sender: Arc<dyn stomatopod_web::digest::DigestSender> =
+        Arc::new(stomatopod_web::digest::LogSender);
+    {
+        let meta_for_digest = meta.clone();
+        let backend_for_digest = backend.clone();
+        let sender_for_digest = digest_sender.clone();
+        let base_url = cfg.public_base_url().to_string();
+        let secret = cfg.auth.secret_key.clone();
+        tokio::spawn(async move {
+            stomatopod_web::digest::run_digest_scheduler(
+                meta_for_digest,
+                backend_for_digest,
+                sender_for_digest,
+                base_url,
+                secret,
+                std::time::Duration::from_secs(3600),
+            )
+            .await;
+        });
+    }
+
     let state = Arc::new(AppState {
         backend,
         agent_store,
@@ -185,6 +208,7 @@ async fn serve(cfg: Config) -> Result<()> {
         control_channels: dashmap::DashMap::new(),
         control_seq: std::sync::atomic::AtomicU64::new(0),
         alerts,
+        digest_sender,
     });
 
     let router = build_router(state);

@@ -62,6 +62,8 @@ pub struct AppState {
     pub control_seq: AtomicU64,
     /// Outbound alert dispatcher (webhook + Slack).
     pub alerts: AlertDispatcher,
+    /// Email transport for digest delivery (test-send + scheduler).
+    pub digest_sender: Arc<dyn crate::digest::DigestSender>,
 }
 
 impl AppState {

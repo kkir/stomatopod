@@ -225,6 +225,18 @@ impl StorageBackend for EmbeddedBackend {
     ) -> Result<PathReport, StoreError> {
         self.reader.query_paths(site_id, range, depth, limit).await
     }
+
+    async fn query_event_props(
+        &self,
+        site_id: Ulid,
+        names: &[String],
+        range: &TimeRange,
+        limit: u32,
+    ) -> Result<Vec<stomatopod_core::query::tier4::EventPropRow>, StoreError> {
+        self.reader
+            .query_event_props(site_id, names, range, limit)
+            .await
+    }
 }
 
 // Forward MetaStore calls to the SQLite meta store
@@ -308,6 +320,13 @@ impl MetaStore for EmbeddedBackend {
         email: &str,
     ) -> Result<Option<stomatopod_core::domain::org::User>, StoreError> {
         self.meta.get_user_by_email(email).await
+    }
+
+    async fn get_user(
+        &self,
+        id: Ulid,
+    ) -> Result<Option<stomatopod_core::domain::org::User>, StoreError> {
+        self.meta.get_user(id).await
     }
 
     async fn create_funnel(
@@ -435,6 +454,80 @@ impl MetaStore for EmbeddedBackend {
     ) -> Result<Option<stomatopod_core::domain::analytics_alert::AnalyticsAlertFire>, StoreError>
     {
         self.meta.last_analytics_alert_fire(alert_id).await
+    }
+
+    async fn create_share_link(
+        &self,
+        link: &stomatopod_core::domain::share_link::ShareLink,
+    ) -> Result<(), StoreError> {
+        self.meta.create_share_link(link).await
+    }
+
+    async fn list_share_links(
+        &self,
+        site_id: Ulid,
+    ) -> Result<Vec<stomatopod_core::domain::share_link::ShareLink>, StoreError> {
+        self.meta.list_share_links(site_id).await
+    }
+
+    async fn get_share_link(
+        &self,
+        id: Ulid,
+    ) -> Result<Option<stomatopod_core::domain::share_link::ShareLink>, StoreError> {
+        self.meta.get_share_link(id).await
+    }
+
+    async fn get_share_link_by_token(
+        &self,
+        token: &str,
+    ) -> Result<Option<stomatopod_core::domain::share_link::ShareLink>, StoreError> {
+        self.meta.get_share_link_by_token(token).await
+    }
+
+    async fn update_share_link(
+        &self,
+        id: Ulid,
+        label: Option<String>,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<(), StoreError> {
+        self.meta.update_share_link(id, label, expires_at).await
+    }
+
+    async fn delete_share_link(&self, id: Ulid) -> Result<(), StoreError> {
+        self.meta.delete_share_link(id).await
+    }
+
+    async fn upsert_digest_subscription(
+        &self,
+        sub: &stomatopod_core::domain::digest::DigestSubscription,
+    ) -> Result<(), StoreError> {
+        self.meta.upsert_digest_subscription(sub).await
+    }
+
+    async fn get_digest_subscription(
+        &self,
+        user_id: Ulid,
+        site_id: Ulid,
+    ) -> Result<Option<stomatopod_core::domain::digest::DigestSubscription>, StoreError> {
+        self.meta.get_digest_subscription(user_id, site_id).await
+    }
+
+    async fn delete_digest_subscription(
+        &self,
+        user_id: Ulid,
+        site_id: Ulid,
+    ) -> Result<(), StoreError> {
+        self.meta.delete_digest_subscription(user_id, site_id).await
+    }
+
+    async fn list_enabled_digest_subscriptions(
+        &self,
+    ) -> Result<Vec<stomatopod_core::domain::digest::DigestSubscription>, StoreError> {
+        self.meta.list_enabled_digest_subscriptions().await
+    }
+
+    async fn record_digest_bounce(&self, id: Ulid, disable_at: u32) -> Result<(), StoreError> {
+        self.meta.record_digest_bounce(id, disable_at).await
     }
 
     async fn upsert_agent(

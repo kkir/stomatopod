@@ -514,3 +514,199 @@ async fn api_key_crud_round_trip() {
         .is_none());
     assert_eq!(meta.list_api_keys(org.id).await.unwrap().len(), 1);
 }
+
+// ---- Share links ----
+
+use stomatopod_core::domain::{
+    digest::{DigestFrequency, DigestSubscription},
+    share_link::ShareLink,
+};
+
+/// Create an org + site and return the site, satisfying the share_links FK.
+async fn org_and_site(meta: &SqliteMeta) -> Site {
+    let org = make_org();
+    meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    meta.create_site(&site).await.unwrap();
+    site
+}
+
+async fn make_persisted_user(meta: &SqliteMeta, site: &Site, email: &str) -> User {
+    let user = User {
+        id: Ulid::new(),
+        org_id: site.org_id,
+        email: email.into(),
+        password_hash: "x".into(),
+        role: UserRole::Owner,
+        created_at: Utc::now(),
+    };
+    meta.create_user(&user).await.unwrap();
+    user
+}
+
+#[tokio::test]
+async fn share_link_crud_lifecycle() {
+    let dir = tempfile::tempdir().unwrap();
+    let meta = open_meta(&dir).await;
+    let site = org_and_site(&meta).await;
+
+    let link = ShareLink {
+        id: Ulid::new(),
+        site_id: site.id,
+        token: "tok-abc123".into(),
+        label: Some("Client view".into()),
+        expires_at: None,
+        created_by: "user-1".into(),
+        created_at: Utc::now(),
+    };
+    meta.create_share_link(&link).await.unwrap();
+
+    // Lookup by id and by token.
+    let by_id = meta.get_share_link(link.id).await.unwrap().unwrap();
+    assert_eq!(by_id.token, "tok-abc123");
+    let by_token = meta
+        .get_share_link_by_token("tok-abc123")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(by_token.id, link.id);
+    assert_eq!(by_token.label.as_deref(), Some("Client view"));
+
+    // List scoped to site.
+    assert_eq!(meta.list_share_links(site.id).await.unwrap().len(), 1);
+
+    // Update label + expiry.
+    let expiry = Utc::now() + chrono::Duration::days(7);
+    meta.update_share_link(link.id, Some("Public".into()), Some(expiry))
+        .await
+        .unwrap();
+    let updated = meta.get_share_link(link.id).await.unwrap().unwrap();
+    assert_eq!(updated.label.as_deref(), Some("Public"));
+    assert!(updated.expires_at.is_some());
+
+    // Delete → 404 on token lookup (revoked tokens must not resolve).
+    meta.delete_share_link(link.id).await.unwrap();
+    assert!(meta
+        .get_share_link_by_token("tok-abc123")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(meta.list_share_links(site.id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn share_link_token_is_unique() {
+    let dir = tempfile::tempdir().unwrap();
+    let meta = open_meta(&dir).await;
+    let site = org_and_site(&meta).await;
+
+    let mk = |token: &str| ShareLink {
+        id: Ulid::new(),
+        site_id: site.id,
+        token: token.into(),
+        label: None,
+        expires_at: None,
+        created_by: "u".into(),
+        created_at: Utc::now(),
+    };
+    meta.create_share_link(&mk("dup")).await.unwrap();
+    assert!(meta.create_share_link(&mk("dup")).await.is_err());
+}
+
+// ---- Digest subscriptions ----
+
+#[tokio::test]
+async fn digest_subscription_upsert_and_get() {
+    let dir = tempfile::tempdir().unwrap();
+    let meta = open_meta(&dir).await;
+    let site = org_and_site(&meta).await;
+    let user = make_persisted_user(&meta, &site, "d@example.com").await;
+
+    let sub = DigestSubscription {
+        id: Ulid::new(),
+        user_id: user.id,
+        site_id: site.id,
+        frequency: DigestFrequency::Weekly,
+        enabled: true,
+        bounce_count: 0,
+        created_at: Utc::now(),
+    };
+    meta.upsert_digest_subscription(&sub).await.unwrap();
+
+    let got = meta
+        .get_digest_subscription(user.id, site.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(got.frequency, DigestFrequency::Weekly);
+    assert!(got.enabled);
+
+    // Upsert again with a new frequency keeps the (user, site) row unique.
+    let mut sub2 = sub.clone();
+    sub2.id = Ulid::new();
+    sub2.frequency = DigestFrequency::Both;
+    meta.upsert_digest_subscription(&sub2).await.unwrap();
+    let got2 = meta
+        .get_digest_subscription(user.id, site.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(got2.frequency, DigestFrequency::Both);
+
+    // Enabled list includes it.
+    assert_eq!(
+        meta.list_enabled_digest_subscriptions()
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // Delete unsubscribes.
+    meta.delete_digest_subscription(user.id, site.id)
+        .await
+        .unwrap();
+    assert!(meta
+        .get_digest_subscription(user.id, site.id)
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn digest_bounce_disables_after_threshold() {
+    let dir = tempfile::tempdir().unwrap();
+    let meta = open_meta(&dir).await;
+    let site = org_and_site(&meta).await;
+    let user = make_persisted_user(&meta, &site, "b@example.com").await;
+
+    let sub = DigestSubscription {
+        id: Ulid::new(),
+        user_id: user.id,
+        site_id: site.id,
+        frequency: DigestFrequency::Monthly,
+        enabled: true,
+        bounce_count: 0,
+        created_at: Utc::now(),
+    };
+    meta.upsert_digest_subscription(&sub).await.unwrap();
+
+    // Two bounces: still enabled.
+    meta.record_digest_bounce(sub.id, 3).await.unwrap();
+    meta.record_digest_bounce(sub.id, 3).await.unwrap();
+    assert_eq!(
+        meta.list_enabled_digest_subscriptions()
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // Third bounce crosses the threshold and disables.
+    meta.record_digest_bounce(sub.id, 3).await.unwrap();
+    assert!(meta
+        .list_enabled_digest_subscriptions()
+        .await
+        .unwrap()
+        .is_empty());
+}
