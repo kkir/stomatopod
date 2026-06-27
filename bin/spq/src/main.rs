@@ -4,10 +4,15 @@
 //! and LLM agents. Outputs JSON by default. Authenticates with a read-scoped
 //! API key (`rk_...`) from `STOMATOPOD_TOKEN` or
 //! `~/.config/stomatopod/credentials`.
+#![recursion_limit = "512"]
 
+mod alerts;
 mod annotations;
 mod client;
+mod goals;
 mod query;
+mod req;
+mod share;
 mod sites;
 mod skills;
 
@@ -51,6 +56,21 @@ enum Commands {
         #[command(subcommand)]
         cmd: annotations::AnnotationsCommand,
     },
+    /// Manage conversion goals.
+    Goals {
+        #[command(subcommand)]
+        cmd: goals::GoalsCommand,
+    },
+    /// Manage analytics alerts.
+    Alerts {
+        #[command(subcommand)]
+        cmd: alerts::AlertsCommand,
+    },
+    /// Manage read-only dashboard share links.
+    Share {
+        #[command(subcommand)]
+        cmd: share::ShareCommand,
+    },
     /// Print a machine-readable description of every command (for LLM agents).
     Describe,
     /// Manage Claude Code skills bundled with spq.
@@ -69,6 +89,9 @@ async fn main() -> anyhow::Result<()> {
         Commands::Query { cmd, human } => query::run(cmd, &client, *human).await,
         Commands::Sites { cmd } => sites::run(cmd, &client).await,
         Commands::Annotations { cmd } => annotations::run(cmd, &client).await,
+        Commands::Goals { cmd } => goals::run(cmd, &client).await,
+        Commands::Alerts { cmd } => alerts::run(cmd, &client).await,
+        Commands::Share { cmd } => share::run(cmd, &client).await,
         Commands::Describe => {
             println!("{}", serde_json::to_string_pretty(&describe())?);
             Ok(())
@@ -161,6 +184,32 @@ fn describe() -> serde_json::Value {
                 ]
             },
             {
+                "name": "query top-entry-pages",
+                "description": "Top entry (landing) pages by traffic.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--compare", "required": false, "note": "Flag: prior-period comparison." },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query top-exit-pages",
+                "description": "Top exit pages by traffic.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--compare", "required": false, "note": "Flag: prior-period comparison." },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
                 "name": "query events",
                 "description": "Custom event breakdown.",
                 "args": [
@@ -169,7 +218,8 @@ fn describe() -> serde_json::Value {
                     { "name": "--range", "default": "30d" },
                     { "name": "--from", "required": false },
                     { "name": "--to", "required": false },
-                    { "name": "--limit", "default": "20" }
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
                 ]
             },
             {
@@ -180,17 +230,34 @@ fn describe() -> serde_json::Value {
                     { "name": "--range", "default": "30d" },
                     { "name": "--from", "required": false },
                     { "name": "--to", "required": false },
-                    { "name": "--limit", "default": "20" }
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query utm",
+                "description": "Single-dimension UTM breakdown.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--dimension", "required": true, "note": "source|medium|campaign|term|content." },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--utm-source", "required": false },
+                    { "name": "--utm-medium", "required": false },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
                 ]
             },
             {
                 "name": "query retention",
-                "description": "Weekly retention cohort grid.",
+                "description": "Retention cohort grid.",
                 "args": [
                     { "name": "--site", "required": true },
                     { "name": "--range", "default": "90d" },
                     { "name": "--from", "required": false },
-                    { "name": "--to", "required": false }
+                    { "name": "--to", "required": false },
+                    { "name": "--granularity", "default": "week", "note": "week|month." }
                 ]
             },
             {
@@ -201,8 +268,95 @@ fn describe() -> serde_json::Value {
                     { "name": "--range", "default": "30d" },
                     { "name": "--from", "required": false },
                     { "name": "--to", "required": false },
-                    { "name": "--depth", "default": "3", "note": "Steps per sequence (2-10)." },
-                    { "name": "--limit", "default": "25" }
+                    { "name": "--steps", "default": "3", "note": "Steps per sequence (2-10). Alias: --depth." },
+                    { "name": "--limit", "default": "25" },
+                    { "name": "--start-url", "required": false, "note": "Only paths beginning at this URL." }
+                ]
+            },
+            {
+                "name": "query realtime",
+                "description": "Live visitors in the last few minutes.",
+                "args": [ { "name": "--site", "required": true } ]
+            },
+            {
+                "name": "query vitals",
+                "description": "Core Web Vitals (LCP/CLS/INP) percentiles.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--url", "required": false, "note": "Restrict to a single page path." },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query scroll",
+                "description": "Scroll-depth distribution.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--url", "required": false, "note": "Restrict to a single page path." },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query search",
+                "description": "Top site-search terms.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query revenue",
+                "description": "Revenue totals.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query revenue-breakdown",
+                "description": "Revenue split by a dimension.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--dimension", "required": true, "note": "referrer|country|utm_source." },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query experiments",
+                "description": "List A/B experiments and their results.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false }
+                ]
+            },
+            {
+                "name": "query experiment",
+                "description": "Detailed results for a single experiment.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--experiment", "required": true },
+                    { "name": "--goal", "required": false, "note": "Goal id to score variants against." },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false }
                 ]
             },
             {
@@ -219,7 +373,8 @@ fn describe() -> serde_json::Value {
                 "args": [
                     { "name": "--site", "required": true },
                     { "name": "--date", "required": true, "note": "YYYY-MM-DD." },
-                    { "name": "--text", "required": true }
+                    { "name": "--label", "required": true, "note": "Alias: --text." },
+                    { "name": "--note", "required": false }
                 ]
             },
             {
@@ -228,6 +383,85 @@ fn describe() -> serde_json::Value {
                 "args": [
                     { "name": "--site", "required": true },
                     { "name": "--id", "required": true }
+                ]
+            },
+            {
+                "name": "goals list",
+                "description": "List conversion goals for a site.",
+                "args": [ { "name": "--site", "required": true } ]
+            },
+            {
+                "name": "goals create",
+                "description": "Create a conversion goal (requires a write-capable key).",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--name", "required": true },
+                    { "name": "--event", "required": true, "note": "Custom event name." },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "goals delete",
+                "description": "Delete a conversion goal by id.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--goal", "required": true }
+                ]
+            },
+            {
+                "name": "alerts list",
+                "description": "List analytics alerts for a site.",
+                "args": [ { "name": "--site", "required": true } ]
+            },
+            {
+                "name": "alerts create",
+                "description": "Create an analytics alert (requires a write-capable key).",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--type", "required": true, "note": "e.g. traffic_spike, traffic_drop." },
+                    { "name": "--threshold", "required": true },
+                    { "name": "--window", "default": "60", "note": "Window in minutes." },
+                    { "name": "--channel", "required": true, "note": "Alert channel id." },
+                    { "name": "--goal-event", "required": false }
+                ]
+            },
+            {
+                "name": "alerts delete",
+                "description": "Delete an analytics alert by id.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--alert", "required": true }
+                ]
+            },
+            {
+                "name": "alerts toggle",
+                "description": "Enable or disable an analytics alert.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--alert", "required": true },
+                    { "name": "--enabled", "required": true, "note": "true|false." }
+                ]
+            },
+            {
+                "name": "share list",
+                "description": "List read-only dashboard share links.",
+                "args": [ { "name": "--site", "required": true } ]
+            },
+            {
+                "name": "share create",
+                "description": "Create a share link (requires a write-capable key).",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--label", "required": false },
+                    { "name": "--expires", "required": false, "note": "YYYY-MM-DD." }
+                ]
+            },
+            {
+                "name": "share revoke",
+                "description": "Revoke a share link by id.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--link", "required": true }
                 ]
             },
             {
