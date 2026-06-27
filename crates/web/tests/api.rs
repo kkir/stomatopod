@@ -153,9 +153,25 @@ fn build_templates() -> Environment<'static> {
     env
 }
 
+/// Test email transport: records every digest handed to it so assertions
+/// can inspect recipients and rendered bodies.
+#[derive(Clone, Default)]
+struct CapturingSender {
+    sent: Arc<std::sync::Mutex<Vec<stomatopod_web::digest::DigestEmail>>>,
+}
+
+#[async_trait::async_trait]
+impl stomatopod_web::digest::DigestSender for CapturingSender {
+    async fn send(&self, email: stomatopod_web::digest::DigestEmail) -> Result<(), String> {
+        self.sent.lock().unwrap().push(email);
+        Ok(())
+    }
+}
+
 struct TestCtx {
     state: Arc<AppState>,
     backend: Arc<EmbeddedBackend>,
+    digest_sink: CapturingSender,
     secret: String,
     _ingest_rx: tokio::sync::mpsc::Receiver<stomatopod_core::domain::event::Event>,
     _span_ingest_rx:
@@ -165,12 +181,18 @@ struct TestCtx {
 }
 
 async fn setup() -> TestCtx {
+    setup_with_flush(100, 3600).await
+}
+
+/// Like [`setup`] but with a tunable Parquet flush cadence so data-path
+/// tests can ingest events and have them land on disk within the test.
+async fn setup_with_flush(flush_rows: usize, flush_interval_s: u64) -> TestCtx {
     let dir = tempfile::tempdir().unwrap();
     let cfg = EmbeddedConfig {
         data_dir: dir.path().to_path_buf(),
         wal_fsync_interval_ms: 0,
-        parquet_flush_rows: 100,
-        parquet_flush_interval_s: 3600,
+        parquet_flush_rows: flush_rows,
+        parquet_flush_interval_s: flush_interval_s,
     };
     let backend = Arc::new(EmbeddedBackend::open(&cfg).await.unwrap());
 
@@ -186,6 +208,8 @@ async fn setup() -> TestCtx {
     let (ingest_tx, ingest_rx) = tokio::sync::mpsc::channel(256);
     let (span_ingest_tx, span_ingest_rx) = tokio::sync::mpsc::channel(256);
     let (alerts, alerts_rx) = stomatopod_web::alerts::AlertDispatcher::channel();
+
+    let digest_sink = CapturingSender::default();
 
     let state = Arc::new(AppState {
         backend: backend.clone(),
@@ -204,11 +228,13 @@ async fn setup() -> TestCtx {
         control_channels: DashMap::new(),
         control_seq: std::sync::atomic::AtomicU64::new(0),
         alerts,
+        digest_sender: Arc::new(digest_sink.clone()),
     });
 
     TestCtx {
         state,
         backend,
+        digest_sink,
         secret,
         _ingest_rx: ingest_rx,
         _span_ingest_rx: span_ingest_rx,
@@ -2642,4 +2668,395 @@ async fn dashboard_tier3_pages_render() {
         let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK, "{path} should render");
     }
+}
+
+// ============================================================================
+// Tier-4 API contract tests
+//
+// Assert the new analytics surfaces resolve and return their documented
+// top-level fields. Deep aggregation correctness is covered by the
+// store-level tier-4 tests; here we lock the HTTP contract.
+// ============================================================================
+
+#[tokio::test]
+async fn tier4_endpoints_return_expected_schema() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    // (path, expected top-level field that must be present)
+    let cases: &[(&str, &str)] = &[
+        ("vitals", "lcp"),
+        ("vitals/pages", "rows"),
+        ("scroll", "reached_50pct"),
+        ("scroll/pages", "rows"),
+        ("search", "rows"),
+        ("search/zero-results", "rows"),
+        ("search/timeseries", "buckets"),
+        ("revenue", "total_revenue"),
+        ("revenue/timeseries", "buckets"),
+        ("revenue/pages", "rows"),
+        ("revenue/breakdown?dimension=page", "rows"),
+        ("experiments", "experiments"),
+    ];
+
+    for (path, field) in cases {
+        let (status, json) = get_json(
+            ctx.state.clone(),
+            &format!("/api/v1/sites/{}/{path}", site.id),
+            &token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{path} should resolve, got {json}");
+        assert!(
+            json.get(*field).is_some(),
+            "{path} response missing `{field}`: {json}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn tier4_heatmap_endpoints_require_url_and_resolve() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    for path in ["heatmaps/clicks", "heatmaps/scroll"] {
+        let (status, json) = get_json(
+            ctx.state.clone(),
+            &format!("/api/v1/sites/{}/{path}?url=/landing", site.id),
+            &token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{path} should resolve, got {json}");
+    }
+}
+
+// ============================================================================
+// Share links
+// ============================================================================
+
+/// Build an unauthenticated GET against the public share surface.
+async fn public_get(state: Arc<AppState>, uri: &str) -> (StatusCode, serde_json::Value) {
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+    let resp = make_app(state).oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = body_bytes(resp).await;
+    let json = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, json)
+}
+
+#[tokio::test]
+async fn share_link_crud_and_public_access() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    // Create a link.
+    let (status, json) = send_json(
+        ctx.state.clone(),
+        "POST",
+        &format!("/api/v1/sites/{}/share-links", site.id),
+        &token,
+        Some(serde_json::json!({"label": "Client view"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "create, got {json}");
+    let share_token = json["token"].as_str().unwrap().to_string();
+    let link_id = json["id"].as_str().unwrap().to_string();
+    assert!(json["url"].as_str().unwrap().ends_with(&share_token));
+
+    // List shows it.
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/share-links", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["share_links"].as_array().unwrap().len(), 1);
+
+    // Public, unauthenticated access resolves and returns the pageviews schema.
+    let (status, json) = public_get(
+        ctx.state.clone(),
+        &format!("/share/{share_token}/api/pageviews"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "public pageviews, got {json}");
+    assert!(json.get("total_pageviews").is_some());
+
+    // The HTML shell renders with branding.
+    let req = Request::builder()
+        .uri(format!("/share/{share_token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    assert!(html.contains("Powered by Stomatopod"));
+
+    // Public top-N mirror.
+    let (status, json) = public_get(
+        ctx.state.clone(),
+        &format!("/share/{share_token}/api/top/pages"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(json.get("rows").is_some());
+
+    // Unknown top dimension → 404.
+    let (status, _) = public_get(
+        ctx.state.clone(),
+        &format!("/share/{share_token}/api/top/secrets"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Revoke → token no longer resolves (404, not 403 — don't leak existence).
+    let (status, _) = send_json(
+        ctx.state.clone(),
+        "DELETE",
+        &format!("/api/v1/sites/{}/share-links/{link_id}", site.id),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = public_get(
+        ctx.state.clone(),
+        &format!("/share/{share_token}/api/pageviews"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "revoked token must 404");
+}
+
+#[tokio::test]
+async fn expired_share_link_returns_gone() {
+    use stomatopod_core::domain::share_link::ShareLink;
+    let ctx = setup().await;
+    let (site, _token) = site_and_token(&ctx).await;
+
+    let link = ShareLink {
+        id: Ulid::new(),
+        site_id: site.id,
+        token: "expired-token".into(),
+        label: None,
+        expires_at: Some(Utc::now() - chrono::Duration::days(1)),
+        created_by: "u".into(),
+        created_at: Utc::now() - chrono::Duration::days(8),
+    };
+    ctx.backend.meta.create_share_link(&link).await.unwrap();
+
+    let (status, json) = public_get(ctx.state.clone(), "/share/expired-token/api/pageviews").await;
+    assert_eq!(status, StatusCode::GONE, "expired token, got {json}");
+}
+
+#[tokio::test]
+async fn unknown_share_token_is_not_found() {
+    let ctx = setup().await;
+    let (status, _) = public_get(ctx.state.clone(), "/share/does-not-exist/api/pageviews").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+// ============================================================================
+// Email digest
+// ============================================================================
+
+/// Create org + persisted user + site, returning the site and a session
+/// token whose principal resolves to that real user (so digest endpoints
+/// can identify the current user).
+async fn site_user_and_token(ctx: &TestCtx) -> (Site, stomatopod_core::domain::org::User) {
+    use stomatopod_core::domain::org::{User, UserRole};
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let user = User {
+        id: Ulid::new(),
+        org_id: org.id,
+        email: format!("user-{}@example.com", Ulid::new()),
+        password_hash: "x".into(),
+        role: UserRole::Owner,
+        created_at: Utc::now(),
+    };
+    ctx.backend.meta.create_user(&user).await.unwrap();
+    (site, user)
+}
+
+#[tokio::test]
+async fn digest_subscription_crud_and_test_send() {
+    let ctx = setup().await;
+    let (site, user) = site_user_and_token(&ctx).await;
+    let token = sign_session(&ctx.secret, &user.id.to_string());
+
+    // No subscription initially.
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/digest-subscription", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["subscription"].is_null());
+
+    // Bad frequency rejected.
+    let (status, _) = send_json(
+        ctx.state.clone(),
+        "PUT",
+        &format!("/api/v1/sites/{}/digest-subscription", site.id),
+        &token,
+        Some(serde_json::json!({"frequency": "hourly"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Create.
+    let (status, json) = send_json(
+        ctx.state.clone(),
+        "PUT",
+        &format!("/api/v1/sites/{}/digest-subscription", site.id),
+        &token,
+        Some(serde_json::json!({"frequency": "weekly"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "create sub, got {json}");
+    assert_eq!(json["frequency"], "weekly");
+
+    // Test-send delivers one email to the user's address.
+    let (status, _) = send_json(
+        ctx.state.clone(),
+        "POST",
+        &format!("/api/v1/sites/{}/digest-subscription/test", site.id),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let sent = ctx.digest_sink.sent.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1, "one digest captured");
+    assert_eq!(sent[0].to, user.email);
+    assert!(sent[0].subject.contains(&site.domain));
+    assert!(sent[0].html.contains("Powered by Stomatopod"));
+
+    // Delete unsubscribes.
+    let (status, _) = send_json(
+        ctx.state.clone(),
+        "DELETE",
+        &format!("/api/v1/sites/{}/digest-subscription", site.id),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/digest-subscription", site.id),
+        &token,
+    )
+    .await;
+    assert!(json["subscription"].is_null());
+}
+
+#[tokio::test]
+async fn digest_scheduler_dispatches_weekly_to_subscribers() {
+    use stomatopod_core::{
+        domain::digest::{DigestFrequency, DigestSubscription},
+        traits::{MetaStore, StorageBackend},
+    };
+    let ctx = setup().await;
+    let (site, user) = site_user_and_token(&ctx).await;
+
+    let sub = DigestSubscription {
+        id: Ulid::new(),
+        user_id: user.id,
+        site_id: site.id,
+        frequency: DigestFrequency::Weekly,
+        enabled: true,
+        bounce_count: 0,
+        created_at: Utc::now(),
+    };
+    ctx.backend
+        .meta
+        .upsert_digest_subscription(&sub)
+        .await
+        .unwrap();
+
+    let sink = CapturingSender::default();
+    let meta: Arc<dyn MetaStore> = ctx.backend.clone();
+    let backend: Arc<dyn StorageBackend> = ctx.backend.clone();
+    let sender: Arc<dyn stomatopod_web::digest::DigestSender> = Arc::new(sink.clone());
+
+    // Weekly cadence reaches the weekly subscriber.
+    let n = stomatopod_web::digest::dispatch_cadence(
+        &meta,
+        &backend,
+        &sender,
+        "http://localhost:8080",
+        &ctx.secret,
+        DigestFrequency::Weekly,
+    )
+    .await;
+    assert_eq!(n, 1, "one weekly digest dispatched");
+    let sent = sink.sent.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].to, user.email);
+
+    // Monthly cadence skips a weekly-only subscriber.
+    let n = stomatopod_web::digest::dispatch_cadence(
+        &meta,
+        &backend,
+        &sender,
+        "http://localhost:8080",
+        &ctx.secret,
+        DigestFrequency::Monthly,
+    )
+    .await;
+    assert_eq!(n, 0, "monthly cadence skips weekly-only subscriber");
+}
+
+#[tokio::test]
+async fn digest_unsubscribe_token_disables_subscription() {
+    use stomatopod_core::domain::digest::{DigestFrequency, DigestSubscription};
+    let ctx = setup().await;
+    let (site, user) = site_user_and_token(&ctx).await;
+
+    let sub = DigestSubscription {
+        id: Ulid::new(),
+        user_id: user.id,
+        site_id: site.id,
+        frequency: DigestFrequency::Both,
+        enabled: true,
+        bounce_count: 0,
+        created_at: Utc::now(),
+    };
+    ctx.backend
+        .meta
+        .upsert_digest_subscription(&sub)
+        .await
+        .unwrap();
+
+    let token = stomatopod_web::digest::unsubscribe_token(&ctx.secret, sub.id);
+    let req = Request::builder()
+        .uri(format!("/digest/unsubscribe/{token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    assert!(html.contains("Unsubscribed"));
+
+    // Subscription is now disabled.
+    let sub = ctx
+        .backend
+        .meta
+        .get_digest_subscription(user.id, site.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!sub.enabled);
+
+    // A garbage token is rejected.
+    let req = Request::builder()
+        .uri("/digest/unsubscribe/not-a-valid-token")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }

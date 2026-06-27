@@ -1556,8 +1556,12 @@ pub async fn revenue_pages(
         Err(resp) => return resp,
     };
     let currency = params.currency.as_deref().unwrap_or("USD");
-    let report =
-        RevenueBreakdown::from_rows(&rows, RevenueDimension::Page, currency, params.limit_or(20) as usize);
+    let report = RevenueBreakdown::from_rows(
+        &rows,
+        RevenueDimension::Page,
+        currency,
+        params.limit_or(20) as usize,
+    );
     Json(serde_json::to_value(report).unwrap()).into_response()
 }
 
@@ -1591,7 +1595,8 @@ pub async fn revenue_breakdown(
         Err(resp) => return resp,
     };
     let currency = params.currency.as_deref().unwrap_or("USD");
-    let report = RevenueBreakdown::from_rows(&rows, dimension, currency, params.limit_or(20) as usize);
+    let report =
+        RevenueBreakdown::from_rows(&rows, dimension, currency, params.limit_or(20) as usize);
     Json(serde_json::to_value(report).unwrap()).into_response()
 }
 
@@ -1633,6 +1638,7 @@ pub async fn experiment_result(
 
 // ---- Heatmaps ----
 
+#[allow(clippy::result_large_err)]
 fn require_url(params: &Tier4Params) -> Result<&str, Response> {
     params.url.as_deref().ok_or_else(|| {
         (

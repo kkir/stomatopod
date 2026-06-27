@@ -104,7 +104,7 @@ pub struct VitalStat {
 }
 
 impl VitalStat {
-    fn from_samples(values: &mut Vec<f64>, good: u64) -> Self {
+    fn from_samples(values: &mut [f64], good: u64) -> Self {
         values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let n = values.len() as u64;
         VitalStat {
@@ -413,12 +413,9 @@ impl SearchReport {
         let mut total = 0u64;
         for r in rows {
             let Some(q) = search_query(r) else { continue };
-            match r.prop_f64("results_count") {
-                Some(c) if c == 0.0 => {
-                    *counts.entry(q).or_default() += 1;
-                    total += 1;
-                }
-                _ => {}
+            if r.prop_f64("results_count") == Some(0.0) {
+                *counts.entry(q).or_default() += 1;
+                total += 1;
             }
         }
         let mut rows: Vec<SearchRow> = counts
@@ -987,7 +984,11 @@ impl ClickHeatmap {
             .into_iter()
             .map(|(element, count)| ClickElementRow { element, count })
             .collect();
-        elements.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.element.cmp(&b.element)));
+        elements.sort_by(|a, b| {
+            b.count
+                .cmp(&a.count)
+                .then_with(|| a.element.cmp(&b.element))
+        });
         elements.truncate(20);
         ClickHeatmap {
             url: url.to_string(),
@@ -1120,9 +1121,21 @@ mod tests {
     fn scroll_milestones_per_session_max() {
         // s1 reaches 75, s2 reaches 25.
         let rows = vec![
-            row("__scroll__", "s1", serde_json::json!({"depth": 25, "url": "/a"})),
-            row("__scroll__", "s1", serde_json::json!({"depth": 75, "url": "/a"})),
-            row("__scroll__", "s2", serde_json::json!({"depth": 25, "url": "/a"})),
+            row(
+                "__scroll__",
+                "s1",
+                serde_json::json!({"depth": 25, "url": "/a"}),
+            ),
+            row(
+                "__scroll__",
+                "s1",
+                serde_json::json!({"depth": 75, "url": "/a"}),
+            ),
+            row(
+                "__scroll__",
+                "s2",
+                serde_json::json!({"depth": 25, "url": "/a"}),
+            ),
         ];
         let r = ScrollReport::from_rows(&rows, Some("/a"));
         assert_eq!(r.sessions_with_scroll_data, 2);
@@ -1148,8 +1161,16 @@ mod tests {
     #[test]
     fn search_zero_results_only_counts_zero() {
         let rows = vec![
-            row("__search__", "s1", serde_json::json!({"query": "x", "results_count": 0})),
-            row("__search__", "s2", serde_json::json!({"query": "y", "results_count": 5})),
+            row(
+                "__search__",
+                "s1",
+                serde_json::json!({"query": "x", "results_count": 0}),
+            ),
+            row(
+                "__search__",
+                "s2",
+                serde_json::json!({"query": "y", "results_count": 5}),
+            ),
         ];
         let r = SearchReport::zero_results(&rows, 10);
         assert_eq!(r.total_searches, 1);
@@ -1159,10 +1180,22 @@ mod tests {
     #[test]
     fn revenue_summary_dedupes_orders() {
         let rows = vec![
-            row("purchase", "s1", serde_json::json!({"revenue": 50.0, "order_id": "o1"})),
+            row(
+                "purchase",
+                "s1",
+                serde_json::json!({"revenue": 50.0, "order_id": "o1"}),
+            ),
             // duplicate of o1 — must not double count.
-            row("purchase", "s1", serde_json::json!({"revenue": 50.0, "order_id": "o1"})),
-            row("purchase", "s2", serde_json::json!({"revenue": 30.0, "order_id": "o2"})),
+            row(
+                "purchase",
+                "s1",
+                serde_json::json!({"revenue": 50.0, "order_id": "o1"}),
+            ),
+            row(
+                "purchase",
+                "s2",
+                serde_json::json!({"revenue": 30.0, "order_id": "o2"}),
+            ),
             // no order_id — counted independently.
             row("purchase", "s3", serde_json::json!({"revenue": 20.0})),
         ];
@@ -1193,8 +1226,16 @@ mod tests {
     #[test]
     fn experiment_list_detects_variants() {
         let rows = vec![
-            row("exp", "s1", serde_json::json!({"experiment": "cta", "variant": "A"})),
-            row("exp", "s2", serde_json::json!({"experiment": "cta", "variant": "B"})),
+            row(
+                "exp",
+                "s1",
+                serde_json::json!({"experiment": "cta", "variant": "A"}),
+            ),
+            row(
+                "exp",
+                "s2",
+                serde_json::json!({"experiment": "cta", "variant": "B"}),
+            ),
         ];
         let l = ExperimentList::from_rows(&rows);
         assert_eq!(l.experiments.len(), 1);
@@ -1243,8 +1284,16 @@ mod tests {
     #[test]
     fn experiment_no_goal_shows_exposures_only() {
         let rows = vec![
-            row("exp", "s1", serde_json::json!({"experiment": "cta", "variant": "A"})),
-            row("exp", "s2", serde_json::json!({"experiment": "cta", "variant": "B"})),
+            row(
+                "exp",
+                "s1",
+                serde_json::json!({"experiment": "cta", "variant": "A"}),
+            ),
+            row(
+                "exp",
+                "s2",
+                serde_json::json!({"experiment": "cta", "variant": "B"}),
+            ),
         ];
         let r = ExperimentResult::from_rows(&rows, "cta", None);
         assert!(r.winner.is_none());
@@ -1255,9 +1304,21 @@ mod tests {
     #[test]
     fn click_heatmap_buckets_points() {
         let rows = vec![
-            row("__click__", "s1", serde_json::json!({"x": 51, "y": 33, "url": "/p", "element": "BUTTON#buy"})),
-            row("__click__", "s2", serde_json::json!({"x": 50, "y": 30, "url": "/p", "element": "BUTTON#buy"})),
-            row("__click__", "s3", serde_json::json!({"x": 10, "y": 90, "url": "/other"})),
+            row(
+                "__click__",
+                "s1",
+                serde_json::json!({"x": 51, "y": 33, "url": "/p", "element": "BUTTON#buy"}),
+            ),
+            row(
+                "__click__",
+                "s2",
+                serde_json::json!({"x": 50, "y": 30, "url": "/p", "element": "BUTTON#buy"}),
+            ),
+            row(
+                "__click__",
+                "s3",
+                serde_json::json!({"x": 10, "y": 90, "url": "/other"}),
+            ),
         ];
         let h = ClickHeatmap::from_rows(&rows, "/p", 2, 5);
         assert_eq!(h.total_clicks, 2);
@@ -1271,8 +1332,16 @@ mod tests {
     #[test]
     fn scroll_heatmap_distribution() {
         let rows = vec![
-            row("__scroll__", "s1", serde_json::json!({"depth": 50, "url": "/p"})),
-            row("__scroll__", "s2", serde_json::json!({"depth": 100, "url": "/p"})),
+            row(
+                "__scroll__",
+                "s1",
+                serde_json::json!({"depth": 50, "url": "/p"}),
+            ),
+            row(
+                "__scroll__",
+                "s2",
+                serde_json::json!({"depth": 100, "url": "/p"}),
+            ),
         ];
         let h = ScrollHeatmap::from_rows(&rows, "/p");
         assert_eq!(h.sessions, 2);

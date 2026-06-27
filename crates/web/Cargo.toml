@@ -25,6 +25,7 @@ argon2 = { workspace = true }
 cookie = { workspace = true }
 blake3 = { workspace = true }
 hex = "0.4"
+getrandom = "0.2"
 dashmap = "6"
 pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -34,6 +35,7 @@ async-trait = { workspace = true }
 
 [dev-dependencies]
 stomatopod-store = { path = "../store" }
+async-trait = { workspace = true }
 tokio = { workspace = true }
 tower = { version = "0.4", features = ["util"] }
 tempfile = { workspace = true }

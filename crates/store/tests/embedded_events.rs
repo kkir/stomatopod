@@ -1026,8 +1026,22 @@ async fn tier4_event_props_roundtrip_and_name_filter() {
     let now = Utc::now();
     backend
         .ingest_events(vec![
-            custom_event(site_id, now, "__vital__", sid(1), "/a", serde_json::json!({"metric":"LCP","value":1200,"rating":"good","url":"/a"})),
-            custom_event(site_id, now, "__scroll__", sid(1), "/a", serde_json::json!({"depth":50,"url":"/a"})),
+            custom_event(
+                site_id,
+                now,
+                "__vital__",
+                sid(1),
+                "/a",
+                serde_json::json!({"metric":"LCP","value":1200,"rating":"good","url":"/a"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "__scroll__",
+                sid(1),
+                "/a",
+                serde_json::json!({"depth":50,"url":"/a"}),
+            ),
         ])
         .await
         .unwrap();
@@ -1084,9 +1098,30 @@ async fn tier4_scroll_engagement_per_session_max() {
     let now = Utc::now();
     backend
         .ingest_events(vec![
-            custom_event(site_id, now, "__scroll__", sid(1), "/blog", serde_json::json!({"depth":25,"url":"/blog"})),
-            custom_event(site_id, now, "__scroll__", sid(1), "/blog", serde_json::json!({"depth":75,"url":"/blog"})),
-            custom_event(site_id, now, "__scroll__", sid(2), "/blog", serde_json::json!({"depth":25,"url":"/blog"})),
+            custom_event(
+                site_id,
+                now,
+                "__scroll__",
+                sid(1),
+                "/blog",
+                serde_json::json!({"depth":25,"url":"/blog"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "__scroll__",
+                sid(1),
+                "/blog",
+                serde_json::json!({"depth":75,"url":"/blog"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "__scroll__",
+                sid(2),
+                "/blog",
+                serde_json::json!({"depth":25,"url":"/blog"}),
+            ),
         ])
         .await
         .unwrap();
@@ -1112,10 +1147,31 @@ async fn tier4_revenue_summary_and_breakdown() {
     let now = Utc::now();
     backend
         .ingest_events(vec![
-            custom_event(site_id, now, "purchase", sid(1), "/checkout", serde_json::json!({"revenue":50.0,"order_id":"o1"})),
+            custom_event(
+                site_id,
+                now,
+                "purchase",
+                sid(1),
+                "/checkout",
+                serde_json::json!({"revenue":50.0,"order_id":"o1"}),
+            ),
             // Duplicate order — must not double-count.
-            custom_event(site_id, now, "purchase", sid(1), "/checkout", serde_json::json!({"revenue":50.0,"order_id":"o1"})),
-            custom_event(site_id, now, "purchase", sid(2), "/checkout", serde_json::json!({"revenue":30.0,"order_id":"o2"})),
+            custom_event(
+                site_id,
+                now,
+                "purchase",
+                sid(1),
+                "/checkout",
+                serde_json::json!({"revenue":50.0,"order_id":"o1"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "purchase",
+                sid(2),
+                "/checkout",
+                serde_json::json!({"revenue":30.0,"order_id":"o2"}),
+            ),
         ])
         .await
         .unwrap();
@@ -1143,12 +1199,33 @@ async fn tier4_experiment_conversion_winner() {
     // Variant A: 2 exposures, 0 conversions; Variant B: 2 exposures, 2 conversions.
     for i in 0..2u8 {
         let s = sid(10 + i);
-        events.push(custom_event(site_id, now, "experiment_viewed", s, "/", serde_json::json!({"experiment":"cta","variant":"A"})));
+        events.push(custom_event(
+            site_id,
+            now,
+            "experiment_viewed",
+            s,
+            "/",
+            serde_json::json!({"experiment":"cta","variant":"A"}),
+        ));
     }
     for i in 0..2u8 {
         let s = sid(20 + i);
-        events.push(custom_event(site_id, now, "experiment_viewed", s, "/", serde_json::json!({"experiment":"cta","variant":"B"})));
-        events.push(custom_event(site_id, now + chrono::Duration::seconds(5), "signup", s, "/", serde_json::json!({})));
+        events.push(custom_event(
+            site_id,
+            now,
+            "experiment_viewed",
+            s,
+            "/",
+            serde_json::json!({"experiment":"cta","variant":"B"}),
+        ));
+        events.push(custom_event(
+            site_id,
+            now + chrono::Duration::seconds(5),
+            "signup",
+            s,
+            "/",
+            serde_json::json!({}),
+        ));
     }
     backend.ingest_events(events).await.unwrap();
     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -1174,11 +1251,46 @@ async fn tier4_search_and_click_heatmap() {
     let now = Utc::now();
     backend
         .ingest_events(vec![
-            custom_event(site_id, now, "__search__", sid(1), "/search", serde_json::json!({"query":"pricing"})),
-            custom_event(site_id, now, "__search__", sid(2), "/search", serde_json::json!({"query":"pricing"})),
-            custom_event(site_id, now, "__search__", sid(3), "/search", serde_json::json!({"query":"docs"})),
-            custom_event(site_id, now, "__click__", sid(1), "/p", serde_json::json!({"x":50,"y":30,"url":"/p","element":"BUTTON#buy"})),
-            custom_event(site_id, now, "__click__", sid(2), "/p", serde_json::json!({"x":51,"y":31,"url":"/p","element":"BUTTON#buy"})),
+            custom_event(
+                site_id,
+                now,
+                "__search__",
+                sid(1),
+                "/search",
+                serde_json::json!({"query":"pricing"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "__search__",
+                sid(2),
+                "/search",
+                serde_json::json!({"query":"pricing"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "__search__",
+                sid(3),
+                "/search",
+                serde_json::json!({"query":"docs"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "__click__",
+                sid(1),
+                "/p",
+                serde_json::json!({"x":50,"y":30,"url":"/p","element":"BUTTON#buy"}),
+            ),
+            custom_event(
+                site_id,
+                now,
+                "__click__",
+                sid(2),
+                "/p",
+                serde_json::json!({"x":51,"y":31,"url":"/p","element":"BUTTON#buy"}),
+            ),
         ])
         .await
         .unwrap();

@@ -12,10 +12,22 @@ port = 8080
 # tls_cert = "/etc/ssl/certs/server.crt"
 # tls_key  = "/etc/ssl/private/server.key"
 
+# Public base URL used to build share-link and email-digest URLs.
+# No trailing slash. Defaults to http://localhost:8080.
+# base_url = "https://analytics.example.com"
+
 # Authentication.  secret_key is required and has no default.
 [auth]
 secret_key = ""          # REQUIRED — set a long random string
 session_ttl_s = 2592000 # 30 days
+
+# Email digest delivery.  With provider = "none" (default) digests are
+# rendered and logged but never sent, so the scheduler is side-effect free
+# until you wire up a transactional provider.
+[email]
+provider = "none"        # none | smtp | postmark | resend
+# api_key = "..."
+from = "analytics@localhost"
 
 # Storage backend.  Only "embedded" is currently implemented.
 [storage]

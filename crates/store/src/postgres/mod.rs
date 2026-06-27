@@ -23,11 +23,13 @@ use stomatopod_core::{
         analytics_alert::{AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind},
         annotation::Annotation,
         api_key::{ApiKey, ApiKeyScope},
+        digest::{DigestFrequency, DigestSubscription},
         event::Event,
         goal::Goal,
         incident::{Incident, IncidentStatus, IncidentTrigger},
         org::{Funnel, Organization, Plan, User, UserRole},
         policy::Policy,
+        share_link::ShareLink,
         site::Site,
     },
     error::StoreError,
@@ -1042,6 +1044,17 @@ impl MetaStore for PostgresBackend {
         row.map(row_to_user).transpose()
     }
 
+    async fn get_user(&self, id: Ulid) -> Result<Option<User>, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, org_id, email, password_hash, role, created_at FROM users WHERE id = $1",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        row.map(row_to_user).transpose()
+    }
+
     async fn create_funnel(&self, funnel: &Funnel) -> Result<(), StoreError> {
         sqlx::query(
             "INSERT INTO funnels (id, site_id, name, definition, created_at) \
@@ -1307,6 +1320,169 @@ impl MetaStore for PostgresBackend {
         .await
         .map_err(StoreError::db)?;
         row.map(row_to_alert_fire).transpose()
+    }
+
+    // ---- Share links ----
+    async fn create_share_link(&self, link: &ShareLink) -> Result<(), StoreError> {
+        sqlx::query(
+            "INSERT INTO share_links (id, site_id, token, label, expires_at, created_by, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(link.id.to_string())
+        .bind(link.site_id.to_string())
+        .bind(&link.token)
+        .bind(&link.label)
+        .bind(link.expires_at)
+        .bind(&link.created_by)
+        .bind(link.created_at)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    async fn list_share_links(&self, site_id: Ulid) -> Result<Vec<ShareLink>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT id, site_id, token, label, expires_at, created_by, created_at FROM share_links \
+             WHERE site_id = $1 ORDER BY created_at DESC",
+        )
+        .bind(site_id.to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        rows.into_iter().map(row_to_share_link).collect()
+    }
+
+    async fn get_share_link(&self, id: Ulid) -> Result<Option<ShareLink>, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, site_id, token, label, expires_at, created_by, created_at \
+             FROM share_links WHERE id = $1",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        row.map(row_to_share_link).transpose()
+    }
+
+    async fn get_share_link_by_token(&self, token: &str) -> Result<Option<ShareLink>, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, site_id, token, label, expires_at, created_by, created_at \
+             FROM share_links WHERE token = $1",
+        )
+        .bind(token)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        row.map(row_to_share_link).transpose()
+    }
+
+    async fn update_share_link(
+        &self,
+        id: Ulid,
+        label: Option<String>,
+        expires_at: Option<DateTime<Utc>>,
+    ) -> Result<(), StoreError> {
+        sqlx::query("UPDATE share_links SET label = $2, expires_at = $3 WHERE id = $1")
+            .bind(id.to_string())
+            .bind(label)
+            .bind(expires_at)
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    async fn delete_share_link(&self, id: Ulid) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM share_links WHERE id = $1")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    // ---- Email digest subscriptions ----
+    async fn upsert_digest_subscription(&self, sub: &DigestSubscription) -> Result<(), StoreError> {
+        sqlx::query(
+            "INSERT INTO digest_subscriptions \
+                (id, user_id, site_id, frequency, enabled, bounce_count, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) \
+             ON CONFLICT (user_id, site_id) DO UPDATE SET \
+                frequency = EXCLUDED.frequency, \
+                enabled = EXCLUDED.enabled, \
+                bounce_count = EXCLUDED.bounce_count",
+        )
+        .bind(sub.id.to_string())
+        .bind(sub.user_id.to_string())
+        .bind(sub.site_id.to_string())
+        .bind(sub.frequency.as_str())
+        .bind(sub.enabled)
+        .bind(sub.bounce_count as i64)
+        .bind(sub.created_at)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    async fn get_digest_subscription(
+        &self,
+        user_id: Ulid,
+        site_id: Ulid,
+    ) -> Result<Option<DigestSubscription>, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, user_id, site_id, frequency, enabled, bounce_count, created_at \
+             FROM digest_subscriptions WHERE user_id = $1 AND site_id = $2",
+        )
+        .bind(user_id.to_string())
+        .bind(site_id.to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        row.map(row_to_digest_sub).transpose()
+    }
+
+    async fn delete_digest_subscription(
+        &self,
+        user_id: Ulid,
+        site_id: Ulid,
+    ) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM digest_subscriptions WHERE user_id = $1 AND site_id = $2")
+            .bind(user_id.to_string())
+            .bind(site_id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        Ok(())
+    }
+
+    async fn list_enabled_digest_subscriptions(
+        &self,
+    ) -> Result<Vec<DigestSubscription>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT id, user_id, site_id, frequency, enabled, bounce_count, created_at \
+             FROM digest_subscriptions WHERE enabled = TRUE ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        rows.into_iter().map(row_to_digest_sub).collect()
+    }
+
+    async fn record_digest_bounce(&self, id: Ulid, disable_at: u32) -> Result<(), StoreError> {
+        sqlx::query(
+            "UPDATE digest_subscriptions \
+             SET bounce_count = bounce_count + 1, \
+                 enabled = CASE WHEN bounce_count + 1 >= $2 THEN FALSE ELSE enabled END \
+             WHERE id = $1",
+        )
+        .bind(id.to_string())
+        .bind(disable_at as i64)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        Ok(())
     }
 
     async fn upsert_agent(&self, agent: &Agent) -> Result<(), StoreError> {
@@ -1874,6 +2050,37 @@ fn row_to_alert_fire(row: sqlx::postgres::PgRow) -> Result<AnalyticsAlertFire, S
     })
 }
 
+fn row_to_share_link(row: sqlx::postgres::PgRow) -> Result<ShareLink, StoreError> {
+    let id: String = row.try_get("id").map_err(StoreError::db)?;
+    let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
+    Ok(ShareLink {
+        id: parse_ulid(&id),
+        site_id: parse_ulid(&site_id),
+        token: row.try_get("token").map_err(StoreError::db)?,
+        label: row.try_get("label").map_err(StoreError::db)?,
+        expires_at: row.try_get("expires_at").map_err(StoreError::db)?,
+        created_by: row.try_get("created_by").map_err(StoreError::db)?,
+        created_at: row.try_get("created_at").map_err(StoreError::db)?,
+    })
+}
+
+fn row_to_digest_sub(row: sqlx::postgres::PgRow) -> Result<DigestSubscription, StoreError> {
+    let id: String = row.try_get("id").map_err(StoreError::db)?;
+    let user_id: String = row.try_get("user_id").map_err(StoreError::db)?;
+    let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
+    let freq: String = row.try_get("frequency").map_err(StoreError::db)?;
+    let bounce_count: i64 = row.try_get("bounce_count").map_err(StoreError::db)?;
+    Ok(DigestSubscription {
+        id: parse_ulid(&id),
+        user_id: parse_ulid(&user_id),
+        site_id: parse_ulid(&site_id),
+        frequency: DigestFrequency::from_str(&freq).unwrap_or(DigestFrequency::Weekly),
+        enabled: row.try_get("enabled").map_err(StoreError::db)?,
+        bounce_count: bounce_count.max(0) as u32,
+        created_at: row.try_get("created_at").map_err(StoreError::db)?,
+    })
+}
+
 fn row_to_agent(row: sqlx::postgres::PgRow) -> Result<Agent, StoreError> {
     let id: String = row.try_get("id").map_err(StoreError::db)?;
     let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
@@ -2015,7 +2222,7 @@ fn parse_incident_status(s: &str) -> IncidentStatus {
 }
 
 mod ddl {
-    pub fn all_statements() -> [&'static str; 14] {
+    pub fn all_statements() -> [&'static str; 16] {
         [
             ORGS_DDL,
             SITES_DDL,
@@ -2031,6 +2238,8 @@ mod ddl {
             ANNOTATIONS_DDL,
             ANALYTICS_ALERTS_DDL,
             ANALYTICS_ALERT_FIRES_DDL,
+            SHARE_LINKS_DDL,
+            DIGEST_SUBSCRIPTIONS_DDL,
         ]
     }
 
@@ -2195,6 +2404,31 @@ mod ddl {
             alert_id    TEXT NOT NULL REFERENCES analytics_alerts(id),
             fired_at    TIMESTAMPTZ NOT NULL,
             payload     TEXT NOT NULL
+        )
+    "#;
+
+    const SHARE_LINKS_DDL: &str = r#"
+        CREATE TABLE IF NOT EXISTS share_links (
+            id          TEXT PRIMARY KEY,
+            site_id     TEXT NOT NULL REFERENCES sites(id),
+            token       TEXT UNIQUE NOT NULL,
+            label       TEXT,
+            expires_at  TIMESTAMPTZ,
+            created_by  TEXT NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL
+        )
+    "#;
+
+    const DIGEST_SUBSCRIPTIONS_DDL: &str = r#"
+        CREATE TABLE IF NOT EXISTS digest_subscriptions (
+            id           TEXT PRIMARY KEY,
+            user_id      TEXT NOT NULL REFERENCES users(id),
+            site_id      TEXT NOT NULL REFERENCES sites(id),
+            frequency    TEXT NOT NULL,
+            enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+            bounce_count BIGINT NOT NULL DEFAULT 0,
+            created_at   TIMESTAMPTZ NOT NULL,
+            UNIQUE (user_id, site_id)
         )
     "#;
 

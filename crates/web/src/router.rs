@@ -13,8 +13,8 @@ use crate::{
         cors::ingest_cors,
     },
     routes::{
-        agents_dashboard, analytics, api, api_keys, auth, dashboard, events, funnels, insights,
-        partials, sentinel, sites, spans,
+        agents_dashboard, analytics, api, api_keys, auth, dashboard, digest, events, funnels,
+        insights, partials, sentinel, share_links, sites, spans,
     },
     state::AppState,
 };
@@ -168,10 +168,47 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/api/v1/sites/:site/heatmaps/scroll",
             get(analytics::heatmap_scroll),
         )
+        // ---- Share links (CRUD) ----
+        .route(
+            "/api/v1/sites/:site/share-links",
+            get(share_links::list_share_links).post(share_links::create_share_link),
+        )
+        .route(
+            "/api/v1/sites/:site/share-links/:id",
+            axum::routing::patch(share_links::patch_share_link)
+                .delete(share_links::delete_share_link),
+        )
+        // ---- Email digest subscription ----
+        .route(
+            "/api/v1/sites/:site/digest-subscription",
+            get(digest::get_subscription)
+                .put(digest::put_subscription)
+                .delete(digest::delete_subscription),
+        )
+        .route(
+            "/api/v1/sites/:site/digest-subscription/test",
+            post(digest::send_test),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             require_api_auth,
         ));
+
+    // Public, unauthenticated surfaces: token-scoped share dashboards and
+    // one-click digest unsubscribe. No auth middleware.
+    let public_share_routes = Router::new()
+        .route("/share/:token", get(share_links::public_page))
+        .route(
+            "/share/:token/api/pageviews",
+            get(share_links::public_pageviews),
+        )
+        .route(
+            "/share/:token/api/top/:dimension",
+            get(share_links::public_top),
+        )
+        .route("/share/:token/api/events", get(share_links::public_events))
+        .route("/share/:token/api/goals", get(share_links::public_goals))
+        .route("/digest/unsubscribe/:token", get(digest::unsubscribe));
 
     // Auth routes (no auth required)
     let auth_routes = Router::new()
@@ -321,6 +358,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(span_ingest_routes)
         .merge(key_ingest_routes)
         .merge(analytics_routes)
+        .merge(public_share_routes)
         .merge(sentinel_control)
         .merge(auth_routes)
         .merge(root_redirect)

@@ -8,10 +8,12 @@ use crate::{
         analytics_alert::{AnalyticsAlert, AnalyticsAlertFire},
         annotation::Annotation,
         api_key::ApiKey,
+        digest::DigestSubscription,
         goal::Goal,
         incident::{Incident, IncidentStatus},
         org::{Funnel, Organization, User},
         policy::Policy,
+        share_link::ShareLink,
         site::Site,
     },
     error::StoreError,
@@ -179,6 +181,7 @@ pub trait MetaStore: Send + Sync + 'static {
     // ---- Users ----
     async fn create_user(&self, user: &User) -> Result<(), StoreError>;
     async fn get_user_by_email(&self, email: &str) -> Result<Option<User>, StoreError>;
+    async fn get_user(&self, id: Ulid) -> Result<Option<User>, StoreError>;
 
     // ---- Funnels ----
     async fn create_funnel(&self, funnel: &Funnel) -> Result<(), StoreError>;
@@ -223,6 +226,43 @@ pub trait MetaStore: Send + Sync + 'static {
         &self,
         alert_id: Ulid,
     ) -> Result<Option<AnalyticsAlertFire>, StoreError>;
+
+    // ---- Share links ----
+    async fn create_share_link(&self, link: &ShareLink) -> Result<(), StoreError>;
+    async fn list_share_links(&self, site_id: Ulid) -> Result<Vec<ShareLink>, StoreError>;
+    async fn get_share_link(&self, id: Ulid) -> Result<Option<ShareLink>, StoreError>;
+    /// Resolve a public token to its link. Powers unauthenticated `/share`
+    /// access; a missing row means a revoked or never-issued token.
+    async fn get_share_link_by_token(&self, token: &str) -> Result<Option<ShareLink>, StoreError>;
+    /// Update the mutable fields (label, expiry) of a link.
+    async fn update_share_link(
+        &self,
+        id: Ulid,
+        label: Option<String>,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<(), StoreError>;
+    async fn delete_share_link(&self, id: Ulid) -> Result<(), StoreError>;
+
+    // ---- Email digest subscriptions ----
+    async fn upsert_digest_subscription(&self, sub: &DigestSubscription) -> Result<(), StoreError>;
+    async fn get_digest_subscription(
+        &self,
+        user_id: Ulid,
+        site_id: Ulid,
+    ) -> Result<Option<DigestSubscription>, StoreError>;
+    async fn delete_digest_subscription(
+        &self,
+        user_id: Ulid,
+        site_id: Ulid,
+    ) -> Result<(), StoreError>;
+    /// All enabled subscriptions across every site — used by the digest
+    /// scheduler loop.
+    async fn list_enabled_digest_subscriptions(
+        &self,
+    ) -> Result<Vec<DigestSubscription>, StoreError>;
+    /// Increment the consecutive-bounce counter, disabling the subscription
+    /// once it reaches `disable_at`.
+    async fn record_digest_bounce(&self, id: Ulid, disable_at: u32) -> Result<(), StoreError>;
 
     // ---- Agents ----
     async fn upsert_agent(&self, agent: &Agent) -> Result<(), StoreError>;

@@ -12,10 +12,12 @@ use stomatopod_core::{
         analytics_alert::{AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind},
         annotation::Annotation,
         api_key::{ApiKey, ApiKeyScope},
+        digest::{DigestFrequency, DigestSubscription},
         goal::Goal,
         incident::{Incident, IncidentStatus, IncidentTrigger},
         org::{Funnel, Organization, Plan, User, UserRole},
         policy::Policy,
+        share_link::ShareLink,
         site::Site,
     },
     error::StoreError,
@@ -206,6 +208,30 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
             payload     TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_alert_fires_alert ON analytics_alert_fires(alert_id, fired_at DESC);
+
+        CREATE TABLE IF NOT EXISTS share_links (
+            id          TEXT PRIMARY KEY,
+            site_id     TEXT NOT NULL REFERENCES sites(id),
+            token       TEXT UNIQUE NOT NULL,
+            label       TEXT,
+            expires_at  TEXT,
+            created_by  TEXT NOT NULL,
+            created_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_share_links_site ON share_links(site_id);
+        CREATE INDEX IF NOT EXISTS idx_share_links_token ON share_links(token);
+
+        CREATE TABLE IF NOT EXISTS digest_subscriptions (
+            id           TEXT PRIMARY KEY,
+            user_id      TEXT NOT NULL REFERENCES users(id),
+            site_id      TEXT NOT NULL REFERENCES sites(id),
+            frequency    TEXT NOT NULL,
+            enabled      INTEGER NOT NULL DEFAULT 1,
+            bounce_count INTEGER NOT NULL DEFAULT 0,
+            created_at   TEXT NOT NULL,
+            UNIQUE(user_id, site_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_digest_subs_enabled ON digest_subscriptions(enabled);
 
         INSERT OR IGNORE INTO schema_version (id, version, applied_at)
         VALUES (1, 1, datetime('now'));
@@ -471,6 +497,41 @@ fn row_to_alert_fire(row: &rusqlite::Row<'_>) -> rusqlite::Result<AnalyticsAlert
     })
 }
 
+fn row_to_share_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<ShareLink> {
+    let id_str: String = row.get(0)?;
+    let site_id_str: String = row.get(1)?;
+    let expires_at: Option<String> = row.get(4)?;
+    let created_at_str: String = row.get(6)?;
+    Ok(ShareLink {
+        id: Ulid::from_string(&id_str).unwrap_or_default(),
+        site_id: Ulid::from_string(&site_id_str).unwrap_or_default(),
+        token: row.get(2)?,
+        label: row.get(3)?,
+        expires_at: parse_utc_opt(expires_at),
+        created_by: row.get(5)?,
+        created_at: parse_utc(&created_at_str),
+    })
+}
+
+fn row_to_digest_sub(row: &rusqlite::Row<'_>) -> rusqlite::Result<DigestSubscription> {
+    let id_str: String = row.get(0)?;
+    let user_id_str: String = row.get(1)?;
+    let site_id_str: String = row.get(2)?;
+    let freq_str: String = row.get(3)?;
+    let enabled: i32 = row.get(4)?;
+    let bounce_count: i64 = row.get(5)?;
+    let created_at_str: String = row.get(6)?;
+    Ok(DigestSubscription {
+        id: Ulid::from_string(&id_str).unwrap_or_default(),
+        user_id: Ulid::from_string(&user_id_str).unwrap_or_default(),
+        site_id: Ulid::from_string(&site_id_str).unwrap_or_default(),
+        frequency: DigestFrequency::from_str(&freq_str).unwrap_or(DigestFrequency::Weekly),
+        enabled: enabled != 0,
+        bounce_count: bounce_count.max(0) as u32,
+        created_at: parse_utc(&created_at_str),
+    })
+}
+
 /// Macro to run a sync closure on the blocking thread pool with a cloned Arc<Mutex<Connection>>.
 macro_rules! db {
     ($conn:expr, $body:expr) => {{
@@ -674,6 +735,18 @@ impl MetaStore for SqliteMeta {
             conn.query_row(
                 "SELECT id, org_id, email, password_hash, role, created_at FROM users WHERE email = ?1",
                 params![email],
+                row_to_user,
+            )
+            .optional()
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn get_user(&self, id: Ulid) -> Result<Option<User>, StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            conn.query_row(
+                "SELECT id, org_id, email, password_hash, role, created_at FROM users WHERE id = ?1",
+                params![id.to_string()],
                 row_to_user,
             )
             .optional()
@@ -988,6 +1061,187 @@ impl MetaStore for SqliteMeta {
                 row_to_alert_fire,
             )
             .optional()
+            .map_err(StoreError::db)
+        })
+    }
+
+    // ---- Share links ----
+    async fn create_share_link(&self, link: &ShareLink) -> Result<(), StoreError> {
+        let link = link.clone();
+        db!(self.conn, |conn: &Connection| {
+            conn.execute(
+                "INSERT INTO share_links (id, site_id, token, label, expires_at, created_by, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    link.id.to_string(),
+                    link.site_id.to_string(),
+                    link.token,
+                    link.label,
+                    link.expires_at.map(|d| d.to_rfc3339()),
+                    link.created_by,
+                    link.created_at.to_rfc3339(),
+                ],
+            )
+            .map(|_| ())
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn list_share_links(&self, site_id: Ulid) -> Result<Vec<ShareLink>, StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, site_id, token, label, expires_at, created_by, created_at
+                     FROM share_links WHERE site_id = ?1 ORDER BY created_at DESC",
+                )
+                .map_err(StoreError::db)?;
+            let rows = stmt
+                .query_map(params![site_id.to_string()], row_to_share_link)
+                .map_err(StoreError::db)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(StoreError::db)
+        })
+    }
+
+    async fn get_share_link(&self, id: Ulid) -> Result<Option<ShareLink>, StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            conn.query_row(
+                "SELECT id, site_id, token, label, expires_at, created_by, created_at
+                 FROM share_links WHERE id = ?1",
+                params![id.to_string()],
+                row_to_share_link,
+            )
+            .optional()
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn get_share_link_by_token(&self, token: &str) -> Result<Option<ShareLink>, StoreError> {
+        let token = token.to_string();
+        db!(self.conn, |conn: &Connection| {
+            conn.query_row(
+                "SELECT id, site_id, token, label, expires_at, created_by, created_at
+                 FROM share_links WHERE token = ?1",
+                params![token],
+                row_to_share_link,
+            )
+            .optional()
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn update_share_link(
+        &self,
+        id: Ulid,
+        label: Option<String>,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<(), StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            conn.execute(
+                "UPDATE share_links SET label = ?2, expires_at = ?3 WHERE id = ?1",
+                params![id.to_string(), label, expires_at.map(|d| d.to_rfc3339()),],
+            )
+            .map(|_| ())
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn delete_share_link(&self, id: Ulid) -> Result<(), StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            conn.execute(
+                "DELETE FROM share_links WHERE id = ?1",
+                params![id.to_string()],
+            )
+            .map(|_| ())
+            .map_err(StoreError::db)
+        })
+    }
+
+    // ---- Email digest subscriptions ----
+    async fn upsert_digest_subscription(&self, sub: &DigestSubscription) -> Result<(), StoreError> {
+        let sub = sub.clone();
+        db!(self.conn, |conn: &Connection| {
+            conn.execute(
+                "INSERT INTO digest_subscriptions
+                    (id, user_id, site_id, frequency, enabled, bounce_count, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(user_id, site_id) DO UPDATE SET
+                    frequency = excluded.frequency,
+                    enabled = excluded.enabled,
+                    bounce_count = excluded.bounce_count",
+                params![
+                    sub.id.to_string(),
+                    sub.user_id.to_string(),
+                    sub.site_id.to_string(),
+                    sub.frequency.as_str(),
+                    sub.enabled as i32,
+                    sub.bounce_count as i64,
+                    sub.created_at.to_rfc3339(),
+                ],
+            )
+            .map(|_| ())
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn get_digest_subscription(
+        &self,
+        user_id: Ulid,
+        site_id: Ulid,
+    ) -> Result<Option<DigestSubscription>, StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            conn.query_row(
+                "SELECT id, user_id, site_id, frequency, enabled, bounce_count, created_at
+                 FROM digest_subscriptions WHERE user_id = ?1 AND site_id = ?2",
+                params![user_id.to_string(), site_id.to_string()],
+                row_to_digest_sub,
+            )
+            .optional()
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn delete_digest_subscription(
+        &self,
+        user_id: Ulid,
+        site_id: Ulid,
+    ) -> Result<(), StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            conn.execute(
+                "DELETE FROM digest_subscriptions WHERE user_id = ?1 AND site_id = ?2",
+                params![user_id.to_string(), site_id.to_string()],
+            )
+            .map(|_| ())
+            .map_err(StoreError::db)
+        })
+    }
+
+    async fn list_enabled_digest_subscriptions(
+        &self,
+    ) -> Result<Vec<DigestSubscription>, StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, user_id, site_id, frequency, enabled, bounce_count, created_at
+                     FROM digest_subscriptions WHERE enabled = 1 ORDER BY created_at ASC",
+                )
+                .map_err(StoreError::db)?;
+            let rows = stmt
+                .query_map([], row_to_digest_sub)
+                .map_err(StoreError::db)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(StoreError::db)
+        })
+    }
+
+    async fn record_digest_bounce(&self, id: Ulid, disable_at: u32) -> Result<(), StoreError> {
+        db!(self.conn, |conn: &Connection| {
+            conn.execute(
+                "UPDATE digest_subscriptions
+                 SET bounce_count = bounce_count + 1,
+                     enabled = CASE WHEN bounce_count + 1 >= ?2 THEN 0 ELSE enabled END
+                 WHERE id = ?1",
+                params![id.to_string(), disable_at as i64],
+            )
+            .map(|_| ())
             .map_err(StoreError::db)
         })
     }
