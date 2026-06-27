@@ -72,8 +72,9 @@ curl -X POST https://your-host/api/v1/ingest \
 ```
 
 Browser pageviews use a separate public endpoint, `POST /api/v1/event`, keyed by
-the site's public tracker key. That path is for the bundled tracker script, not
-for backend use.
+the site's public tracker key. That path is for the bundled tracker script (see
+[Installing the browser tracker](#installing-the-browser-tracker)), not for
+backend use.
 
 ## Querying analytics
 
@@ -126,6 +127,69 @@ All accept the common query parameters above and authenticate with a read key.
 | `GET /api/v1/sites/:site/experiments/:experiment`   | Per-variant conversion comparison (`goal=`).                   |
 | `GET /api/v1/sites/:site/heatmaps/clicks`           | Click heatmap points for a page (`url=` required).             |
 | `GET /api/v1/sites/:site/heatmaps/scroll`           | Scroll heatmap buckets for a page (`url=` required).           |
+
+## Installing the browser tracker
+
+The bundled tracker is a tiny, dependency-free script served at `/tracker.js`.
+Add a single tag to every page you want to measure; it records a pageview on
+load and on client-side route changes, and — unless opted out — the Tier-4
+auto-events below. No cookies are set and no cross-site identifier is used.
+
+```html
+<script defer src="https://your-host/tracker.js" data-site="YOUR_PUBLIC_KEY"></script>
+```
+
+`data-site` is the site's **public key** (the `Public Key` shown on the site's
+**Settings** tab, or via `GET /api/v1/sites`). Unlike the `sk_live_…`/`rk_…`
+keys, it is meant to be embedded in client HTML: it only authorizes writing
+pageviews and events to that one site through the public `POST /api/v1/event`
+endpoint, and grants no read or cross-site access. The tracker resolves the
+site from this key, so you never pass a site id.
+
+The script is served with a one-day immutable cache, so reference it directly
+from your host rather than copying its contents.
+
+### Script-tag attributes
+
+| Attribute        | Effect                                                                                      |
+|------------------|---------------------------------------------------------------------------------------------|
+| `data-site`      | **Required.** Site public key. The tracker no-ops if it is missing.                         |
+| `data-api`       | Override the event endpoint (default `/api/v1/event`) — e.g. when the tracker and API are on different hosts. |
+| `data-exclude`   | Disable the tracker for this page load entirely (handy for staging/admin pages).            |
+| `data-no-vitals` | Don't collect Core Web Vitals (`__vital__`).                                                |
+| `data-no-scroll` | Don't collect scroll-depth milestones (`__scroll__`).                                       |
+| `data-no-clicks` | Don't collect click-heatmap points (`__click__`).                                           |
+| `data-no-search` | Don't detect site-search queries (`__search__`).                                            |
+
+Each `data-no-*` switch disables only its own collector; pageview analytics keep
+working regardless.
+
+### Behavior
+
+- A `pageview` is sent on initial load and on every SPA navigation the tracker
+  intercepts (`history.pushState` / `replaceState` and `popstate`). Scroll
+  milestones reset for each new route.
+- Every beacon carries the current URL, referrer, screen size, and browser
+  language; UTM parameters are parsed from the URL server-side.
+- Beacons use `navigator.sendBeacon` when available (falling back to
+  `fetch(..., {keepalive:true})`), so they survive page unload.
+- **Do Not Track is honored:** if the browser reports
+  `navigator.doNotTrack === "1"`, the tracker sends nothing.
+
+### Manual events from the browser
+
+Once loaded, the tracker exposes a global helper for your own custom events
+(the same events you later query via `…/events?name=<event>`):
+
+```js
+stomatopod("event", "signup", { plan: "pro" });
+```
+
+The first argument is always `"event"`, followed by the event name and an
+optional properties object. As with server-side events, tag a property
+`revenue` (a number) to feed the revenue reports, or `variant` plus an
+`experiment` name to feed A/B comparisons. The `__…__` names are reserved for
+the tracker's own auto-events — don't send them yourself.
 
 ## Auto-captured browser events
 
