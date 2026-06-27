@@ -53,9 +53,7 @@ pub enum AlertsCommand {
 
 pub fn build(cmd: &AlertsCommand) -> anyhow::Result<Req> {
     let req = match cmd {
-        AlertsCommand::List { site } => {
-            Req::Get(format!("/api/v1/sites/{site}/analytics-alerts"))
-        }
+        AlertsCommand::List { site } => Req::Get(format!("/api/v1/sites/{site}/analytics-alerts")),
         AlertsCommand::Create {
             site,
             alert_type,
@@ -160,7 +158,15 @@ mod tests {
 
     #[test]
     fn toggle_alert_patches() {
-        match build_args(&["toggle", "--site", "s", "--alert", "a1", "--enabled", "false"]) {
+        match build_args(&[
+            "toggle",
+            "--site",
+            "s",
+            "--alert",
+            "a1",
+            "--enabled",
+            "false",
+        ]) {
             Req::Patch(path, body) => {
                 assert_eq!(path, "/api/v1/sites/s/analytics-alerts/a1");
                 assert_eq!(body["enabled"], false);

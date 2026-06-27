@@ -453,7 +453,16 @@ pub fn build(cmd: &QueryCommand) -> anyhow::Result<Req> {
             limit,
             compare,
             filters,
-        } => top_req(site, "top-pages", range, from, to, *limit, *compare, filters),
+        } => top_req(
+            site,
+            "top-pages",
+            range,
+            from,
+            to,
+            *limit,
+            *compare,
+            filters,
+        ),
         QueryCommand::TopReferrers {
             site,
             range,
