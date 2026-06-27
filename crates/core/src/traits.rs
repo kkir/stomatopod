@@ -24,6 +24,7 @@ use crate::{
         funnel::{FunnelQuery, FunnelResult},
         pageviews::{Filter, PageviewsQuery, PageviewsResult, TimeRange, TopList, TopListField},
         spans::{AgentSummary, SpanQuery, SpanRow},
+        tier4::EventPropRow,
     },
 };
 
@@ -135,6 +136,25 @@ pub trait StorageBackend: Send + Sync + 'static {
         depth: u32,
         limit: u32,
     ) -> Result<PathReport, StoreError>;
+
+    // ---- Tier-4 analytics: raw custom-event rows ----
+
+    /// Fetch raw custom-event rows (name, url, session, timestamp, key
+    /// dimensions, and the JSON property bag) for in-process Tier-4
+    /// aggregation (Core Web Vitals, scroll, revenue, A/B, heatmaps, search).
+    ///
+    /// `names` restricts to those event names; an empty slice returns every
+    /// custom event. `limit` caps the row count. The default returns an empty
+    /// vector so backends can opt in incrementally.
+    async fn query_event_props(
+        &self,
+        _site_id: Ulid,
+        _names: &[String],
+        _range: &TimeRange,
+        _limit: u32,
+    ) -> Result<Vec<EventPropRow>, StoreError> {
+        Ok(Vec::new())
+    }
 }
 
 /// Metadata CRUD: sites, orgs, users, funnels.

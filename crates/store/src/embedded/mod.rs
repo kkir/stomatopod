@@ -225,6 +225,18 @@ impl StorageBackend for EmbeddedBackend {
     ) -> Result<PathReport, StoreError> {
         self.reader.query_paths(site_id, range, depth, limit).await
     }
+
+    async fn query_event_props(
+        &self,
+        site_id: Ulid,
+        names: &[String],
+        range: &TimeRange,
+        limit: u32,
+    ) -> Result<Vec<stomatopod_core::query::tier4::EventPropRow>, StoreError> {
+        self.reader
+            .query_event_props(site_id, names, range, limit)
+            .await
+    }
 }
 
 // Forward MetaStore calls to the SQLite meta store

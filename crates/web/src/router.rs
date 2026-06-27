@@ -119,6 +119,55 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/api/v1/sites/:site/funnels/:funnel_id",
             get(analytics::funnel_result),
         )
+        // ---- Tier-4 analytics ----
+        .route("/api/v1/sites/:site/vitals", get(analytics::vitals))
+        .route(
+            "/api/v1/sites/:site/vitals/pages",
+            get(analytics::vitals_pages),
+        )
+        .route("/api/v1/sites/:site/scroll", get(analytics::scroll))
+        .route(
+            "/api/v1/sites/:site/scroll/pages",
+            get(analytics::scroll_pages),
+        )
+        .route("/api/v1/sites/:site/search", get(analytics::search))
+        .route(
+            "/api/v1/sites/:site/search/zero-results",
+            get(analytics::search_zero_results),
+        )
+        .route(
+            "/api/v1/sites/:site/search/timeseries",
+            get(analytics::search_timeseries),
+        )
+        .route("/api/v1/sites/:site/revenue", get(analytics::revenue))
+        .route(
+            "/api/v1/sites/:site/revenue/timeseries",
+            get(analytics::revenue_timeseries),
+        )
+        .route(
+            "/api/v1/sites/:site/revenue/pages",
+            get(analytics::revenue_pages),
+        )
+        .route(
+            "/api/v1/sites/:site/revenue/breakdown",
+            get(analytics::revenue_breakdown),
+        )
+        .route(
+            "/api/v1/sites/:site/experiments",
+            get(analytics::experiments),
+        )
+        .route(
+            "/api/v1/sites/:site/experiments/:experiment",
+            get(analytics::experiment_result),
+        )
+        .route(
+            "/api/v1/sites/:site/heatmaps/clicks",
+            get(analytics::heatmap_clicks),
+        )
+        .route(
+            "/api/v1/sites/:site/heatmaps/scroll",
+            get(analytics::heatmap_scroll),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             require_api_auth,
