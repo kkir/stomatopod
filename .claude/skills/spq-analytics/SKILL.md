@@ -37,8 +37,14 @@ spq describe      # machine-readable JSON manifest of every command + args
 - `--site` — a site **ULID or its domain** (e.g. `example.com`).
 - `--range` — `7d`, `30d` (default), `90d`, `12m`. Match the window to the
   question: `7d` for recent trends, `12m` for year-over-year.
-- `--granularity` (pageviews only) — `hour`, `day` (default), `week`, `month`.
+- `--from` / `--to` — explicit `YYYY-MM-DD` window; overrides `--range`.
+- `--granularity` (pageviews/retention) — `hour`, `day`, `week`, `month`.
 - `--limit` — rows for top-N commands (default `20`).
+- `--filter` — repeatable `field:op:value` (e.g. `country:eq:US`); multiple
+  filters are AND-combined. Fields: url, referrer, country, region, browser,
+  os, device_type, utm_source, utm_medium, utm_campaign, utm_term, utm_content,
+  event_name. Ops: eq, not_eq, contains, starts_with.
+- `--compare` — flag that attaches prior-period comparison (`delta_pct`).
 - Output is JSON unless `--human` is passed.
 
 ## Recommended workflow
@@ -51,12 +57,49 @@ spq describe      # machine-readable JSON manifest of every command + args
 
 ```bash
 spq sites                                                       # sites in scope
-spq query pageviews     --site <id|domain> [--range 30d] [--granularity day]
-spq query top-pages     --site <id|domain> [--range 30d] [--limit 20]
-spq query top-referrers --site <id|domain> [--range 30d] [--limit 20]
-spq query events        --site <id|domain> [--name signup] [--range 30d]
-spq query funnels       --site <id|domain>                      # list funnels
-spq query funnel        --site <id|domain> --funnel <id> [--range 30d]   # run one
+spq query pageviews         --site <id|domain> [--range 30d] [--granularity day] [--compare] [--filter f:op:v]
+spq query top-pages         --site <id|domain> [--range 30d] [--limit 20] [--compare] [--filter f:op:v]
+spq query top-referrers     --site <id|domain> [--range 30d] [--limit 20]
+spq query top-os            --site <id|domain> [--range 30d] [--limit 20]
+spq query top-regions       --site <id|domain> [--range 30d] [--limit 20]
+spq query top-entry-pages   --site <id|domain> [--range 30d] [--limit 20]
+spq query top-exit-pages    --site <id|domain> [--range 30d] [--limit 20]
+spq query events            --site <id|domain> [--name signup] [--range 30d] [--filter f:op:v]
+spq query campaigns         --site <id|domain> [--range 30d] [--limit 20]
+spq query utm               --site <id|domain> --dimension source|medium|campaign|term|content [--utm-source s] [--utm-medium m]
+spq query paths             --site <id|domain> [--steps 3] [--start-url /pricing] [--limit 25]
+spq query retention         --site <id|domain> [--granularity week|month] [--range 90d]
+spq query realtime          --site <id|domain>
+spq query vitals            --site <id|domain> [--url /home] [--range 30d]
+spq query scroll            --site <id|domain> [--url /home] [--range 30d]
+spq query search            --site <id|domain> [--range 30d] [--limit 20]
+spq query revenue           --site <id|domain> [--range 30d]
+spq query revenue-breakdown --site <id|domain> --dimension referrer|country|utm_source [--range 30d]
+spq query experiments       --site <id|domain> [--range 30d]
+spq query experiment        --site <id|domain> --experiment <name> [--goal <goal_id>] [--range 30d]
+spq query funnels           --site <id|domain>                  # list funnels
+spq query funnel            --site <id|domain> --funnel <id> [--range 30d]   # run one
+```
+
+## Management commands (require a write-capable key)
+
+```bash
+spq goals list          --site <id|domain>
+spq goals create        --site <id|domain> --name "Signup" --event user_signed_up [--filter plan:eq:pro]
+spq goals delete        --site <id|domain> --goal <id>
+
+spq alerts list         --site <id|domain>
+spq alerts create       --site <id|domain> --type traffic_spike --threshold 200 --window 60 --channel <channel_id>
+spq alerts delete       --site <id|domain> --alert <id>
+spq alerts toggle       --site <id|domain> --alert <id> --enabled true|false
+
+spq annotations list    --site <id|domain> [--range 90d]
+spq annotations create  --site <id|domain> --date 2025-06-03 --label "Launched v2.0" [--note "HN post + email"]
+spq annotations delete  --site <id|domain> --id <id>
+
+spq share list          --site <id|domain>
+spq share create        --site <id|domain> [--label "Client view"] [--expires 2025-12-31]
+spq share revoke        --site <id|domain> --link <id>
 ```
 
 ## Creating a funnel (the one write)
