@@ -328,7 +328,7 @@ pub fn verify_unsubscribe_token(secret: &str, token: &str) -> Option<Ulid> {
     let (id, sig) = token.split_once('.')?;
     let key = blake3::derive_key("stomatopod digest unsubscribe v1", secret.as_bytes());
     let expected = hex::encode(&blake3::keyed_hash(&key, id.as_bytes()).as_bytes()[..16]);
-    if sig == expected {
+    if crate::middleware::auth::constant_time_eq(sig.as_bytes(), expected.as_bytes()) {
         Ulid::from_string(id).ok()
     } else {
         None

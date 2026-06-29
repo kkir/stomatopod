@@ -92,6 +92,19 @@ async fn resolve_authorized_site(
     Ok(site_id)
 }
 
+/// Minimal HTML-entity escaping for values interpolated into the public
+/// share page. The page is built with `format!` (no template auto-escaping)
+/// and served to untrusted viewers, so any operator-controlled value (e.g. a
+/// site's `domain`, which is stored without character validation) must be
+/// escaped to prevent stored XSS.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
+
 /// Generate a 32-byte URL-safe random token (hex-encoded, 64 chars).
 fn generate_token() -> String {
     let mut buf = [0u8; 32];
@@ -363,7 +376,10 @@ pub async fn public_page(
         }
     };
     let site = state.meta.get_site(link.site_id).await.ok().flatten();
-    let domain = site.map(|s| s.domain).unwrap_or_else(|| "site".into());
+    let domain = html_escape(&site.map(|s| s.domain).unwrap_or_else(|| "site".into()));
+    // The token already matched a stored value (64-char hex), but escape it
+    // too for defense in depth since it lands in HTML and a JS string literal.
+    let token = html_escape(&token);
     let body = format!(
         "<!doctype html><html><head><meta charset=utf-8>\
          <meta name=\"robots\" content=\"noindex\">\

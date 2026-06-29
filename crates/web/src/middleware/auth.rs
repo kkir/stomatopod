@@ -35,6 +35,20 @@ fn session_key(secret: &str) -> [u8; 32] {
     blake3::derive_key("stomatopod session signing key v1", secret.as_bytes())
 }
 
+/// Constant-time byte-slice equality. Used to compare MACs/signatures so an
+/// attacker can't recover a valid signature byte-by-byte from response timing.
+/// The length check leaks length only, which is fixed for our signatures.
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// Returns a signed cookie value: `{user_id}.{hex_mac_16}`.
 pub fn sign_session(secret: &str, user_id: &str) -> String {
     let key = session_key(secret);
@@ -47,7 +61,7 @@ pub fn verify_session(secret: &str, value: &str) -> Option<String> {
     let (user_id, provided_sig) = value.split_once('.')?;
     let key = session_key(secret);
     let expected_sig = hex::encode(&blake3::keyed_hash(&key, user_id.as_bytes()).as_bytes()[..16]);
-    if provided_sig == expected_sig {
+    if constant_time_eq(provided_sig.as_bytes(), expected_sig.as_bytes()) {
         Some(user_id.to_string())
     } else {
         None

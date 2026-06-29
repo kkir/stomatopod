@@ -69,9 +69,14 @@ pub async fn login_submit(
     // accidentally absurd config value can't wrap to a negative max-age
     // and immediately invalidate every cookie.
     let ttl_secs = i64::try_from(state.config.auth.session_ttl_s).unwrap_or(i64::MAX);
+    // Mark the cookie `Secure` whenever the deployment is served over HTTPS so
+    // the session token is never transmitted in cleartext. Left off for plain
+    // `http://` (local dev) where a Secure cookie would simply never be sent.
+    let secure = state.config.public_base_url().starts_with("https://");
     let cookie = Cookie::build((SESSION_COOKIE, session_value))
         .path("/")
         .http_only(true)
+        .secure(secure)
         .same_site(SameSite::Lax)
         .max_age(Duration::seconds(ttl_secs))
         .build();
