@@ -1,6 +1,7 @@
 pub mod arrow_schema;
 pub mod buffer;
 pub mod meta;
+pub mod persistence;
 pub mod reader;
 pub mod spans;
 pub mod util;
@@ -53,6 +54,9 @@ impl EmbeddedBackend {
     pub async fn open(cfg: &EmbeddedConfig) -> anyhow::Result<Self> {
         let data_dir = cfg.data_dir.clone();
         tokio::fs::create_dir_all(&data_dir).await?;
+        // Refuse to run on ephemeral container storage that would be wiped on
+        // the next redeploy (no-op outside containers / when opted out).
+        persistence::ensure_persistent(cfg, &data_dir)?;
         tokio::fs::create_dir_all(data_dir.join("parquet")).await?;
         tokio::fs::create_dir_all(data_dir.join("wal")).await?;
         tokio::fs::create_dir_all(data_dir.join("parquet_spans").join("v1")).await?;

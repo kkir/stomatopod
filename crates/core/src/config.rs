@@ -130,6 +130,13 @@ pub struct EmbeddedConfig {
     pub wal_fsync_interval_ms: u64,
     pub parquet_flush_rows: usize,
     pub parquet_flush_interval_s: u64,
+    /// When false (the default), the server refuses to start if it detects it
+    /// is running inside a container with `data_dir` on ephemeral container
+    /// storage rather than a mounted volume — otherwise all analytics data is
+    /// silently lost on the next redeploy. Set to true (or
+    /// `STOMATOPOD_STORAGE__ALLOW_EPHEMERAL=true`) only for throwaway demos and
+    /// ephemeral test containers.
+    pub allow_ephemeral: bool,
 }
 
 impl Default for EmbeddedConfig {
@@ -139,6 +146,7 @@ impl Default for EmbeddedConfig {
             wal_fsync_interval_ms: 200,
             parquet_flush_rows: 50_000,
             parquet_flush_interval_s: 30,
+            allow_ephemeral: false,
         }
     }
 }

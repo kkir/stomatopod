@@ -193,6 +193,7 @@ async fn setup_with_flush(flush_rows: usize, flush_interval_s: u64) -> TestCtx {
         wal_fsync_interval_ms: 0,
         parquet_flush_rows: flush_rows,
         parquet_flush_interval_s: flush_interval_s,
+        allow_ephemeral: true,
     };
     let backend = Arc::new(EmbeddedBackend::open(&cfg).await.unwrap());
 

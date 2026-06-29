@@ -408,6 +408,7 @@ async fn embedded_backend_accepts_event_batch() {
         wal_fsync_interval_ms: 0,
         parquet_flush_rows: 10,
         parquet_flush_interval_s: 60,
+        allow_ephemeral: true,
     };
     let backend = Arc::new(EmbeddedBackend::open(&cfg).await.unwrap());
 

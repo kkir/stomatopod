@@ -32,10 +32,17 @@ from = "analytics@localhost"
 # Storage backend.  Only "embedded" is currently implemented.
 [storage]
 backend = "embedded"
+# All state (SQLite metadata, WAL, Parquet files) lives here. In a container
+# this MUST be a mounted volume or the server refuses to start, because the data
+# would otherwise be wiped on every redeploy. Override with
+# STOMATOPOD_STORAGE__DATA_DIR. See DEPLOY.md.
 data_dir = "./data"
 wal_fsync_interval_ms = 200
 parquet_flush_rows = 50000
 parquet_flush_interval_s = 30
+# Set true (or STOMATOPOD_STORAGE__ALLOW_EPHEMERAL=true) to allow running on
+# ephemeral container storage for throwaway demos/tests. Data is lost on redeploy.
+allow_ephemeral = false
 
 # Optional MaxMind GeoLite2-City database for country/region lookup.
 [geo]

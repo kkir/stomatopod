@@ -18,6 +18,7 @@ fn cfg(dir: &tempfile::TempDir) -> EmbeddedConfig {
         // Tiny thresholds so the flush worker writes parquet immediately.
         parquet_flush_rows: 1,
         parquet_flush_interval_s: 1,
+        allow_ephemeral: true,
     }
 }
 
