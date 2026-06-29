@@ -20,6 +20,7 @@ fn cfg(dir: &tempfile::TempDir) -> EmbeddedConfig {
         wal_fsync_interval_ms: 200,
         parquet_flush_rows: 1,
         parquet_flush_interval_s: 1,
+        allow_ephemeral: true,
     }
 }
 
@@ -33,6 +34,7 @@ fn cfg_bulk(dir: &tempfile::TempDir) -> EmbeddedConfig {
         wal_fsync_interval_ms: 0,
         parquet_flush_rows: 10_000,
         parquet_flush_interval_s: 1,
+        allow_ephemeral: true,
     }
 }
 

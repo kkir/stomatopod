@@ -34,6 +34,12 @@ mise run test         # Rust tests only
 mise run e2e          # Playwright smoke tests
 ```
 
+## Deployment
+
+See [`DEPLOY.md`](./DEPLOY.md) for running Stomatopod in production, including the
+**data persistence** requirement (mount a volume at `/app/data`) and ready-to-use
+[`docker-compose.yml`](./docker-compose.yml).
+
 ## Notes
 
 - `mise run dev` fails fast when auth config is missing.

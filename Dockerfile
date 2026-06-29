@@ -21,6 +21,10 @@ COPY --from=builder /app/target/release/stomatopod /usr/local/bin/stomatopod
 RUN mkdir -p /app/data \
     && chown -R stomatopod:stomatopod /app
 
+# No `VOLUME /app/data` by design: an anonymous volume would make the data dir
+# look "mounted" yet still be orphaned on redeploy, defeating the startup
+# persistence guard. Mount a named volume / bind mount instead — see DEPLOY.md.
+
 USER stomatopod
 
 EXPOSE 8080
