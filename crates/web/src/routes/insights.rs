@@ -1,711 +1,33 @@
-//! Dashboard pages for the Tier-2 analytics features: the real-time view,
-//! goals/conversions, and analytics alerts. All are session-authed (mounted
-//! under the `require_auth` dashboard router) and server-rendered.
+//! Alert-channel management JSON API. (The Tier-2 dashboard *pages* that used
+//! to live here - real-time, goals, analytics alerts, campaigns, retention,
+//! paths, compare - moved to the Dioxus SPA in the `/app` cutover; only the
+//! channel CRUD + test-fire endpoints the SPA calls remain.)
 
 use axum::{
-    extract::{Path, Query, State},
-    response::{IntoResponse, Redirect, Response},
-    Form,
+    extract::{Extension, Path, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
 };
 use chrono::Utc;
 use serde::Deserialize;
 use std::sync::Arc;
 use ulid::Ulid;
 
-use stomatopod_core::{
-    domain::{
-        agent::{AlertChannel, AlertChannelKind},
-        analytics_alert::{AnalyticsAlert, AnalyticsAlertConfig, AnalyticsAlertKind},
-        annotation::Annotation,
-        goal::Goal,
-        incident::{Incident, IncidentStatus, IncidentTrigger},
-    },
-    query::{
-        analytics::GoalQuery,
-        pageviews::{Granularity, PageviewsQuery, TopListField},
-    },
+use stomatopod_core::domain::{
+    agent::{AlertChannel, AlertChannelKind},
+    incident::{Incident, IncidentStatus, IncidentTrigger},
 };
 
 use crate::{
     alerts::sinks::{AlertSink, SlackSink, TelegramSink, WebhookSink},
-    error::AppError,
-    extractors::{Range, SiteId},
+    middleware::auth::Principal,
     state::AppState,
-    templates,
 };
 
-async fn load_site(
-    state: &AppState,
-    site_id: Ulid,
-) -> Result<stomatopod_core::domain::site::Site, AppError> {
-    state
-        .meta
-        .get_site(site_id)
-        .await?
-        .ok_or(AppError::NotFound("site not found"))
-}
-
-/// `?site=` selector on the global (site-less) pages. `tested` carries the
-/// test-channel result flash back to the alerts page.
-#[derive(Deserialize)]
-pub struct SiteSel {
-    site: Option<String>,
-    #[serde(default)]
-    tested: Option<String>,
-}
-
-/// `?tested=` flash on the per-site alerts page.
-#[derive(Deserialize)]
-pub struct AlertsFlash {
-    #[serde(default)]
-    tested: Option<String>,
-}
-
-/// Resolve the global-page scope: the full site list (for the dropdown) and
-/// the selected site (the `?site=` param if valid, else the first site).
-/// Returns `None` when the org has no sites yet.
-async fn resolve_scope(
-    state: &AppState,
-    sel: Option<&str>,
-) -> Result<Option<(stomatopod_core::domain::site::Site, Vec<serde_json::Value>)>, AppError> {
-    let orgs = state.meta.list_orgs().await?;
-    let sites = match orgs.first() {
-        Some(org) => state.meta.list_sites(org.id).await?,
-        None => vec![],
-    };
-    if sites.is_empty() {
-        return Ok(None);
-    }
-    let wanted = sel.and_then(|s| Ulid::from_string(s).ok());
-    let selected = wanted
-        .and_then(|id| sites.iter().find(|s| s.id == id).cloned())
-        .unwrap_or_else(|| sites[0].clone());
-    let options: Vec<serde_json::Value> = sites
-        .iter()
-        .map(|s| serde_json::json!({ "id": s.id.to_string(), "name": s.name }))
-        .collect();
-    Ok(Some((selected, options)))
-}
-
-/// Per-goal completion + conversion view for a site over `range`.
-async fn build_goals_view(
-    state: &AppState,
-    site_id: Ulid,
-    range: &stomatopod_core::query::pageviews::TimeRange,
-) -> Result<Vec<serde_json::Value>, AppError> {
-    let goals = state.meta.list_goals(site_id).await?;
-    let mut out = Vec::with_capacity(goals.len());
-    for g in &goals {
-        let stats = state
-            .backend
-            .query_goal(&GoalQuery {
-                site_id,
-                event_name: g.event_name.clone(),
-                filters: g.parsed_filters(),
-                granularity: Granularity::auto_for_range(range),
-                range: range.clone(),
-            })
-            .await
-            .unwrap_or_default();
-        out.push(serde_json::json!({
-            "id": g.id.to_string(),
-            "name": g.name,
-            "event_name": g.event_name,
-            "completions": stats.completions,
-            "unique_completions": stats.unique_completions,
-            "conversion_rate": format!("{:.1}", stats.conversion_rate),
-        }));
-    }
-    Ok(out)
-}
-
-/// Alert + channel view models for a site.
-async fn build_alerts_view(
-    state: &AppState,
-    site_id: Ulid,
-) -> Result<(Vec<serde_json::Value>, Vec<serde_json::Value>), AppError> {
-    let alerts = state.meta.list_analytics_alerts(site_id).await?;
-    let channels = state.meta.list_alert_channels(site_id).await?;
-    let mut alerts_view = Vec::with_capacity(alerts.len());
-    for a in &alerts {
-        let last = state
-            .meta
-            .last_analytics_alert_fire(a.id)
-            .await
-            .ok()
-            .flatten()
-            .map(|f| f.fired_at.to_rfc3339());
-        alerts_view.push(serde_json::json!({
-            "id": a.id.to_string(),
-            "type": a.kind.as_str(),
-            "threshold": a.config.threshold,
-            "window_minutes": a.config.window_minutes,
-            "goal_event_name": a.config.goal_event_name,
-            "enabled": a.enabled,
-            "last_fired": last,
-        }));
-    }
-    let channels_view: Vec<serde_json::Value> = channels
-        .iter()
-        .map(|c| serde_json::json!({ "id": c.id.to_string(), "url": c.url, "kind": c.kind.as_str() }))
-        .collect();
-    Ok((alerts_view, channels_view))
-}
-
-// ---- Global (site-less) pages with a site-filter dropdown ----
-
-/// GET /app/realtime — real-time view with a site selector.
-pub async fn realtime_global(
-    State(state): State<Arc<AppState>>,
-    Query(sel): Query<SiteSel>,
-) -> Result<Response, AppError> {
-    let Some((site, sites)) = resolve_scope(&state, sel.site.as_deref()).await? else {
-        return Ok(Redirect::to("/app/sites").into_response());
-    };
-    let html = templates::render(
-        &state,
-        "realtime.jinja",
-        minijinja::context! {
-            site => serde_json::to_value(&site).unwrap(),
-            range => "30d",
-            sites => sites,
-            scope_path => "/app/realtime",
-        },
-    )?;
-    Ok(html.into_response())
-}
-
-/// GET /app/goals — goals across sites, filtered by a site selector.
-pub async fn goals_global(
-    State(state): State<Arc<AppState>>,
-    Query(sel): Query<SiteSel>,
-    Range { range, label }: Range,
-) -> Result<Response, AppError> {
-    let Some((site, sites)) = resolve_scope(&state, sel.site.as_deref()).await? else {
-        return Ok(Redirect::to("/app/sites").into_response());
-    };
-    let goals = build_goals_view(&state, site.id, &range).await?;
-    let html = templates::render(
-        &state,
-        "goals.jinja",
-        minijinja::context! {
-            site => serde_json::to_value(&site).unwrap(),
-            goals => goals,
-            range => label,
-            sites => sites,
-            scope_path => "/app/goals",
-        },
-    )?;
-    Ok(html.into_response())
-}
-
-/// GET /app/alerts — analytics alerts across sites, filtered by a selector.
-pub async fn alerts_global(
-    State(state): State<Arc<AppState>>,
-    Query(sel): Query<SiteSel>,
-    Range { label, .. }: Range,
-) -> Result<Response, AppError> {
-    let Some((site, sites)) = resolve_scope(&state, sel.site.as_deref()).await? else {
-        return Ok(Redirect::to("/app/sites").into_response());
-    };
-    let (alerts, channels) = build_alerts_view(&state, site.id).await?;
-    let html = templates::render(
-        &state,
-        "alerts.jinja",
-        minijinja::context! {
-            site => serde_json::to_value(&site).unwrap(),
-            alerts => alerts,
-            channels => channels,
-            range => label,
-            sites => sites,
-            scope_path => "/app/alerts",
-            tested => sel.tested,
-        },
-    )?;
-    Ok(html.into_response())
-}
-
-// ---- Real-time ----
-
-/// GET /app/sites/:site_id/realtime — page shell that polls the panel.
-pub async fn realtime_page(
-    State(state): State<Arc<AppState>>,
-    SiteId(site_id): SiteId,
-    Range { label, .. }: Range,
-) -> Result<Response, AppError> {
-    let site = load_site(&state, site_id).await?;
-    let html = templates::render(
-        &state,
-        "realtime.jinja",
-        minijinja::context! {
-            site => serde_json::to_value(&site).unwrap(),
-            range => label,
-        },
-    )?;
-    Ok(html.into_response())
-}
-
-/// GET /app/sites/:site_id/partials/realtime — htmx-polled inner panel.
-pub async fn realtime_panel(
-    State(state): State<Arc<AppState>>,
-    SiteId(site_id): SiteId,
-) -> Result<Response, AppError> {
-    let snapshot = state.backend.query_realtime(site_id, 30).await?;
-    let html = templates::render(
-        &state,
-        "partials/realtime_panel.jinja",
-        minijinja::context! {
-            rt => serde_json::to_value(&snapshot).unwrap(),
-        },
-    )?;
-    Ok(html.into_response())
-}
-
-// ---- Goals ----
-
-/// GET /app/sites/:site_id/goals — goal list with 30d conversion stats.
-pub async fn goals_page(
-    State(state): State<Arc<AppState>>,
-    SiteId(site_id): SiteId,
-    Range { range, label }: Range,
-) -> Result<Response, AppError> {
-    let site = load_site(&state, site_id).await?;
-    let goals = build_goals_view(&state, site_id, &range).await?;
-    let html = templates::render(
-        &state,
-        "goals.jinja",
-        minijinja::context! {
-            site => serde_json::to_value(&site).unwrap(),
-            goals => goals,
-            range => label,
-        },
-    )?;
-    Ok(html.into_response())
-}
-
-#[derive(Deserialize)]
-pub struct CreateGoalForm {
-    pub name: String,
-    pub event_name: String,
-}
-
-/// POST /app/sites/:site_id/goals — create a goal, then back to the list.
-pub async fn create_goal(
-    State(state): State<Arc<AppState>>,
-    SiteId(site_id): SiteId,
-    Form(form): Form<CreateGoalForm>,
-) -> Result<Response, AppError> {
-    if form.name.trim().is_empty() || form.event_name.trim().is_empty() {
-        return Err(AppError::BadRequest("name and event are required"));
-    }
-    let goal = Goal {
-        id: Ulid::new(),
-        site_id,
-        name: form.name,
-        event_name: form.event_name,
-        filters: None,
-        created_at: Utc::now(),
-    };
-    state.meta.create_goal(&goal).await?;
-    Ok(Redirect::to(&format!("/app/sites/{site_id}/goals")).into_response())
-}
-
-/// POST /app/sites/:site_id/goals/:goal_id/delete
-pub async fn delete_goal(
-    State(state): State<Arc<AppState>>,
-    Path((site_id_str, goal_id_str)): Path<(String, String)>,
-) -> Result<Response, AppError> {
-    let site_id =
-        Ulid::from_string(&site_id_str).map_err(|_| AppError::BadRequest("invalid site id"))?;
-    let goal_id =
-        Ulid::from_string(&goal_id_str).map_err(|_| AppError::BadRequest("invalid goal id"))?;
-    // Only delete a goal that belongs to this site.
-    if let Some(g) = state.meta.get_goal(goal_id).await? {
-        if g.site_id == site_id {
-            state.meta.delete_goal(goal_id).await?;
-        }
-    }
-    Ok(Redirect::to(&format!("/app/sites/{site_id}/goals")).into_response())
-}
-
-// ---- Analytics alerts ----
-
-/// GET /app/sites/:site_id/alerts — alert list + create form.
-pub async fn alerts_page(
-    State(state): State<Arc<AppState>>,
-    SiteId(site_id): SiteId,
-    Range { label, .. }: Range,
-    Query(flash): Query<AlertsFlash>,
-) -> Result<Response, AppError> {
-    let site = load_site(&state, site_id).await?;
-    let (alerts, channels) = build_alerts_view(&state, site_id).await?;
-    let html = templates::render(
-        &state,
-        "alerts.jinja",
-        minijinja::context! {
-            site => serde_json::to_value(&site).unwrap(),
-            alerts => alerts,
-            channels => channels,
-            range => label,
-            tested => flash.tested,
-        },
-    )?;
-    Ok(html.into_response())
-}
-
-#[derive(Deserialize)]
-pub struct CreateAlertForm {
-    #[serde(rename = "type")]
-    pub alert_type: String,
-    pub threshold: f64,
-    #[serde(default)]
-    pub window_minutes: u32,
-    #[serde(default)]
-    pub goal_event_name: Option<String>,
-    pub channel_id: String,
-}
-
-/// POST /app/sites/:site_id/alerts — create an analytics alert.
-pub async fn create_alert(
-    State(state): State<Arc<AppState>>,
-    SiteId(site_id): SiteId,
-    Form(form): Form<CreateAlertForm>,
-) -> Result<Response, AppError> {
-    let kind = AnalyticsAlertKind::from_str(&form.alert_type)
-        .ok_or(AppError::BadRequest("unknown alert type"))?;
-    let channel_id =
-        Ulid::from_string(&form.channel_id).map_err(|_| AppError::BadRequest("invalid channel"))?;
-    // The channel must belong to this site.
-    let channels = state.meta.list_alert_channels(site_id).await?;
-    if !channels.iter().any(|c| c.id == channel_id) {
-        return Err(AppError::BadRequest("channel does not belong to this site"));
-    }
-    let goal_event_name = form.goal_event_name.filter(|s| !s.trim().is_empty());
-    let alert = AnalyticsAlert {
-        id: Ulid::new(),
-        site_id,
-        kind,
-        config: AnalyticsAlertConfig {
-            threshold: form.threshold,
-            window_minutes: if form.window_minutes == 0 {
-                60
-            } else {
-                form.window_minutes
-            },
-            goal_event_name,
-        },
-        channel_id,
-        enabled: true,
-        created_at: Utc::now(),
-    };
-    state.meta.create_analytics_alert(&alert).await?;
-    Ok(Redirect::to(&format!("/app/sites/{site_id}/alerts")).into_response())
-}
-
-/// POST /app/sites/:site_id/alerts/:id/delete
-pub async fn delete_alert(
-    State(state): State<Arc<AppState>>,
-    Path((site_id_str, alert_id_str)): Path<(String, String)>,
-) -> Result<Response, AppError> {
-    let site_id =
-        Ulid::from_string(&site_id_str).map_err(|_| AppError::BadRequest("invalid site id"))?;
-    let alert_id =
-        Ulid::from_string(&alert_id_str).map_err(|_| AppError::BadRequest("invalid alert id"))?;
-    if let Some(a) = state.meta.get_analytics_alert(alert_id).await? {
-        if a.site_id == site_id {
-            state.meta.delete_analytics_alert(alert_id).await?;
-        }
-    }
-    Ok(Redirect::to(&format!("/app/sites/{site_id}/alerts")).into_response())
-}
-
-// ---- Tier-3: campaigns, retention, paths, multi-site compare ----
-
-/// GET /app/campaigns — UTM campaign drill-down, filtered by a site selector.
-pub async fn campaigns_global(
-    State(state): State<Arc<AppState>>,
-    Query(sel): Query<SiteSel>,
-    Range { range, label }: Range,
-) -> Result<Response, AppError> {
-    let Some((site, sites)) = resolve_scope(&state, sel.site.as_deref()).await? else {
-        return Ok(Redirect::to("/app/sites").into_response());
-    };
-    // One labelled top-list per UTM dimension, rendered as a stack of tables.
-    let titles = [
-        ("utm_source", "Source"),
-        ("utm_medium", "Medium"),
-        ("utm_campaign", "Campaign"),
-        ("utm_term", "Term"),
-        ("utm_content", "Content"),
-    ];
-    let mut reports = Vec::with_capacity(TopListField::UTM.len());
-    for (field, (_, title)) in TopListField::UTM.iter().zip(titles) {
-        let tl = state
-            .backend
-            .query_top_list(site.id, *field, &range, 50, &[])
-            .await
-            .unwrap_or_default();
-        reports.push(serde_json::json!({
-            "title": title,
-            "rows": tl.rows,
-        }));
-    }
-    let html = templates::render(
-        &state,
-        "campaigns.jinja",
-        minijinja::context! {
-            site => serde_json::to_value(&site).unwrap(),
-            reports => reports,
-            range => label,
-            sites => sites,
-            scope_path => "/app/campaigns",
-        },
-    )?;
-    Ok(html.into_response())
-}
-
-/// GET /app/retention — weekly cohort grid, filtered by a site selector.
-pub async fn retention_global(
-    State(state): State<Arc<AppState>>,
-    Query(sel): Query<SiteSel>,
-    Range { range, label }: Range,
-) -> Result<Response, AppError> {
-    let Some((site, sites)) = resolve_scope(&state, sel.site.as_deref()).await? else {
-        return Ok(Redirect::to("/app/sites").into_response());
-    };
-    let grid = state
-        .backend
-        .query_retention(site.id, &range)
-        .await
-        .unwrap_or_default();
-    let html = templates::render(
-        &state,
-        "retention.jinja",
-        minijinja::context! {
-            site => serde_json::to_value(&site).unwrap(),
-            grid => serde_json::to_value(&grid).unwrap(),
-            offsets => (0..=grid.max_offset).collect::<Vec<_>>(),
-            range => label,
-            sites => sites,
-            scope_path => "/app/retention",
-        },
-    )?;
-    Ok(html.into_response())
-}
-
-/// `?depth=` selector on the paths page (number of steps per sequence).
-#[derive(Deserialize)]
-pub struct PathsSel {
-    site: Option<String>,
-    depth: Option<u32>,
-}
-
-/// GET /app/paths — top page-navigation sequences, by site.
-pub async fn paths_global(
-    State(state): State<Arc<AppState>>,
-    Query(sel): Query<PathsSel>,
-    Range { range, label }: Range,
-) -> Result<Response, AppError> {
-    let Some((site, sites)) = resolve_scope(&state, sel.site.as_deref()).await? else {
-        return Ok(Redirect::to("/app/sites").into_response());
-    };
-    let depth = sel.depth.unwrap_or(3).clamp(2, 6);
-    let report = state
-        .backend
-        .query_paths(site.id, &range, depth, 25)
-        .await
-        .unwrap_or_default();
-    let html = templates::render(
-        &state,
-        "paths.jinja",
-        minijinja::context! {
-            site => serde_json::to_value(&site).unwrap(),
-            report => serde_json::to_value(&report).unwrap(),
-            depth => depth,
-            range => label,
-            sites => sites,
-            scope_path => "/app/paths",
-        },
-    )?;
-    Ok(html.into_response())
-}
-
-/// GET /app/compare — pageviews/sessions across every site in the org.
-pub async fn compare_global(
-    State(state): State<Arc<AppState>>,
-    Range { range, label }: Range,
-) -> Result<Response, AppError> {
-    let orgs = state.meta.list_orgs().await?;
-    let sites = match orgs.first() {
-        Some(org) => state.meta.list_sites(org.id).await?,
-        None => vec![],
-    };
-    if sites.is_empty() {
-        return Ok(Redirect::to("/app/sites").into_response());
-    }
-    let mut rows = Vec::with_capacity(sites.len());
-    for s in &sites {
-        let pv = state
-            .backend
-            .query_pageviews(&PageviewsQuery {
-                site_id: s.id,
-                range: range.clone(),
-                granularity: Granularity::auto_for_range(&range),
-                filters: vec![],
-            })
-            .await
-            .unwrap_or_default();
-        rows.push(serde_json::json!({
-            "id": s.id.to_string(),
-            "name": s.name,
-            "domain": s.domain,
-            "pageviews": pv.total_pageviews,
-            "sessions": pv.total_sessions,
-            "bounce_rate": format!("{:.1}", pv.bounce_rate * 100.0),
-        }));
-    }
-    rows.sort_by(|a, b| {
-        b["pageviews"]
-            .as_u64()
-            .unwrap_or(0)
-            .cmp(&a["pageviews"].as_u64().unwrap_or(0))
-    });
-    let html = templates::render(
-        &state,
-        "compare.jinja",
-        minijinja::context! {
-            rows => rows,
-            range => label,
-        },
-    )?;
-    Ok(html.into_response())
-}
-
-// ---- Tier-3: annotations (dashboard forms on the overview) ----
-
-#[derive(Deserialize)]
-pub struct CreateAnnotationForm {
-    pub date: String,
-    pub text: String,
-}
-
-/// POST /app/sites/:site_id/annotations — add a chart annotation.
-pub async fn create_annotation(
-    State(state): State<Arc<AppState>>,
-    SiteId(site_id): SiteId,
-    Form(form): Form<CreateAnnotationForm>,
-) -> Result<Response, AppError> {
-    let date = chrono::NaiveDate::parse_from_str(form.date.trim(), "%Y-%m-%d")
-        .map_err(|_| AppError::BadRequest("date must be YYYY-MM-DD"))?;
-    if form.text.trim().is_empty() {
-        return Err(AppError::BadRequest("text is required"));
-    }
-    let annotation = Annotation {
-        id: Ulid::new(),
-        site_id,
-        date,
-        text: form.text,
-        created_at: Utc::now(),
-    };
-    state.meta.create_annotation(&annotation).await?;
-    Ok(Redirect::to(&format!("/app/sites/{site_id}")).into_response())
-}
-
-/// POST /app/sites/:site_id/annotations/:id/delete
-pub async fn delete_annotation(
-    State(state): State<Arc<AppState>>,
-    Path((site_id_str, annotation_id_str)): Path<(String, String)>,
-) -> Result<Response, AppError> {
-    let site_id =
-        Ulid::from_string(&site_id_str).map_err(|_| AppError::BadRequest("invalid site id"))?;
-    let annotation_id = Ulid::from_string(&annotation_id_str)
-        .map_err(|_| AppError::BadRequest("invalid annotation id"))?;
-    if let Some(a) = state.meta.get_annotation(annotation_id).await? {
-        if a.site_id == site_id {
-            state.meta.delete_annotation(annotation_id).await?;
-        }
-    }
-    Ok(Redirect::to(&format!("/app/sites/{site_id}")).into_response())
-}
-
-// ---- Alert channels ----
-
-#[derive(Deserialize)]
-pub struct CreateChannelForm {
-    pub kind: String,
-    pub url: String,
-    #[serde(default)]
-    pub secret: Option<String>,
-}
-
-/// POST /app/sites/:site_id/channels — create a webhook/Slack/Telegram channel.
-pub async fn create_channel(
-    State(state): State<Arc<AppState>>,
-    SiteId(site_id): SiteId,
-    Form(form): Form<CreateChannelForm>,
-) -> Result<Response, AppError> {
-    let kind = AlertChannelKind::from_str(&form.kind);
-    let url = form.url.trim().to_string();
-    if url.is_empty() {
-        // For Telegram this field is the chat id; for webhooks/Slack the URL.
-        return Err(AppError::BadRequest("destination is required"));
-    }
-    let secret = form
-        .secret
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    // Telegram needs the bot token in `secret`.
-    if kind == AlertChannelKind::Telegram && secret.is_none() {
-        return Err(AppError::BadRequest("telegram channel needs a bot token"));
-    }
-    let channel = AlertChannel {
-        id: Ulid::new(),
-        site_id,
-        kind,
-        url,
-        secret,
-        created_at: Utc::now(),
-        last_error_at: None,
-    };
-    state.meta.create_alert_channel(&channel).await?;
-    Ok(Redirect::to(&format!("/app/sites/{site_id}/alerts")).into_response())
-}
-
-/// POST /app/sites/:site_id/channels/:channel_id/delete
-pub async fn delete_channel(
-    State(state): State<Arc<AppState>>,
-    Path((site_id_str, channel_id_str)): Path<(String, String)>,
-) -> Result<Response, AppError> {
-    let site_id =
-        Ulid::from_string(&site_id_str).map_err(|_| AppError::BadRequest("invalid site id"))?;
-    let channel_id = Ulid::from_string(&channel_id_str)
-        .map_err(|_| AppError::BadRequest("invalid channel id"))?;
-    // Only delete a channel that belongs to this site.
-    let channels = state.meta.list_alert_channels(site_id).await?;
-    if channels.iter().any(|c| c.id == channel_id) {
-        state.meta.delete_alert_channel(channel_id).await?;
-    }
-    Ok(Redirect::to(&format!("/app/sites/{site_id}/alerts")).into_response())
-}
-
-/// POST /app/sites/:site_id/channels/:channel_id/test — send a sample
-/// notification through the channel and report the result via `?tested=`.
-pub async fn test_channel(
-    State(state): State<Arc<AppState>>,
-    Path((site_id_str, channel_id_str)): Path<(String, String)>,
-) -> Result<Response, AppError> {
-    let site_id =
-        Ulid::from_string(&site_id_str).map_err(|_| AppError::BadRequest("invalid site id"))?;
-    let channel_id = Ulid::from_string(&channel_id_str)
-        .map_err(|_| AppError::BadRequest("invalid channel id"))?;
-    let channels = state.meta.list_alert_channels(site_id).await?;
-    let Some(channel) = channels.into_iter().find(|c| c.id == channel_id) else {
-        return Ok(
-            Redirect::to(&format!("/app/sites/{site_id}/alerts?tested=fail")).into_response(),
-        );
-    };
-
-    // A sample incident, dispatched once (no retry) through the channel's sink.
+/// Send a sample notification through a channel, used by the test-fire
+/// endpoint to let operators confirm a destination is wired up correctly.
+async fn dispatch_test_notification(site_id: Ulid, channel: &AlertChannel) -> Result<(), String> {
     let incident = Incident {
         id: Ulid::new(),
         site_id,
@@ -731,12 +53,180 @@ pub async fn test_channel(
         AlertChannelKind::Slack => &slack,
         AlertChannelKind::Telegram => &telegram,
     };
-    let outcome = match sink.dispatch(&channel, &incident).await {
-        Ok(()) => "ok",
+    sink.dispatch(channel, &incident)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ---- Alert channels: JSON API ----
+//
+// Channel management is dashboard-only: destinations carry secrets
+// (webhook signing keys, Telegram bot tokens) that a read/ingest-scoped API
+// key shouldn't be able to configure.
+
+/// Public view of an `AlertChannel`. Omits `secret`.
+fn channel_json(c: &AlertChannel) -> serde_json::Value {
+    serde_json::json!({
+        "id": c.id.to_string(),
+        "site_id": c.site_id.to_string(),
+        "kind": c.kind.as_str(),
+        "url": c.url,
+        "created_at": c.created_at.to_rfc3339(),
+        "last_error_at": c.last_error_at.map(|t| t.to_rfc3339()),
+    })
+}
+
+fn bad_request(msg: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({"error": msg})),
+    )
+        .into_response()
+}
+
+fn not_found() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({"error": "not found"})),
+    )
+        .into_response()
+}
+
+fn forbidden() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({"error": "requires a dashboard session, not an API key"})),
+    )
+        .into_response()
+}
+
+/// GET /api/v1/sites/:site/alert-channels
+pub async fn list_channels_api(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+) -> Response {
+    if !principal.is_dashboard() {
+        return forbidden();
+    }
+    let Ok(site_id) = Ulid::from_string(&site) else {
+        return bad_request("invalid site id");
+    };
+    let channels = state
+        .meta
+        .list_alert_channels(site_id)
+        .await
+        .unwrap_or_default();
+    Json(serde_json::json!({
+        "channels": channels.iter().map(channel_json).collect::<Vec<_>>(),
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct CreateChannelBody {
+    pub kind: String,
+    pub url: String,
+    #[serde(default)]
+    pub secret: Option<String>,
+}
+
+/// POST /api/v1/sites/:site/alert-channels
+pub async fn create_channel_api(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Json(body): Json<CreateChannelBody>,
+) -> Response {
+    if !principal.is_dashboard() {
+        return forbidden();
+    }
+    let Ok(site_id) = Ulid::from_string(&site) else {
+        return bad_request("invalid site id");
+    };
+    let kind = AlertChannelKind::from_str(&body.kind);
+    let url = body.url.trim().to_string();
+    if url.is_empty() {
+        return bad_request("destination is required");
+    }
+    let secret = body
+        .secret
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if kind == AlertChannelKind::Telegram && secret.is_none() {
+        return bad_request("telegram channel needs a bot token");
+    }
+    let channel = AlertChannel {
+        id: Ulid::new(),
+        site_id,
+        kind,
+        url,
+        secret,
+        created_at: Utc::now(),
+        last_error_at: None,
+    };
+    match state.meta.create_alert_channel(&channel).await {
+        Ok(_) => (StatusCode::CREATED, Json(channel_json(&channel))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// DELETE /api/v1/sites/:site/alert-channels/:id
+pub async fn delete_channel_api(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path((site, channel_id)): Path<(String, String)>,
+) -> Response {
+    if !principal.is_dashboard() {
+        return forbidden();
+    }
+    let (Ok(site_id), Ok(channel_ulid)) =
+        (Ulid::from_string(&site), Ulid::from_string(&channel_id))
+    else {
+        return bad_request("invalid id");
+    };
+    let channels = state
+        .meta
+        .list_alert_channels(site_id)
+        .await
+        .unwrap_or_default();
+    if !channels.iter().any(|c| c.id == channel_ulid) {
+        return not_found();
+    }
+    match state.meta.delete_alert_channel(channel_ulid).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// POST /api/v1/sites/:site/alert-channels/:id/test — test-fire a sample
+/// notification and report the outcome directly.
+pub async fn test_channel_api(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path((site, channel_id)): Path<(String, String)>,
+) -> Response {
+    if !principal.is_dashboard() {
+        return forbidden();
+    }
+    let (Ok(site_id), Ok(channel_ulid)) =
+        (Ulid::from_string(&site), Ulid::from_string(&channel_id))
+    else {
+        return bad_request("invalid id");
+    };
+    let channels = state
+        .meta
+        .list_alert_channels(site_id)
+        .await
+        .unwrap_or_default();
+    let Some(channel) = channels.into_iter().find(|c| c.id == channel_ulid) else {
+        return not_found();
+    };
+    match dispatch_test_notification(site_id, &channel).await {
+        Ok(()) => Json(serde_json::json!({"result": "ok"})).into_response(),
         Err(e) => {
             tracing::warn!(channel = %channel.id, kind = channel.kind.as_str(), "test channel failed: {e}");
-            "fail"
+            Json(serde_json::json!({"result": "fail", "error": e})).into_response()
         }
-    };
-    Ok(Redirect::to(&format!("/app/sites/{site_id}/alerts?tested={outcome}")).into_response())
+    }
 }

@@ -12,6 +12,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
     Json,
 };
+use axum_extra::extract::cookie::CookieJar;
 use serde::Deserialize;
 use ulid::Ulid;
 
@@ -19,7 +20,7 @@ use stomatopod_core::domain::digest::{DigestFrequency, DigestSubscription};
 
 use crate::{
     digest::{build_digest_email, verify_unsubscribe_token},
-    middleware::auth::Principal,
+    middleware::auth::{verify_session, Principal, SESSION_COOKIE},
     state::AppState,
 };
 
@@ -44,15 +45,20 @@ fn not_found() -> Response {
         .into_response()
 }
 
-/// Identify the acting user from the principal. A session-token bearer
-/// carries its user id directly; cookie sessions and API keys don't, so
-/// digest management requires a user-scoped token. Returns `None` when no
-/// user can be determined.
-fn current_user_id(principal: &Principal) -> Option<Ulid> {
-    match principal {
-        Principal::User(uid) => Ulid::from_string(uid).ok(),
-        _ => None,
-    }
+/// Identify the acting user. A session-token bearer carries its user id
+/// directly; the cookie-`Session` principal only records that a valid cookie
+/// was present (see `require_api_auth`), so re-derive the id from the cookie
+/// itself, mirroring `api::session_user_id`. API keys aren't tied to a user.
+/// Returns `None` when no user can be determined.
+fn current_user_id(state: &AppState, principal: &Principal, jar: &CookieJar) -> Option<Ulid> {
+    let raw = match principal {
+        Principal::User(uid) => Some(uid.clone()),
+        Principal::Session => jar
+            .get(SESSION_COOKIE)
+            .and_then(|c| verify_session(&state.config.auth.secret_key, c.value())),
+        Principal::ApiKey { .. } => None,
+    }?;
+    Ulid::from_string(&raw).ok()
 }
 
 #[derive(Deserialize)]
@@ -80,13 +86,14 @@ fn subscription_json(sub: &DigestSubscription) -> serde_json::Value {
 pub async fn get_subscription(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
+    jar: CookieJar,
     Path(site): Path<String>,
 ) -> Response {
     let site_id = match resolve_site_id(&state, &site).await {
         Some(id) => id,
         None => return not_found(),
     };
-    let user_id = match current_user_id(&principal) {
+    let user_id = match current_user_id(&state, &principal, &jar) {
         Some(id) => id,
         None => return not_found(),
     };
@@ -101,6 +108,7 @@ pub async fn get_subscription(
 pub async fn put_subscription(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
+    jar: CookieJar,
     Path(site): Path<String>,
     Json(body): Json<PutSubscriptionBody>,
 ) -> Response {
@@ -108,7 +116,7 @@ pub async fn put_subscription(
         Some(id) => id,
         None => return not_found(),
     };
-    let user_id = match current_user_id(&principal) {
+    let user_id = match current_user_id(&state, &principal, &jar) {
         Some(id) => id,
         None => {
             return (
@@ -157,13 +165,14 @@ pub async fn put_subscription(
 pub async fn delete_subscription(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
+    jar: CookieJar,
     Path(site): Path<String>,
 ) -> Response {
     let site_id = match resolve_site_id(&state, &site).await {
         Some(id) => id,
         None => return not_found(),
     };
-    let user_id = match current_user_id(&principal) {
+    let user_id = match current_user_id(&state, &principal, &jar) {
         Some(id) => id,
         None => return not_found(),
     };
@@ -181,13 +190,14 @@ pub async fn delete_subscription(
 pub async fn send_test(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
+    jar: CookieJar,
     Path(site): Path<String>,
 ) -> Response {
     let site_id = match resolve_site_id(&state, &site).await {
         Some(id) => id,
         None => return not_found(),
     };
-    let user_id = match current_user_id(&principal) {
+    let user_id = match current_user_id(&state, &principal, &jar) {
         Some(id) => id,
         None => return not_found(),
     };

@@ -31,6 +31,16 @@ pub enum Principal {
     Session,
 }
 
+impl Principal {
+    /// True for a logged-in dashboard user (session cookie or signed-session
+    /// bearer token). False for read/ingest-scoped API keys, which must not
+    /// perform account-administrative writes (creating sites, minting other
+    /// API keys, or wiring alert-channel destinations).
+    pub fn is_dashboard(&self) -> bool {
+        !matches!(self, Principal::ApiKey { .. })
+    }
+}
+
 fn session_key(secret: &str) -> [u8; 32] {
     blake3::derive_key("stomatopod session signing key v1", secret.as_bytes())
 }

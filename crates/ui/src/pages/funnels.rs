@@ -1,0 +1,100 @@
+use dioxus::prelude::*;
+
+use crate::api::{get_json, post_json};
+use crate::components::card::{Card, EmptyState};
+use crate::components::funnel::FunnelBuilder;
+use crate::components::layout::PageHead;
+use crate::components::skeleton::Skeleton;
+use crate::components::tabs::{RangeTabs, SiteTab, SiteTabs};
+use crate::pages::active_filters;
+use crate::query::DashQuery;
+use crate::routes::Route;
+use crate::types::{CreateFunnelBody, FunnelsList};
+
+/// Per-site funnels list + builder. Ports funnels.jinja's list and its
+/// vanilla-JS create form (now [`FunnelBuilder`]).
+#[component]
+pub fn Funnels(site_id: String, q: DashQuery) -> Element {
+    let route = use_route::<Route>();
+    let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
+
+    let refresh = use_signal(|| 0u32);
+    let funnels = use_resource({
+        let site_id = site_id.clone();
+        move || {
+            let _ = refresh();
+            let path = format!("/api/v1/sites/{site_id}/funnels");
+            async move { get_json::<FunnelsList>(&path).await }
+        }
+    });
+
+    rsx! {
+        PageHead { title: "Funnels", subtitle: "Site {site_id}",
+            RangeTabs { active: range.clone() }
+        }
+        SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Funnels }
+        {active_filters(&route, &q)}
+
+        div { class: "mb-4",
+            Card { title: "Funnels",
+                {match &*funnels.read() {
+                    None => rsx! {
+                        Skeleton { lines: 2 }
+                    },
+                    Some(Err(e)) => rsx! {
+                        EmptyState { message: format!("Failed to load funnels ({e})") }
+                    },
+                    Some(Ok(list)) => {
+                        if list.funnels.is_empty() {
+                            rsx! {
+                                EmptyState { message: "No funnels yet" }
+                            }
+                        } else {
+                            let site_id = site_id.clone();
+                            let range = range.clone();
+                            rsx! {
+                                div { class: "flex flex-col gap-2",
+                                    for f in list.funnels.clone() {
+                                        Link {
+                                            key: "{f.id}",
+                                            class: "flex items-center justify-between gap-3 py-2.5 px-1 border-t border-border-1 text-text-1 no-underline hover:text-teal-hi",
+                                            to: Route::FunnelDetail {
+                                                site_id: site_id.clone(),
+                                                funnel_id: f.id.clone(),
+                                                q: DashQuery {
+                                                    range: Some(range.clone()),
+                                                    ..Default::default()
+                                                },
+                                            },
+                                            span { class: "text-[13px] font-medium", "{f.name}" }
+                                            span { class: "text-muted-1 text-xs", "View →" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }}
+            }
+        }
+
+        Card { title: "Create funnel",
+            FunnelBuilder {
+                on_submit: {
+                    let site_id = site_id.clone();
+                    move |(name, steps)| {
+                        let site_id = site_id.clone();
+                        let mut refresh = refresh;
+                        spawn(async move {
+                            let path = format!("/api/v1/sites/{site_id}/funnels");
+                            let body = CreateFunnelBody { name, steps };
+                            if post_json::<_, serde_json::Value>(&path, &body).await.is_ok() {
+                                refresh += 1;
+                            }
+                        });
+                    }
+                },
+            }
+        }
+    }
+}

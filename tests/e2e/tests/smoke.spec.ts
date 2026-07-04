@@ -111,10 +111,11 @@ test("logged-in user can access the sites list page", async ({ page }) => {
   await page.click('button[type="submit"]');
   await expect(page).not.toHaveURL(/\/login/);
 
-  // Navigate to sites; requires an authenticated session cookie.
-  await page.goto("/app/sites");
+  // Navigate to the dashboard; requires an authenticated session cookie.
+  // After the SPA cutover the sites list lives at /app.
+  await page.goto("/app");
   await expect(page).not.toHaveURL(/\/login/);
-  // The page title comes from base.jinja
+  // The SPA sets the document title once the WASM bundle hydrates.
   await expect(page).toHaveTitle(/stomatopod/i);
 });
 

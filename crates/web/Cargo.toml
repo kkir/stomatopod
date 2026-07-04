@@ -32,6 +32,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 futures-util = "0.3"
 reqwest = { workspace = true }
 async-trait = { workspace = true }
+rust-embed = "8"
 
 [dev-dependencies]
 stomatopod-store = { path = "../store" }

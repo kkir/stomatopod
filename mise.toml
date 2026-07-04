@@ -1,6 +1,7 @@
 [tools]
 "cargo:cargo-nextest" = "latest"
 "cargo:cargo-watch" = "latest"
+"cargo:dioxus-cli" = "0.7.9"
 rust = "stable"
 
 [tasks."config:init"]
@@ -65,6 +66,22 @@ run = "cargo nextest run --all --all-features"
 description = "Run formatting, lint, and tests"
 depends = ["fmt", "lint", "test"]
 run = "echo 'All checks complete'"
+
+[tasks."ui:dev"]
+description = "Run the Dioxus SPA dev server with hot reload"
+run = "cd crates/ui && dx serve"
+
+[tasks."ui:bundle"]
+description = "Build the Dioxus SPA release bundle and copy it into crates/web/ui-dist"
+run = """
+# Clean the dx output and destination first: dx keeps old content-hashed
+# assets across builds, which would otherwise pile up stale files in ui-dist.
+rm -rf target/dx/stomatopod-ui/release/web/public
+(cd crates/ui && dx bundle --release)
+mkdir -p crates/web/ui-dist
+find crates/web/ui-dist -mindepth 1 ! -name '.gitkeep' -delete
+cp -r target/dx/stomatopod-ui/release/web/public/. crates/web/ui-dist/
+"""
 
 [tasks."e2e:install"]
 description = "Install Playwright dependencies and Chromium browser"

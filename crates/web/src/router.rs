@@ -13,8 +13,8 @@ use crate::{
         cors::ingest_cors,
     },
     routes::{
-        agents_dashboard, analytics, api, api_keys, auth, dashboard, digest, events, funnels,
-        insights, partials, sentinel, share_links, sites, spans,
+        agents_dashboard, analytics, api, api_keys, auth, digest, insights, sentinel, share_links,
+        sites, spans, ui,
     },
     state::AppState,
 };
@@ -49,7 +49,16 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     // Analytics JSON API routes (bearer token or session auth)
     let analytics_routes = Router::new()
-        .route("/api/v1/sites", get(analytics::list_sites))
+        .route(
+            "/api/v1/sites",
+            get(analytics::list_sites).post(sites::create_site_api),
+        )
+        .route(
+            "/api/v1/sites/:site",
+            axum::routing::patch(sites::patch_site_api),
+        )
+        .route("/api/v1/me", get(api::me))
+        .route("/api/v1/docs", get(api::docs_api))
         .route("/api/v1/sites/:site/pageviews", get(analytics::pageviews))
         .route("/api/v1/sites/:site/top-pages", get(analytics::top_pages))
         .route(
@@ -60,6 +69,18 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/v1/sites/:site/top-regions",
             get(analytics::top_regions),
+        )
+        .route(
+            "/api/v1/sites/:site/top-countries",
+            get(analytics::top_countries),
+        )
+        .route(
+            "/api/v1/sites/:site/top-browsers",
+            get(analytics::top_browsers),
+        )
+        .route(
+            "/api/v1/sites/:site/top-devices",
+            get(analytics::top_devices),
         )
         .route("/api/v1/sites/:site/events", get(analytics::events))
         .route(
@@ -178,6 +199,36 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             axum::routing::patch(share_links::patch_share_link)
                 .delete(share_links::delete_share_link),
         )
+        // ---- API keys (CRUD): global + per-site ----
+        .route(
+            "/api/v1/keys",
+            get(api_keys::list_keys_api).post(api_keys::create_key_api),
+        )
+        .route(
+            "/api/v1/keys/:key_id",
+            axum::routing::delete(api_keys::delete_key_api),
+        )
+        .route(
+            "/api/v1/sites/:site/keys",
+            get(api_keys::list_site_keys_api).post(api_keys::create_site_key_api),
+        )
+        .route(
+            "/api/v1/sites/:site/keys/:key_id",
+            axum::routing::delete(api_keys::delete_site_key_api),
+        )
+        // ---- Alert channels (CRUD) + test-fire ----
+        .route(
+            "/api/v1/sites/:site/alert-channels",
+            get(insights::list_channels_api).post(insights::create_channel_api),
+        )
+        .route(
+            "/api/v1/sites/:site/alert-channels/:id",
+            axum::routing::delete(insights::delete_channel_api),
+        )
+        .route(
+            "/api/v1/sites/:site/alert-channels/:id/test",
+            post(insights::test_channel_api),
+        )
         // ---- Email digest subscription ----
         .route(
             "/api/v1/sites/:site/digest-subscription",
@@ -215,128 +266,26 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout));
 
-    // Protected dashboard routes.
-    let dashboard_routes = Router::new()
-        .route("/app", get(dashboard::index))
-        .route("/app/docs", get(api::docs_page))
-        // Global feature pages with a site-filter dropdown.
-        .route("/app/realtime", get(insights::realtime_global))
-        .route("/app/goals", get(insights::goals_global))
-        .route("/app/alerts", get(insights::alerts_global))
-        .route("/app/campaigns", get(insights::campaigns_global))
-        .route("/app/retention", get(insights::retention_global))
-        .route("/app/paths", get(insights::paths_global))
-        .route("/app/compare", get(insights::compare_global))
+    // Protected dashboard: the Dioxus SPA now owns `/app` and every
+    // client-side route beneath it. The legacy AI-firewall "agents"
+    // dashboard is not part of the SPA migration (its nav is commented out),
+    // so its concrete routes are kept alongside the SPA fallback. matchit
+    // 0.7 forbids overlapping a `/app/*path` catch-all with these concrete
+    // routes, so the SPA is served via a nested `fallback` instead.
+    let app_routes = Router::new()
+        .route("/agents", get(agents_dashboard::agents_index))
+        .route("/agents/:agent_id", get(agents_dashboard::agent_detail))
         .route(
-            "/app/sites",
-            get(sites::sites_list).post(sites::create_site),
-        )
-        .route(
-            "/app/keys",
-            get(api_keys::global_keys_page).post(api_keys::global_create_key),
-        )
-        .route(
-            "/app/keys/:key_id/delete",
-            post(api_keys::global_delete_key),
-        )
-        .route(
-            "/app/sites/:site_id",
-            get(dashboard::site_overview).post(sites::update_site),
-        )
-        .route("/app/sites/:site_id/settings", get(sites::site_settings))
-        .route(
-            "/app/sites/:site_id/keys",
-            get(api_keys::keys_page).post(api_keys::create_key),
-        )
-        .route(
-            "/app/sites/:site_id/keys/:key_id/delete",
-            post(api_keys::delete_key),
-        )
-        .route("/app/sites/:site_id/events", get(events::events_list))
-        // Tier-2 dashboard pages: real-time, goals, analytics alerts.
-        .route("/app/sites/:site_id/realtime", get(insights::realtime_page))
-        .route(
-            "/app/sites/:site_id/partials/realtime",
-            get(insights::realtime_panel),
-        )
-        .route(
-            "/app/sites/:site_id/goals",
-            get(insights::goals_page).post(insights::create_goal),
-        )
-        .route(
-            "/app/sites/:site_id/goals/:goal_id/delete",
-            post(insights::delete_goal),
-        )
-        .route(
-            "/app/sites/:site_id/annotations",
-            post(insights::create_annotation),
-        )
-        .route(
-            "/app/sites/:site_id/annotations/:annotation_id/delete",
-            post(insights::delete_annotation),
-        )
-        .route(
-            "/app/sites/:site_id/alerts",
-            get(insights::alerts_page).post(insights::create_alert),
-        )
-        .route(
-            "/app/sites/:site_id/alerts/:alert_id/delete",
-            post(insights::delete_alert),
-        )
-        .route(
-            "/app/sites/:site_id/channels",
-            post(insights::create_channel),
-        )
-        .route(
-            "/app/sites/:site_id/channels/:channel_id/delete",
-            post(insights::delete_channel),
-        )
-        .route(
-            "/app/sites/:site_id/channels/:channel_id/test",
-            post(insights::test_channel),
-        )
-        .route(
-            "/app/sites/:site_id/funnels",
-            get(funnels::funnels_page).post(funnels::create_funnel),
-        )
-        .route(
-            "/app/sites/:site_id/funnels/:funnel_id",
-            get(funnels::funnel_detail),
-        )
-        // AI firewall dashboard
-        .route("/app/agents", get(agents_dashboard::agents_index))
-        .route("/app/agents/:agent_id", get(agents_dashboard::agent_detail))
-        .route(
-            "/app/agents/:agent_id/spans",
+            "/agents/:agent_id/spans",
             get(agents_dashboard::agent_spans_partial),
         )
-        .route("/app/incidents", get(agents_dashboard::incidents_page))
-        // HTMX partial routes
-        .route(
-            "/app/sites/:site_id/partials/top-pages",
-            get(partials::top_pages),
-        )
-        .route(
-            "/app/sites/:site_id/partials/top-referrers",
-            get(partials::top_referrers),
-        )
-        .route(
-            "/app/sites/:site_id/partials/top-countries",
-            get(partials::top_countries),
-        )
-        .route(
-            "/app/sites/:site_id/partials/top-browsers",
-            get(partials::top_browsers),
-        )
-        .route(
-            "/app/sites/:site_id/partials/top-devices",
-            get(partials::top_devices),
-        )
-        .route("/app/sites/:site_id/partials/top-os", get(partials::top_os))
-        .route(
-            "/app/sites/:site_id/partials/top-regions",
-            get(partials::top_regions),
-        )
+        .route("/incidents", get(agents_dashboard::incidents_page))
+        // Anything else under /app (the shell, hashed assets, and every SPA
+        // client route) is served by the bundle built by `mise run ui:bundle`.
+        .fallback(ui::serve_ui);
+
+    let dashboard_routes = Router::new()
+        .nest("/app", app_routes)
         .layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     // Sentinel SSE control stream — bearer-auth'd inline. MUST be

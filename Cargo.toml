@@ -5,6 +5,7 @@ members = [
     "crates/ingest",
     "crates/query",
     "crates/web",
+    "crates/ui",
     "bin/stomatopod",
     "bin/spq",
     "bin/sentinel",
@@ -15,7 +16,7 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0"
-rust-version = "1.76"
+rust-version = "1.85"
 
 [workspace.dependencies]
 # Async runtime
