@@ -6,8 +6,18 @@ use crate::ui::routes::Route;
 /// App grid: fixed sidebar + scrolling main. Used as `#[layout(Shell)]`.
 #[component]
 pub fn Shell() -> Element {
+    // Client-only hydration marker. SSR renders the shell without it; the mount
+    // effect below runs only after wasm hydrates (once event handlers are
+    // attached), flipping `data-hydrated` on. Tests (and any readiness probe)
+    // can wait for it instead of the SSR'd sidebar, which is present before the
+    // page is actually interactive.
+    let mut hydrated = use_signal(|| false);
+    use_effect(move || hydrated.set(true));
+
     rsx! {
-        div { class: "grid grid-cols-[232px_minmax(0,1fr)] min-h-screen bg-bg font-ui text-text-1",
+        div {
+            class: "grid grid-cols-[232px_minmax(0,1fr)] min-h-screen bg-bg font-ui text-text-1",
+            "data-hydrated": if hydrated() { "true" },
             Sidebar {}
             main { class: "main min-w-0 overflow-y-auto",
                 div { class: "container mx-auto max-w-[1200px] px-f4 pt-8 pb-16",

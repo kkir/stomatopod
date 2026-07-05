@@ -20,11 +20,16 @@ async function login(page: Page) {
   await expect(page).not.toHaveURL(/\/login/);
 }
 
-/** Wait for the WASM bundle to hydrate: the sidebar (kept with the literal
- *  `side-nav` class for exactly this) is present on every page via the
- *  layout Shell. */
+/** Wait for the WASM bundle to hydrate. The sidebar (kept with the literal
+ *  `side-nav` class for exactly this) is SSR'd and present before hydration,
+ *  so it only proves the shell rendered. The Shell's mount effect sets
+ *  `data-hydrated` once wasm has hydrated and event handlers are attached;
+ *  wait for that before interacting, or clicks race the hydration. */
 async function waitForSpa(page: Page) {
   await expect(page.locator(".side-nav")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator("[data-hydrated='true']")).toBeAttached({
+    timeout: 20_000,
+  });
 }
 
 /** Create a site via the JSON API using the browser context's session
