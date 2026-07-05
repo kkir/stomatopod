@@ -237,7 +237,23 @@ async fn serve(cfg: Config) -> Result<()> {
 
     let app = rest.merge(dioxus_app);
 
-    let addr: SocketAddr = format!("{listen_host}:{listen_port}").parse()?;
+    // `dx serve` (and PaaS platforms like Cloud Run) assign the listen address
+    // via the IP/PORT environment variables. Honor those when present so the
+    // Dioxus dev proxy and hot-reload can reach the server; otherwise fall back
+    // to the configured host/port.
+    let addr: SocketAddr = match std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+    {
+        Some(port) => {
+            let ip = std::env::var("IP")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+            SocketAddr::new(ip, port)
+        }
+        None => format!("{listen_host}:{listen_port}").parse()?,
+    };
     let listener = TcpListener::bind(addr).await?;
     info!("Stomatopod listening on http://{addr}");
 

@@ -34,11 +34,11 @@ exit 1
 """
 
 [tasks.dev]
-description = "Run local dev server (SSR + hydration). Builds the wasm client, then runs the server against it."
-depends = ["config:check", "ui:build"]
+description = "Run the Dioxus dev server (dx serve): builds the wasm client + server, compiles Tailwind, and hot-reloads on change."
+depends = ["config:check"]
 run = """
-DIOXUS_PUBLIC_PATH="$PWD/target/dx/stomatopod/debug/web/public" \
-  cargo run --bin stomatopod -- --config stomatopod.toml serve
+CONFIG="$PWD/stomatopod.toml"
+cd crates/web && dx serve --platform web @server --args="--config $CONFIG serve"
 """
 
 [tasks."dev:watch"]

@@ -1,5 +1,8 @@
 /target
 /data
+# `mise dev` runs `dx serve` from crates/web, so the embedded store's relative
+# `data_dir = "./data"` lands here instead of at the repo root.
+/crates/web/data
 *.mmdb
 stomatopod.toml
 !tests/e2e/stomatopod.toml

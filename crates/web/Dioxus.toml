@@ -1,4 +1,9 @@
 [application]
+# Compile the Tailwind v4 source (tailwind.css, which `@source`s the .rs
+# components) into the asset that `App` links via `asset!("/assets/tailwind.css")`.
+# `dx serve`/`dx build` run this automatically and watch the input in dev.
+tailwind_input = "tailwind.css"
+tailwind_output = "assets/tailwind.css"
 
 [web.app]
 title = "Stomatopod"
