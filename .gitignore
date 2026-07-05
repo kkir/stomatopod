@@ -7,9 +7,8 @@ stomatopod.toml
 *.log
 node_modules/
 assets/dist/
-# Built Dioxus SPA bundle (produced by `mise run ui:bundle`); rebuilt in CI /
-# Docker. The directory itself is kept via .gitkeep so rust-embed's
-# `#[folder = "ui-dist/"]` always resolves.
-/crates/web/ui-dist/*
-!/crates/web/ui-dist/.gitkeep
+# Dioxus fullstack build output (client bundle + server binary), rebuilt in CI /
+# Docker via `dx build --platform web`. Covered by `/target` above but called
+# out here for clarity.
+/target/dx/
 .DS_Store

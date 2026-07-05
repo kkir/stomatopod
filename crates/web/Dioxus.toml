@@ -1,0 +1,7 @@
+[application]
+
+[web.app]
+title = "Stomatopod"
+# The dashboard is served at the site root (SSR + hydration), so no base_path.
+# The former CSR proxies are gone too: in fullstack the server that renders the
+# app also owns `/api/*`, `/login`, etc., so there is nothing to proxy to.

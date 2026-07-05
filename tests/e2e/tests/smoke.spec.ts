@@ -34,10 +34,10 @@ test("successful login redirects to the dashboard", async ({ page }) => {
   await page.fill('input[name="password"]', ADMIN_PASSWORD);
   await page.click('button[type="submit"]');
 
-  // After a successful login the server redirects to /app.
+  // After a successful login the server redirects to the dashboard root (`/`).
   // With no sites configured the index page shows the "Your Sites" list.
   await expect(page).not.toHaveURL(/\/login/);
-  await expect(page).toHaveURL(/\/app/);
+  await expect(page).toHaveURL(/\/$/);
   // The page should not show the error class.
   await expect(page.locator(".error")).toHaveCount(0);
 });

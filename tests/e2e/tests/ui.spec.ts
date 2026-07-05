@@ -4,9 +4,11 @@ import { test, expect, Page } from "@playwright/test";
 const ADMIN_EMAIL = "admin@e2e.test";
 const ADMIN_PASSWORD = "playwright-test-pw";
 
-// The Dioxus SPA is client-rendered WASM; after the Phase 7 cutover it owns
-// the dashboard at `/app`.
-const UI = "/app";
+// The Dioxus fullstack app owns the dashboard at the site root (SSR +
+// hydration). `UI` is the empty prefix so `${UI}/sites/:id` etc. resolve
+// against `/`; use `ROOT` for a bare navigation to the dashboard root.
+const UI = "";
+const ROOT = "/";
 
 /** Log in through the SSR login form; the session cookie then authorizes
  *  both the SPA shell (`require_auth`) and its `/api/v1` calls. */
@@ -39,7 +41,7 @@ async function createSite(page: Page, name: string, domain: string) {
 // ---- Auth gating ----
 
 test("unauthenticated visit to /ui redirects to login", async ({ page }) => {
-  await page.goto(UI);
+  await page.goto(ROOT);
   await expect(page).toHaveURL(/\/login/);
 });
 
@@ -47,7 +49,7 @@ test("unauthenticated visit to /ui redirects to login", async ({ page }) => {
 
 test("authenticated /ui renders the SPA shell", async ({ page }) => {
   await login(page);
-  await page.goto(UI);
+  await page.goto(ROOT);
   await waitForSpa(page);
   await expect(page.getByRole("heading", { name: "Sites" })).toBeVisible();
   // Nav links from the sidebar (kept from the legacy tier2 coverage).
@@ -66,7 +68,7 @@ test("a created site appears and its overview loads", async ({ page }) => {
   const uniq = `Overview Co ${Date.now().toString(36)}`;
   const siteId = await createSite(page, uniq, "overview.example");
 
-  await page.goto(UI);
+  await page.goto(ROOT);
   await waitForSpa(page);
   await expect(page.getByText(uniq)).toBeVisible();
 

@@ -9,4 +9,3 @@ pub mod sentinel;
 pub mod share_links;
 pub mod sites;
 pub mod spans;
-pub mod ui;

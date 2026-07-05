@@ -8,7 +8,6 @@ use axum::{
 use chrono::Utc;
 use dashmap::DashMap;
 use http_body_util::BodyExt;
-use minijinja::Environment;
 use tower::ServiceExt;
 use ulid::Ulid;
 
@@ -25,48 +24,6 @@ use stomatopod_store::embedded::EmbeddedBackend;
 use stomatopod_web::{middleware::auth::sign_session, router::build_router, state::AppState};
 
 // ---- Test harness ----
-
-fn build_templates() -> Environment<'static> {
-    let mut env = Environment::new();
-    env.set_auto_escape_callback(|name| {
-        if name.ends_with(".jinja") {
-            minijinja::AutoEscape::Html
-        } else {
-            minijinja::AutoEscape::None
-        }
-    });
-    env.add_template("base.jinja", include_str!("../templates/base.jinja"))
-        .unwrap();
-    env.add_template("login.jinja", include_str!("../templates/login.jinja"))
-        .unwrap();
-    env.add_filter("urlencode", |s: String| {
-        let mut out = String::with_capacity(s.len());
-        for b in s.bytes() {
-            match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                    out.push(b as char)
-                }
-                _ => out.push_str(&format!("%{b:02X}")),
-            }
-        }
-        out
-    });
-    env.add_template("agents.jinja", include_str!("../templates/agents.jinja"))
-        .unwrap();
-    env.add_template("agent.jinja", include_str!("../templates/agent.jinja"))
-        .unwrap();
-    env.add_template(
-        "incidents.jinja",
-        include_str!("../templates/incidents.jinja"),
-    )
-    .unwrap();
-    env.add_template(
-        "partials/agent_spans.jinja",
-        include_str!("../templates/partials/agent_spans.jinja"),
-    )
-    .unwrap();
-    env
-}
 
 /// Test email transport: records every digest handed to it so assertions
 /// can inspect recipients and rendered bodies.
@@ -131,7 +88,6 @@ async fn setup_with_flush(flush_rows: usize, flush_interval_s: u64) -> TestCtx {
         backend: backend.clone(),
         agent_store: backend.clone(),
         meta: backend.clone(),
-        templates: build_templates(),
         config,
         tracker_hash: "testhash".into(),
         ingest_tx,
@@ -355,7 +311,7 @@ async fn agents_index_renders_when_no_data() {
     let user_id = Ulid::new().to_string();
     let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
     let req = Request::builder()
-        .uri("/app/agents")
+        .uri("/agents")
         .header("cookie", &cookie)
         .body(Body::empty())
         .unwrap();
@@ -390,7 +346,7 @@ async fn incidents_page_lists_manual_kill() {
     let user_id = Ulid::new().to_string();
     let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
     let req = Request::builder()
-        .uri("/app/incidents")
+        .uri("/incidents")
         .header("cookie", &cookie)
         .body(Body::empty())
         .unwrap();
@@ -1056,7 +1012,10 @@ async fn login_with_correct_credentials_redirects() {
         .get("location")
         .and_then(|v: &axum::http::HeaderValue| v.to_str().ok())
         .unwrap_or("");
-    assert_eq!(location, "/app", "successful login should redirect to /app");
+    assert_eq!(
+        location, "/",
+        "successful login should redirect to the dashboard root"
+    );
 }
 
 #[tokio::test]
@@ -1112,8 +1071,14 @@ async fn logout_clears_cookie_and_redirects_to_login() {
 
 #[tokio::test]
 async fn unauthenticated_dashboard_redirects_to_login() {
+    // The Dioxus SPA at `/` is guarded by `require_auth` in `server::serve`
+    // (outside `build_router`); the legacy agents/incidents dashboards carry
+    // the same guard here, so `/agents` exercises the redirect.
     let ctx = setup().await;
-    let req = Request::builder().uri("/app").body(Body::empty()).unwrap();
+    let req = Request::builder()
+        .uri("/agents")
+        .body(Body::empty())
+        .unwrap();
 
     let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);

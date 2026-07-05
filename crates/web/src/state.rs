@@ -4,7 +4,6 @@ use std::sync::{
 };
 
 use dashmap::DashMap;
-use minijinja::Environment;
 use stomatopod_core::{
     config::Config,
     domain::{api_key::ApiKeyScope, control::ControlEnvelope},
@@ -32,7 +31,6 @@ pub struct AppState {
     pub backend: Arc<dyn StorageBackend>,
     pub agent_store: Arc<dyn AgentStore>,
     pub meta: Arc<dyn MetaStore>,
-    pub templates: Environment<'static>,
     pub config: Arc<Config>,
     pub tracker_hash: String,
     /// Channel to the batch accumulator for event ingestion.

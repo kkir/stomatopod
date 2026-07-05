@@ -1,6 +1,6 @@
 use axum::{
     extract::State,
-    response::{IntoResponse, Redirect, Response},
+    response::{Html, IntoResponse, Redirect, Response},
     Form,
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
@@ -11,8 +11,8 @@ use std::sync::Arc;
 use crate::{
     error::AppError,
     middleware::auth::{sign_session, verify_session, SESSION_COOKIE},
+    server::html,
     state::AppState,
-    templates,
 };
 
 #[derive(Deserialize)]
@@ -30,9 +30,9 @@ pub async fn login_page(
         .and_then(|c| verify_session(&state.config.auth.secret_key, c.value()))
         .is_some()
     {
-        return Ok(Redirect::to("/app").into_response());
+        return Ok(Redirect::to("/").into_response());
     }
-    Ok(templates::render(&state, "login.jinja", minijinja::context! {})?.into_response())
+    Ok(Html(html::login_page(None)).into_response())
 }
 
 pub async fn login_submit(
@@ -42,26 +42,21 @@ pub async fn login_submit(
 ) -> Result<Response, AppError> {
     use argon2::{Argon2, PasswordHash, PasswordVerifier};
 
-    let render_invalid = |state: &AppState| -> Result<Response, AppError> {
-        Ok(templates::render(
-            state,
-            "login.jinja",
-            minijinja::context! { error => "Invalid credentials" },
-        )?
-        .into_response())
+    let render_invalid = || -> Result<Response, AppError> {
+        Ok(Html(html::login_page(Some("Invalid credentials"))).into_response())
     };
 
     let Some(user) = state.meta.get_user_by_email(&form.email).await? else {
-        return render_invalid(&state);
+        return render_invalid();
     };
     let Ok(hash) = PasswordHash::new(&user.password_hash) else {
-        return render_invalid(&state);
+        return render_invalid();
     };
     if Argon2::default()
         .verify_password(form.password.as_bytes(), &hash)
         .is_err()
     {
-        return render_invalid(&state);
+        return render_invalid();
     }
 
     let session_value = sign_session(&state.config.auth.secret_key, &user.id.to_string());
@@ -80,7 +75,7 @@ pub async fn login_submit(
         .same_site(SameSite::Lax)
         .max_age(Duration::seconds(ttl_secs))
         .build();
-    Ok((jar.add(cookie), Redirect::to("/app")).into_response())
+    Ok((jar.add(cookie), Redirect::to("/")).into_response())
 }
 
 pub async fn logout(jar: CookieJar) -> impl IntoResponse {

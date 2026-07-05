@@ -2,22 +2,17 @@ FROM rust:1-bookworm AS builder
 
 WORKDIR /app
 
-# Toolchain for building the Dioxus SPA: the wasm target plus the pinned
-# `dx` CLI (matches the version in mise.toml / crates/ui/Cargo.toml).
+# Toolchain for the Dioxus fullstack build: the wasm target plus the pinned
+# `dx` CLI (matches the version in mise.toml).
 RUN rustup target add wasm32-unknown-unknown \
     && cargo install dioxus-cli --version 0.7.9 --locked
 
 COPY . .
 
-# Build the SPA bundle first and stage it into crates/web/ui-dist/ so
-# rust-embed embeds it into the release binary at compile time. (This mirrors
-# `mise run ui:bundle`; ui-dist is gitignored and rebuilt here.)
-RUN cd crates/ui && dx bundle --release \
-    && rm -rf /app/crates/web/ui-dist \
-    && mkdir -p /app/crates/web/ui-dist \
-    && cp -r /app/target/dx/stomatopod-ui/release/web/public/. /app/crates/web/ui-dist/
-
-RUN cargo build --release --bin stomatopod
+# One command builds the whole fullstack app: the wasm client (hydration
+# bundle) and the native server binary that SSRs it. dx arranges the output as
+# `.../web/{server, public/}` — the server binary next to its static assets.
+RUN cd crates/web && dx build --platform web --release
 
 FROM debian:bookworm-slim AS runtime
 
@@ -30,7 +25,11 @@ RUN groupadd --system stomatopod \
 
 WORKDIR /app
 
-COPY --from=builder /app/target/release/stomatopod /usr/local/bin/stomatopod
+# The server binary and the client bundle it renders/serves. `DIOXUS_PUBLIC_PATH`
+# points the server at the bundle (index.html + hashed wasm/JS/CSS assets).
+COPY --from=builder /app/target/dx/stomatopod/release/web/server /usr/local/bin/stomatopod
+COPY --from=builder /app/target/dx/stomatopod/release/web/public /app/public
+ENV DIOXUS_PUBLIC_PATH=/app/public
 
 RUN mkdir -p /app/data \
     && chown -R stomatopod:stomatopod /app

@@ -297,20 +297,6 @@ fn render_docs() -> RenderedDocs {
     RenderedDocs { body, toc }
 }
 
-/// `GET /app/docs` — the same documentation rendered to HTML for humans, with
-/// a right-side anchor nav built from the H2/H3 headings.
-pub async fn docs_page(
-    State(state): State<Arc<AppState>>,
-) -> Result<axum::response::Response, crate::error::AppError> {
-    let RenderedDocs { body, toc } = render_docs();
-    let html = crate::templates::render(
-        &state,
-        "docs.jinja",
-        minijinja::context! { content => body, toc => toc },
-    )?;
-    Ok(html.into_response())
-}
-
 /// `GET /api/v1/docs` — the same documentation as pulldown-cmark-rendered
 /// HTML, for the SPA to inject with `dangerous_inner_html`.
 pub async fn docs_api() -> impl IntoResponse {

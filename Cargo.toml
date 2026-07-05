@@ -5,8 +5,6 @@ members = [
     "crates/ingest",
     "crates/query",
     "crates/web",
-    "crates/ui",
-    "bin/stomatopod",
     "bin/spq",
     "bin/sentinel",
 ]

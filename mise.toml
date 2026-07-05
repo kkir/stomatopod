@@ -34,13 +34,19 @@ exit 1
 """
 
 [tasks.dev]
-description = "Run local development server"
-depends = ["config:check"]
-run = "cargo run --bin stomatopod -- --config stomatopod.toml serve"
+description = "Run local dev server (SSR + hydration). Builds the wasm client, then runs the server against it."
+depends = ["config:check", "ui:build"]
+run = """
+DIOXUS_PUBLIC_PATH="$PWD/target/dx/stomatopod/debug/web/public" \
+  cargo run --bin stomatopod -- --config stomatopod.toml serve
+"""
 
 [tasks."dev:watch"]
-description = "Run local development server with file watching"
-run = "cargo watch -x 'run --bin stomatopod -- --config stomatopod.toml serve'"
+description = "Run the dev server with file watching (rebuild the client separately via `mise run ui:build`)"
+run = """
+DIOXUS_PUBLIC_PATH="$PWD/target/dx/stomatopod/debug/web/public" \
+  cargo watch -x 'run --bin stomatopod -- --config stomatopod.toml serve'
+"""
 
 [tasks.fmt]
 description = "Check Rust formatting"
@@ -67,21 +73,13 @@ description = "Run formatting, lint, and tests"
 depends = ["fmt", "lint", "test"]
 run = "echo 'All checks complete'"
 
-[tasks."ui:dev"]
-description = "Run the Dioxus SPA dev server with hot reload"
-run = "cd crates/ui && dx serve"
+[tasks."ui:build"]
+description = "Build the Dioxus fullstack app (debug): wasm client + server binary into target/dx/stomatopod/debug/web"
+run = "cd crates/web && dx build --platform web"
 
 [tasks."ui:bundle"]
-description = "Build the Dioxus SPA release bundle and copy it into crates/web/ui-dist"
-run = """
-# Clean the dx output and destination first: dx keeps old content-hashed
-# assets across builds, which would otherwise pile up stale files in ui-dist.
-rm -rf target/dx/stomatopod-ui/release/web/public
-(cd crates/ui && dx bundle --release)
-mkdir -p crates/web/ui-dist
-find crates/web/ui-dist -mindepth 1 ! -name '.gitkeep' -delete
-cp -r target/dx/stomatopod-ui/release/web/public/. crates/web/ui-dist/
-"""
+description = "Release build of the fullstack app into target/dx/stomatopod/release/web ({server, public/})"
+run = "cd crates/web && dx build --platform web --release"
 
 [tasks."e2e:install"]
 description = "Install Playwright dependencies and Chromium browser"
@@ -93,5 +91,7 @@ npx playwright install chromium
 
 [tasks.e2e]
 description = "Run Playwright end-to-end tests"
-depends = ["e2e:install"]
+# `ui:build` produces the wasm client bundle the SSR server hydrates against
+# (playwright.config.ts points DIOXUS_PUBLIC_PATH at it).
+depends = ["e2e:install", "ui:build"]
 run = "npm --prefix tests/e2e test"
