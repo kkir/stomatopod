@@ -34,7 +34,7 @@ jobs:
       # doesn't run `dx`, so create an empty placeholder: the CSS content is
       # irrelevant to clippy/test, only the file's presence is checked.
       - name: Create Tailwind placeholder
-        run: touch crates/web/assets/tailwind.css
+        run: mkdir -p crates/web/assets && touch crates/web/assets/tailwind.css
 
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
@@ -57,7 +57,7 @@ jobs:
       # See the check job: `asset!` needs the file present; content is irrelevant
       # to tests, and plain `cargo` doesn't run `dx` to generate it.
       - name: Create Tailwind placeholder
-        run: touch crates/web/assets/tailwind.css
+        run: mkdir -p crates/web/assets && touch crates/web/assets/tailwind.css
 
       - name: cargo test --all
         run: cargo test --all --all-features
