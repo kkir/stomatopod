@@ -154,6 +154,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
       - name: Cache cargo registry + build artifacts
         uses: actions/cache@v4
@@ -174,8 +176,20 @@ jobs:
           cache-dependency-path: |
             tests/e2e/package-lock.json
 
-      - name: Build server binary
-        run: cargo build --bin stomatopod
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Dioxus CLI
+        run: cargo binstall dioxus-cli@0.7.9 --locked --no-confirm
+
+      # The Dioxus fullstack server SSRs + hydrates against the wasm client
+      # bundle, so a plain `cargo build` binary panics for lack of the public
+      # dir. `dx build` produces both the server binary and its `public/` assets
+      # under target/dx/stomatopod/debug/web/ (playwright.config.ts defaults
+      # DIOXUS_PUBLIC_PATH there).
+      - name: Build fullstack app (server + wasm client bundle)
+        run: dx build --platform web
+        working-directory: crates/web
 
       - name: Install E2E npm dependencies (Playwright)
         run: npm ci
@@ -190,7 +204,7 @@ jobs:
         working-directory: tests/e2e
         env:
           CI: "true"
-          STOMATOPOD_BIN: ${{ github.workspace }}/target/debug/stomatopod
+          STOMATOPOD_BIN: ${{ github.workspace }}/target/dx/stomatopod/debug/web/server
           STOMATOPOD_ADMIN_EMAIL: admin@e2e.test
           STOMATOPOD_ADMIN_PASSWORD: playwright-test-pw
 
