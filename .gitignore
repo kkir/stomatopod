@@ -14,4 +14,7 @@ assets/dist/
 # Docker via `dx build --platform web`. Covered by `/target` above but called
 # out here for clarity.
 /target/dx/
+# Compiled Tailwind output, regenerated from crates/web/tailwind.css by
+# `dx serve`/`dx build`. The source is tracked; this artifact is not.
+/crates/web/assets/tailwind.css
 .DS_Store
