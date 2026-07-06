@@ -62,7 +62,14 @@ Host bind mount instead of a named volume:
 ## PaaS / Kubernetes (any platform)
 
 Attach a persistent disk and either mount it at `/app/data`, or mount it elsewhere
-and point Stomatopod at it with `STOMATOPOD_STORAGE__DATA_DIR`.
+and point Stomatopod at it with `STOMATOPOD_STORAGE__DATA_DIR`. The container
+starts as root and `chown`s the mounted directory to its unprivileged user before
+dropping privileges, so this works whether the platform gives you a Docker named
+volume, a bind mount, or a plain host directory (e.g. Coolify's persistent
+storage) — you don't need to pre-provision ownership yourself. The one exception:
+if the platform forces a specific non-root UID/GID on the container (an explicit
+`--user` or equivalent), the ownership fix-up is skipped and you're responsible
+for provisioning correct ownership on that path.
 
 - **Fly.io** — create a volume and mount it:
   ```toml

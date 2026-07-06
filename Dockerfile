@@ -17,7 +17,7 @@ RUN cd crates/web && dx build --platform web --release
 FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system stomatopod \
@@ -38,7 +38,13 @@ RUN mkdir -p /app/data \
 # look "mounted" yet still be orphaned on redeploy, defeating the startup
 # persistence guard. Mount a named volume / bind mount instead — see DEPLOY.md.
 
-USER stomatopod
+# Container starts as root (default, no USER here) so the entrypoint can chown
+# a freshly mounted data dir at boot before dropping to the unprivileged
+# `stomatopod` user via gosu. This matters because a bind-mounted host dir
+# (e.g. Coolify's persistent storage) is typically root-owned and does not
+# inherit this image's pre-chowned /app/data ownership at any mount path.
+COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 EXPOSE 8080
 

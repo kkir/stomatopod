@@ -6,6 +6,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub mode: Mode,
     pub listen: ListenConfig,
+    #[serde(default, deserialize_with = "deserialize_storage")]
     pub storage: StorageConfig,
     pub geo: GeoConfig,
     pub auth: AuthConfig,
@@ -123,6 +124,32 @@ impl Default for StorageConfig {
     }
 }
 
+/// Deserialize `storage`, defaulting the internally-tagged `backend`
+/// discriminator to `"embedded"` when it is absent but other `storage.*`
+/// keys are present.
+///
+/// Platforms like Coolify configure via individual env vars, so an operator
+/// who sets only `STOMATOPOD_STORAGE__DATA_DIR` (per DEPLOY.md) produces a
+/// `storage` table with no `backend` tag, which otherwise fails hard with
+/// `missing field \`backend\``. We buffer into a `serde_json::Value` (works
+/// over any self-describing deserializer, including the `config` crate's),
+/// inject `backend = "embedded"` only if missing, then deserialize the enum.
+/// This does not default any other required field, so e.g. `backend =
+/// "postgres"` without `url` still fails loudly. A fully-absent `storage`
+/// key never reaches this function; it uses the container-level
+/// `#[serde(default)]` fallback (`StorageConfig::default()`) instead.
+fn deserialize_storage<'de, D>(deserializer: D) -> Result<StorageConfig, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let mut value = serde_json::Value::deserialize(deserializer)?;
+    if let serde_json::Value::Object(map) = &mut value {
+        map.entry("backend")
+            .or_insert_with(|| serde_json::Value::String("embedded".to_string()));
+    }
+    serde_json::from_value(value).map_err(serde::de::Error::custom)
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct EmbeddedConfig {
@@ -214,5 +241,51 @@ impl Default for LimitsConfig {
             ingest_flush_interval_ms: 100,
             max_events_per_request: 10,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_defaults_backend_to_embedded_when_only_other_keys_set() {
+        let cfg: Config = serde_json::from_value(serde_json::json!({
+            "storage": { "data_dir": "/data" }
+        }))
+        .unwrap();
+        match cfg.storage {
+            StorageConfig::Embedded(e) => assert_eq!(e.data_dir, PathBuf::from("/data")),
+            other => panic!("expected Embedded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn storage_defaults_to_embedded_when_fully_absent() {
+        let cfg: Config = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(matches!(cfg.storage, StorageConfig::Embedded(_)));
+    }
+
+    #[test]
+    fn storage_passes_through_explicit_backend() {
+        let cfg: Config = serde_json::from_value(serde_json::json!({
+            "storage": {
+                "backend": "postgres",
+                "url": "postgresql://localhost/db"
+            }
+        }))
+        .unwrap();
+        match cfg.storage {
+            StorageConfig::Postgres(p) => assert_eq!(p.url, "postgresql://localhost/db"),
+            other => panic!("expected Postgres, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn storage_postgres_without_url_still_fails() {
+        let result: Result<Config, _> = serde_json::from_value(serde_json::json!({
+            "storage": { "backend": "postgres" }
+        }));
+        assert!(result.is_err());
     }
 }
