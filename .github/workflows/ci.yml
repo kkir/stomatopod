@@ -134,8 +134,12 @@ jobs:
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@main
 
+      # `--force`: rust-cache can restore binstall's `.crates.toml` metadata
+      # ("already installed") without the actual `dx` binary, leaving
+      # `dx: command not found`. Forcing the install always materializes the
+      # binary; binstall pulls a prebuilt release, so it stays fast.
       - name: Install Dioxus CLI
-        run: cargo binstall dioxus-cli@0.7.9 --locked --no-confirm
+        run: cargo binstall dioxus-cli@0.7.9 --locked --no-confirm --force
 
       # The Dioxus fullstack server SSRs + hydrates against the wasm client
       # bundle, so a plain `cargo build` binary panics for lack of the public
