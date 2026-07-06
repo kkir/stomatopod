@@ -23,16 +23,18 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache cargo registry + build artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+      # rust-cache keys per-job (GITHUB_JOB + toolchain + Cargo.lock), so each
+      # job persists its own target/ and registry instead of racing for one
+      # shared key. Only saves on green builds.
+      - name: Cache cargo + build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      # `asset!("/assets/tailwind.css")` requires the file to exist at compile
+      # time. It's a `dx`-generated artifact (untracked), and plain `cargo`
+      # doesn't run `dx`, so create an empty placeholder: the CSS content is
+      # irrelevant to clippy/test, only the file's presence is checked.
+      - name: Create Tailwind placeholder
+        run: mkdir -p crates/web/assets && touch crates/web/assets/tailwind.css
 
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
@@ -49,60 +51,16 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry + build artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+      - name: Cache cargo + build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      # See the check job: `asset!` needs the file present; content is irrelevant
+      # to tests, and plain `cargo` doesn't run `dx` to generate it.
+      - name: Create Tailwind placeholder
+        run: mkdir -p crates/web/assets && touch crates/web/assets/tailwind.css
 
       - name: cargo test --all
         run: cargo test --all --all-features
-
-  build-release:
-    name: Release Build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry + build artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-release-
-
-      - name: cargo build --release
-        run: cargo build --release
-
-      - name: Check stomatopod binary size
-        run: |
-          size=$(stat -c%s target/release/stomatopod)
-          echo "stomatopod size: $((size / 1024 / 1024))MB ($size bytes)"
-          if [ $size -gt 20971520 ]; then
-            echo "::warning::stomatopod binary exceeds 20MB target ($((size / 1024 / 1024))MB)"
-          fi
-
-      - name: Check sentinel binary size
-        run: |
-          size=$(stat -c%s target/release/sentinel)
-          echo "sentinel size: $((size / 1024 / 1024))MB ($size bytes)"
-          # Hyper + rustls puts the sidecar in a slightly different class
-          # from the analytics server; budget is intentionally larger.
-          if [ $size -gt 26214400 ]; then
-            echo "::warning::sentinel binary exceeds 25MB target ($((size / 1024 / 1024))MB)"
-          fi
 
   docker-image:
     name: Build & Push Container Image
@@ -148,23 +106,22 @@ jobs:
   e2e:
     name: E2E Smoke Tests
     runs-on: ubuntu-latest
-    needs: [check, test]
+    # Clippy is the cheap fast-fail gate; the e2e build (wasm + server) is the
+    # long pole, so run it in parallel with `test` rather than waiting on it.
+    needs: [check]
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry + build artifacts
-        uses: actions/cache@v4
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          targets: wasm32-unknown-unknown
+
+      # Distinct cache from the native-only jobs: `dx build` compiles the whole
+      # dependency graph a second time for wasm32, and rust-cache persists those
+      # artifacts here (the bulk of the build time).
+      - name: Cache cargo + build artifacts
+        uses: Swatinem/rust-cache@v2
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -174,12 +131,37 @@ jobs:
           cache-dependency-path: |
             tests/e2e/package-lock.json
 
-      - name: Build server binary
-        run: cargo build --bin stomatopod
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      # `--force`: rust-cache can restore binstall's `.crates.toml` metadata
+      # ("already installed") without the actual `dx` binary, leaving
+      # `dx: command not found`. Forcing the install always materializes the
+      # binary; binstall pulls a prebuilt release, so it stays fast.
+      - name: Install Dioxus CLI
+        run: cargo binstall dioxus-cli@0.7.9 --locked --no-confirm --force
+
+      # The Dioxus fullstack server SSRs + hydrates against the wasm client
+      # bundle, so a plain `cargo build` binary panics for lack of the public
+      # dir. `dx build` produces both the server binary and its `public/` assets
+      # under target/dx/stomatopod/debug/web/ (playwright.config.ts defaults
+      # DIOXUS_PUBLIC_PATH there).
+      - name: Build fullstack app (server + wasm client bundle)
+        run: dx build --platform web
+        working-directory: crates/web
 
       - name: Install E2E npm dependencies (Playwright)
         run: npm ci
         working-directory: tests/e2e
+
+      # Cache the downloaded browser binaries (~110MB) keyed on the Playwright
+      # version; on a hit `playwright install` only re-checks system deps.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('tests/e2e/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-playwright-
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
@@ -190,7 +172,7 @@ jobs:
         working-directory: tests/e2e
         env:
           CI: "true"
-          STOMATOPOD_BIN: ${{ github.workspace }}/target/debug/stomatopod
+          STOMATOPOD_BIN: ${{ github.workspace }}/target/dx/stomatopod/debug/web/server
           STOMATOPOD_ADMIN_EMAIL: admin@e2e.test
           STOMATOPOD_ADMIN_PASSWORD: playwright-test-pw
 

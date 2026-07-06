@@ -9,15 +9,14 @@ use tracing::error;
 /// a route can encounter and renders them as HTML responses with the
 /// appropriate status code.
 ///
-/// Previously every handler swallowed minijinja errors as 200-OK HTML and
-/// `StoreError`s as 200-OK error fragments — both invisible to monitoring.
-/// `AppError` propagates with `?` and maps to the right status at the edge.
+/// Previously every handler swallowed `StoreError`s as 200-OK error fragments,
+/// invisible to monitoring. `AppError` propagates with `?` and maps to the
+/// right status at the edge.
 #[derive(Debug)]
 pub enum AppError {
     BadRequest(&'static str),
     NotFound(&'static str),
     Store(StoreError),
-    Template(minijinja::Error),
 }
 
 impl AppError {
@@ -28,10 +27,6 @@ impl AppError {
             AppError::Store(e) => {
                 error!("store error: {e}");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Storage error".into())
-            }
-            AppError::Template(e) => {
-                error!("template error: {e}");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Template error".into())
             }
         }
     }
@@ -47,11 +42,5 @@ impl IntoResponse for AppError {
 impl From<StoreError> for AppError {
     fn from(e: StoreError) -> Self {
         AppError::Store(e)
-    }
-}
-
-impl From<minijinja::Error> for AppError {
-    fn from(e: minijinja::Error) -> Self {
-        AppError::Template(e)
     }
 }

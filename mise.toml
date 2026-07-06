@@ -1,6 +1,7 @@
 [tools]
 "cargo:cargo-nextest" = "latest"
 "cargo:cargo-watch" = "latest"
+"cargo:dioxus-cli" = "0.7.9"
 rust = "stable"
 
 [tasks."config:init"]
@@ -33,13 +34,19 @@ exit 1
 """
 
 [tasks.dev]
-description = "Run local development server"
+description = "Run the Dioxus dev server (dx serve): builds the wasm client + server, compiles Tailwind, and hot-reloads on change."
 depends = ["config:check"]
-run = "cargo run --bin stomatopod -- --config stomatopod.toml serve"
+run = """
+CONFIG="$PWD/stomatopod.toml"
+cd crates/web && dx serve --platform web @server --args="--config $CONFIG serve"
+"""
 
 [tasks."dev:watch"]
-description = "Run local development server with file watching"
-run = "cargo watch -x 'run --bin stomatopod -- --config stomatopod.toml serve'"
+description = "Run the dev server with file watching (rebuild the client separately via `mise run ui:build`)"
+run = """
+DIOXUS_PUBLIC_PATH="$PWD/target/dx/stomatopod/debug/web/public" \
+  cargo watch -x 'run --bin stomatopod -- --config stomatopod.toml serve'
+"""
 
 [tasks.fmt]
 description = "Check Rust formatting"
@@ -66,6 +73,14 @@ description = "Run formatting, lint, and tests"
 depends = ["fmt", "lint", "test"]
 run = "echo 'All checks complete'"
 
+[tasks."ui:build"]
+description = "Build the Dioxus fullstack app (debug): wasm client + server binary into target/dx/stomatopod/debug/web"
+run = "cd crates/web && dx build --platform web"
+
+[tasks."ui:bundle"]
+description = "Release build of the fullstack app into target/dx/stomatopod/release/web ({server, public/})"
+run = "cd crates/web && dx build --platform web --release"
+
 [tasks."e2e:install"]
 description = "Install Playwright dependencies and Chromium browser"
 run = """
@@ -76,5 +91,7 @@ npx playwright install chromium
 
 [tasks.e2e]
 description = "Run Playwright end-to-end tests"
-depends = ["e2e:install"]
+# `ui:build` produces the wasm client bundle the SSR server hydrates against
+# (playwright.config.ts points DIOXUS_PUBLIC_PATH at it).
+depends = ["e2e:install", "ui:build"]
 run = "npm --prefix tests/e2e test"

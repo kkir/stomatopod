@@ -1,173 +1,151 @@
 use axum::{
-    extract::State,
+    extract::{Extension, Path, State},
     http::StatusCode,
-    response::{IntoResponse, Redirect, Response},
-    Form,
+    response::{IntoResponse, Response},
+    Json,
 };
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::Deserialize;
 use std::sync::Arc;
 use ulid::Ulid;
 
 use stomatopod_core::domain::site::Site;
 
-use crate::{
-    error::AppError,
-    extractors::{Range, SiteId},
-    state::AppState,
-    templates,
-};
-
-#[derive(Deserialize)]
-pub struct CreateSiteForm {
-    pub domain: String,
-    pub name: String,
-    #[serde(default = "default_tz")]
-    pub timezone: String,
-}
-
-#[derive(Deserialize)]
-pub struct UpdateSiteForm {
-    pub domain: String,
-    pub name: String,
-    #[serde(default = "default_tz")]
-    pub timezone: String,
-    pub is_active: Option<String>,
-}
+use crate::{middleware::auth::Principal, state::AppState};
 
 fn default_tz() -> String {
     "UTC".into()
 }
 
-const TIMEZONES: &[&str] = &[
-    "UTC",
-    "America/Los_Angeles",
-    "America/Denver",
-    "America/Chicago",
-    "America/New_York",
-    "America/Toronto",
-    "America/Sao_Paulo",
-    "Europe/London",
-    "Europe/Berlin",
-    "Europe/Paris",
-    "Europe/Moscow",
-    "Africa/Johannesburg",
-    "Asia/Dubai",
-    "Asia/Kolkata",
-    "Asia/Singapore",
-    "Asia/Tokyo",
-    "Australia/Sydney",
-    "Pacific/Auckland",
-];
-
-pub async fn sites_list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let orgs = state.meta.list_orgs().await.unwrap_or_default();
-    let org_id = orgs.first().map(|o| o.id).unwrap_or_default();
-    let sites = state.meta.list_sites(org_id).await.unwrap_or_default();
-
-    let tmpl = state.templates.get_template("index.jinja").unwrap();
-    axum::response::Html(
-        tmpl.render(minijinja::context! {
-            sites => serde_json::to_value(&sites).unwrap(),
-        })
-        .unwrap(),
-    )
-}
-
-pub async fn create_site(
-    State(state): State<Arc<AppState>>,
-    Form(form): Form<CreateSiteForm>,
-) -> impl IntoResponse {
-    let orgs = state.meta.list_orgs().await.unwrap_or_default();
-    let org_id = match orgs.first() {
-        Some(o) => o.id,
-        None => return (StatusCode::BAD_REQUEST, "No organization found").into_response(),
-    };
-
-    let site = Site {
+/// Build a new `Site` domain object, shared by the site-creation API.
+fn build_site(org_id: Ulid, domain: String, name: String, timezone: String) -> Site {
+    Site {
         id: Ulid::new(),
         org_id,
-        domain: form.domain,
-        name: form.name,
-        timezone: form.timezone,
+        domain,
+        name,
+        timezone,
         public_key: generate_api_key(),
         created_at: Utc::now(),
         is_active: true,
-    };
+    }
+}
 
+// ---- JSON API ----
+
+fn site_json(site: &Site) -> serde_json::Value {
+    serde_json::json!({
+        "id": site.id.to_string(),
+        "org_id": site.org_id.to_string(),
+        "domain": site.domain,
+        "name": site.name,
+        "timezone": site.timezone,
+        "public_key": site.public_key,
+        "created_at": site.created_at.to_rfc3339(),
+        "is_active": site.is_active,
+    })
+}
+
+fn bad_request(msg: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({"error": msg})),
+    )
+        .into_response()
+}
+
+fn not_found() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({"error": "site not found"})),
+    )
+        .into_response()
+}
+
+fn forbidden() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({"error": "requires a dashboard session, not an API key"})),
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct CreateSiteBody {
+    pub domain: String,
+    pub name: String,
+    #[serde(default = "default_tz")]
+    pub timezone: String,
+}
+
+/// POST /api/v1/sites — create a site. Dashboard principals only: minting a
+/// new site isn't a "read" operation and API keys are read/ingest-scoped.
+pub async fn create_site_api(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Json(body): Json<CreateSiteBody>,
+) -> Response {
+    if !principal.is_dashboard() {
+        return forbidden();
+    }
+    let domain = body.domain.trim().to_string();
+    let name = body.name.trim().to_string();
+    if domain.is_empty() || name.is_empty() {
+        return bad_request("domain and name are required");
+    }
+    let orgs = state.meta.list_orgs().await.unwrap_or_default();
+    let Some(org) = orgs.first() else {
+        return bad_request("no organization found");
+    };
+    let site = build_site(org.id, domain, name, body.timezone);
     match state.meta.create_site(&site).await {
-        Ok(_) => Redirect::to(&format!("/app/sites/{}", site.id)).into_response(),
+        Ok(_) => (StatusCode::CREATED, Json(site_json(&site))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
-pub async fn site_settings(
-    State(state): State<Arc<AppState>>,
-    SiteId(site_id): SiteId,
-    Range { label, .. }: Range,
-) -> Result<Response, AppError> {
-    let site = state
-        .meta
-        .get_site(site_id)
-        .await?
-        .ok_or(AppError::NotFound("site not found"))?;
-
-    let created_ago = relative_time(site.created_at);
-    let html = templates::render(
-        &state,
-        "site_settings.jinja",
-        minijinja::context! {
-            site => serde_json::to_value(&site).unwrap(),
-            range => label,
-            created_ago => created_ago,
-            timezones => TIMEZONES,
-        },
-    )?;
-    Ok(html.into_response())
+#[derive(Deserialize, Default)]
+pub struct PatchSiteBody {
+    pub domain: Option<String>,
+    pub name: Option<String>,
+    pub timezone: Option<String>,
+    pub is_active: Option<bool>,
 }
 
-pub async fn update_site(
+/// PATCH /api/v1/sites/:site — update settings fields. Dashboard principals
+/// only, matching `create_site_api`.
+pub async fn patch_site_api(
     State(state): State<Arc<AppState>>,
-    SiteId(site_id): SiteId,
-    Form(form): Form<UpdateSiteForm>,
-) -> impl IntoResponse {
-    let mut site = match state.meta.get_site(site_id).await {
-        Ok(Some(site)) => site,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Site not found").into_response(),
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    Json(body): Json<PatchSiteBody>,
+) -> Response {
+    if !principal.is_dashboard() {
+        return forbidden();
+    }
+    let Ok(site_id) = Ulid::from_string(&site) else {
+        return bad_request("invalid site id");
+    };
+    let mut site_row = match state.meta.get_site(site_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return not_found(),
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
-
-    site.domain = form.domain;
-    site.name = form.name;
-    site.timezone = form.timezone;
-    site.is_active = form.is_active.is_some();
-
-    match state.meta.update_site(&site).await {
-        Ok(_) => Redirect::to(&format!("/app/sites/{site_id}/settings")).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    if let Some(d) = body.domain {
+        site_row.domain = d;
     }
-}
-
-fn relative_time(ts: DateTime<Utc>) -> String {
-    let now = Utc::now();
-    let delta = now.signed_duration_since(ts);
-    if delta.num_seconds() < 60 {
-        "just now".into()
-    } else if delta.num_minutes() < 60 {
-        let n = delta.num_minutes();
-        format!("{n} minute{} ago", if n == 1 { "" } else { "s" })
-    } else if delta.num_hours() < 24 {
-        let n = delta.num_hours();
-        format!("{n} hour{} ago", if n == 1 { "" } else { "s" })
-    } else if delta.num_days() < 30 {
-        let n = delta.num_days();
-        format!("{n} day{} ago", if n == 1 { "" } else { "s" })
-    } else if delta.num_days() < 365 {
-        let n = delta.num_days() / 30;
-        format!("{n} month{} ago", if n == 1 { "" } else { "s" })
-    } else {
-        let n = delta.num_days() / 365;
-        format!("{n} year{} ago", if n == 1 { "" } else { "s" })
+    if let Some(n) = body.name {
+        site_row.name = n;
+    }
+    if let Some(tz) = body.timezone {
+        site_row.timezone = tz;
+    }
+    if let Some(active) = body.is_active {
+        site_row.is_active = active;
+    }
+    match state.meta.update_site(&site_row).await {
+        Ok(_) => Json(site_json(&site_row)).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 

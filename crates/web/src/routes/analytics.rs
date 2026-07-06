@@ -380,6 +380,36 @@ pub async fn top_regions(
     top_list_response(&state, &principal, &site, &params, TopListField::Region).await
 }
 
+/// GET /api/v1/sites/:site/top-countries
+pub async fn top_countries(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    top_list_response(&state, &principal, &site, &params, TopListField::Country).await
+}
+
+/// GET /api/v1/sites/:site/top-browsers
+pub async fn top_browsers(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    top_list_response(&state, &principal, &site, &params, TopListField::Browser).await
+}
+
+/// GET /api/v1/sites/:site/top-devices
+pub async fn top_devices(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<AnalyticsParams>,
+) -> impl IntoResponse {
+    top_list_response(&state, &principal, &site, &params, TopListField::Device).await
+}
+
 /// GET /api/v1/sites/:site/events
 pub async fn events(
     State(state): State<Arc<AppState>>,

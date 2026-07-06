@@ -1,5 +1,4 @@
 use axum::{
-    async_trait,
     extract::{FromRequestParts, Path, Query},
     http::request::Parts,
 };
@@ -21,7 +20,6 @@ const MAX_FILTERS: usize = 10;
 /// `AppError::BadRequest` for non-ULID inputs so the response is a clean 400.
 pub struct SiteId(pub Ulid);
 
-#[async_trait]
 impl<S: Send + Sync> FromRequestParts<S> for SiteId {
     type Rejection = AppError;
 
@@ -57,7 +55,6 @@ pub struct Range {
     pub label: &'static str,
 }
 
-#[async_trait]
 impl<S: Send + Sync> FromRequestParts<S> for Range {
     type Rejection = AppError;
 
@@ -148,7 +145,6 @@ impl DashQuery {
     }
 }
 
-#[async_trait]
 impl<S: Send + Sync> FromRequestParts<S> for DashQuery {
     type Rejection = AppError;
 

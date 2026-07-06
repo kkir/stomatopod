@@ -1,0 +1,143 @@
+@import "tailwindcss";
+@source "./src/**/*.rs";
+
+@theme {
+    /* Transcribed from assets/dashboard.css :root (lines 17-83). */
+
+    /* Abyss */
+    --color-bg: #04080b;
+    --color-bg-2: #071119;
+    --color-surface-1: #0b141c;
+    --color-surface-2: #101c26;
+    --color-surface-3: #15242f;
+    --color-border-1: rgba(148, 222, 233, 0.08);
+    --color-border-2: rgba(148, 222, 233, 0.14);
+    --color-border-3: rgba(148, 222, 233, 0.22);
+
+    /* Ink */
+    --color-text-1: #e9f4f4;
+    --color-text-2: #bdd2d6;
+    --color-muted-1: #7e95a0;
+    --color-muted-2: #5d7280;
+
+    /* Carapace */
+    --color-teal: #2dd4bf;
+    --color-teal-hi: #5eead4;
+    --color-teal-deep: #0d9488;
+    --color-cyan: #22d3ee;
+    --color-violet: #818cf8;
+    --color-magenta: #e879f9;
+    --color-green: #34d399;
+    --color-red: #fb7185;
+    --color-gold: #fbbf24;
+    --color-teal-soft: rgba(45, 212, 191, 0.15);
+
+    --font-display: "Space Grotesk", sans-serif;
+    --font-ui:
+        "InterVariable", "Inter", ui-sans-serif, system-ui, -apple-system,
+        BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+    --radius-sm: 9px;
+    --radius-md: 14px;
+    --radius-lg: 20px;
+
+    /* Fibonacci spacing */
+    --spacing-f1: 8px;
+    --spacing-f2: 13px;
+    --spacing-f3: 1.3125rem;
+    --spacing-f4: 1.625rem;
+
+    --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-md:
+        0 1px 0 rgba(0, 0, 0, 0.35), 0 8px 18px rgba(0, 0, 0, 0.4),
+        0 22px 44px rgba(0, 0, 0, 0.35);
+    --shadow-glow:
+        0 4px 12px rgba(45, 212, 191, 0.28),
+        0 14px 32px rgba(45, 212, 191, 0.16);
+    --shadow-inner-hi: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+@layer base {
+    body {
+        background-color: var(--color-bg);
+    }
+}
+
+/* Kept as plain CSS (not expressible as utilities). */
+@keyframes skeleton-shimmer {
+    0% {
+        background-position:
+            -100% 0,
+            0 0;
+    }
+
+    100% {
+        background-position:
+            100% 0,
+            0 0;
+    }
+}
+
+.ret-cell {
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    background: color-mix(in srgb, var(--color-teal) var(--p, 0%), transparent);
+    border-radius: 4px;
+}
+
+/* Iridescent gradient + button gradient, from --iri / --grad-btn. */
+@utility bg-iri {
+    background: linear-gradient(
+        110deg,
+        var(--color-teal-hi) 0%,
+        var(--color-cyan) 32%,
+        var(--color-violet) 68%,
+        var(--color-magenta) 100%
+    );
+}
+
+@utility bg-grad-btn {
+    background: linear-gradient(
+        180deg,
+        #46e3cd 0%,
+        var(--color-teal) 45%,
+        #14b8a6 100%
+    );
+}
+
+/* Percentage-bar gradient inside table cells (BreakdownTable / EntryExitTable). */
+@utility bg-grad-bar {
+    background: linear-gradient(
+        90deg,
+        var(--color-teal-deep) 0%,
+        var(--color-teal) 55%,
+        var(--color-cyan) 100%
+    );
+    box-shadow: 0 0 10px rgba(45, 212, 191, 0.4);
+}
+
+/* Clip-text gradient used by StatTile's headline value. */
+@utility text-grad-value {
+    background: linear-gradient(180deg, #ffffff 0%, #99f6e4 115%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+/* Shimmering placeholder bar (Skeleton), reusing skeleton-shimmer above. */
+@utility skeleton-bar {
+    border-radius: var(--radius-sm);
+    background:
+        linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(186, 240, 245, 0.05) 50%,
+            transparent 100%
+        ),
+        var(--color-surface-2);
+    background-size:
+        200% 100%,
+        100% 100%;
+    animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}

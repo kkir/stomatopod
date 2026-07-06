@@ -1,11 +1,12 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    extract::{ConnectInfo, State},
+    extract::{ConnectInfo, Extension, State},
     http::{header, HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     Json,
 };
+use axum_extra::extract::cookie::CookieJar;
 
 use stomatopod_core::domain::api_key::{ApiKey, ApiKeyScope};
 use stomatopod_ingest::handler::{
@@ -14,7 +15,10 @@ use stomatopod_ingest::handler::{
 use tracing::warn;
 use ulid::Ulid;
 
-use crate::state::{ApiKeyCacheEntry, AppState};
+use crate::{
+    middleware::auth::{verify_session, Principal, SESSION_COOKIE},
+    state::{ApiKeyCacheEntry, AppState},
+};
 
 /// Ingest endpoint — delegates to the ingest crate using AppState fields.
 pub async fn handle_ingest(
@@ -105,6 +109,64 @@ pub fn touch_api_key(state: &Arc<AppState>, key_id: Ulid) {
     });
 }
 
+/// Resolve the signed-session user id carried by a `Principal`. Bearer
+/// principals already carry it; the cookie-based `Session` principal only
+/// records that a valid cookie was present (see `require_api_auth`), so this
+/// re-derives the user id from the cookie itself.
+fn session_user_id(state: &AppState, principal: &Principal, jar: &CookieJar) -> Option<Ulid> {
+    let raw = match principal {
+        Principal::User(uid) => Some(uid.clone()),
+        Principal::Session => jar
+            .get(SESSION_COOKIE)
+            .and_then(|c| verify_session(&state.config.auth.secret_key, c.value())),
+        Principal::ApiKey { .. } => None,
+    }?;
+    Ulid::from_string(&raw).ok()
+}
+
+/// `GET /api/v1/me` — session probe so the SPA can confirm it is logged in
+/// and learn who the current user is. API-key principals get a reduced view
+/// (org/site scope, no user row) since keys aren't tied to a specific user.
+pub async fn me(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    jar: CookieJar,
+) -> Response {
+    if let Principal::ApiKey { org_id, site_id } = &principal {
+        return Json(serde_json::json!({
+            "auth": "api_key",
+            "org_id": org_id.to_string(),
+            "site_id": site_id.map(|s| s.to_string()),
+        }))
+        .into_response();
+    }
+
+    let Some(user_id) = session_user_id(&state, &principal, &jar) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "authentication required"})),
+        )
+            .into_response();
+    };
+
+    match state.meta.get_user(user_id).await {
+        Ok(Some(user)) => Json(serde_json::json!({
+            "auth": "session",
+            "id": user.id.to_string(),
+            "org_id": user.org_id.to_string(),
+            "email": user.email,
+            "role": serde_json::to_value(user.role).unwrap_or_default(),
+        }))
+        .into_response(),
+        Ok(None) => (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "authentication required"})),
+        )
+            .into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 static TRACKER: &str = include_str!("../../../../assets/tracker.js");
 
 pub async fn tracker_js() -> impl IntoResponse {
@@ -162,11 +224,17 @@ fn slugify(s: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
-/// `GET /app/docs` — the same documentation rendered to HTML for humans, with
-/// a right-side anchor nav built from the H2/H3 headings.
-pub async fn docs_page(
-    State(state): State<Arc<AppState>>,
-) -> Result<axum::response::Response, crate::error::AppError> {
+/// Rendered docs: the markdown body as HTML plus the H2/H3 anchor-nav TOC.
+/// Shared by the human-facing page and the JSON API so the pulldown-cmark
+/// walk (heading-slug assignment included) lives in exactly one place.
+struct RenderedDocs {
+    body: String,
+    toc: Vec<TocItem>,
+}
+
+/// Render `DOCS_MD` to HTML, slugging H1-H6 headings as anchor ids and
+/// collecting H2/H3 headings into a table of contents.
+fn render_docs() -> RenderedDocs {
     use pulldown_cmark::{html, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
     use std::collections::HashMap;
 
@@ -226,13 +294,14 @@ pub async fn docs_page(
 
     let mut body = String::new();
     html::push_html(&mut body, events.into_iter());
+    RenderedDocs { body, toc }
+}
 
-    let html = crate::templates::render(
-        &state,
-        "docs.jinja",
-        minijinja::context! { content => body, toc => toc },
-    )?;
-    Ok(html.into_response())
+/// `GET /api/v1/docs` — the same documentation as pulldown-cmark-rendered
+/// HTML, for the SPA to inject with `dangerous_inner_html`.
+pub async fn docs_api() -> impl IntoResponse {
+    let RenderedDocs { body, toc } = render_docs();
+    Json(serde_json::json!({ "html": body, "toc": toc }))
 }
 
 static DASHBOARD_CSS: &str = include_str!("../../../../assets/dashboard.css");

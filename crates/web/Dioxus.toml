@@ -1,0 +1,12 @@
+[application]
+# Compile the Tailwind v4 source (tailwind.css, which `@source`s the .rs
+# components) into the asset that `App` links via `asset!("/assets/tailwind.css")`.
+# `dx serve`/`dx build` run this automatically and watch the input in dev.
+tailwind_input = "tailwind.css"
+tailwind_output = "assets/tailwind.css"
+
+[web.app]
+title = "Stomatopod"
+# The dashboard is served at the site root (SSR + hydration), so no base_path.
+# The former CSR proxies are gone too: in fullstack the server that renders the
+# app also owns `/api/*`, `/login`, etc., so there is nothing to proxy to.

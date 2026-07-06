@@ -13,12 +13,16 @@ use crate::{
         cors::ingest_cors,
     },
     routes::{
-        agents_dashboard, analytics, api, api_keys, auth, dashboard, digest, events, funnels,
-        insights, partials, sentinel, share_links, sites, spans,
+        agents_dashboard, analytics, api, api_keys, auth, digest, insights, sentinel, share_links,
+        sites, spans,
     },
     state::AppState,
 };
 
+/// Builds the non-SPA router: the REST API, ingest, auth, public share pages,
+/// the sentinel stream, and the legacy agents/incidents dashboards. The Dioxus
+/// application itself (SSR + hydration + static assets) is merged on top of
+/// this by [`crate::server::serve`], which owns the catch-all fallback.
 pub fn build_router(state: Arc<AppState>) -> Router {
     // Public ingest routes (CORS-enabled)
     let ingest_routes = Router::new()
@@ -26,13 +30,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/tracker.js", get(api::tracker_js))
         .layer(ingest_cors());
 
-    // Redirect / to /login — marketing site is out of scope for self-hosted.
-    // The stylesheet is public: the login page needs it before auth.
-    let root_redirect = Router::new()
-        .route(
-            "/",
-            get(|| async { axum::response::Redirect::to("/login") }),
-        )
+    // Public assets the login page needs before auth. The dashboard root `/`
+    // is no longer a redirect: it is now served by the Dioxus SSR fallback
+    // (behind `require_auth`, which redirects to `/login` when unauthenticated).
+    let public_assets = Router::new()
         .route("/app.css", get(api::dashboard_css))
         .route("/llms.txt", get(api::llms_txt));
 
@@ -49,144 +50,195 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     // Analytics JSON API routes (bearer token or session auth)
     let analytics_routes = Router::new()
-        .route("/api/v1/sites", get(analytics::list_sites))
-        .route("/api/v1/sites/:site/pageviews", get(analytics::pageviews))
-        .route("/api/v1/sites/:site/top-pages", get(analytics::top_pages))
         .route(
-            "/api/v1/sites/:site/top-referrers",
+            "/api/v1/sites",
+            get(analytics::list_sites).post(sites::create_site_api),
+        )
+        .route(
+            "/api/v1/sites/{site}",
+            axum::routing::patch(sites::patch_site_api),
+        )
+        .route("/api/v1/me", get(api::me))
+        .route("/api/v1/docs", get(api::docs_api))
+        .route("/api/v1/sites/{site}/pageviews", get(analytics::pageviews))
+        .route("/api/v1/sites/{site}/top-pages", get(analytics::top_pages))
+        .route(
+            "/api/v1/sites/{site}/top-referrers",
             get(analytics::top_referrers),
         )
-        .route("/api/v1/sites/:site/top-os", get(analytics::top_os))
+        .route("/api/v1/sites/{site}/top-os", get(analytics::top_os))
         .route(
-            "/api/v1/sites/:site/top-regions",
+            "/api/v1/sites/{site}/top-regions",
             get(analytics::top_regions),
         )
-        .route("/api/v1/sites/:site/events", get(analytics::events))
         .route(
-            "/api/v1/sites/:site/top-entry-pages",
+            "/api/v1/sites/{site}/top-countries",
+            get(analytics::top_countries),
+        )
+        .route(
+            "/api/v1/sites/{site}/top-browsers",
+            get(analytics::top_browsers),
+        )
+        .route(
+            "/api/v1/sites/{site}/top-devices",
+            get(analytics::top_devices),
+        )
+        .route("/api/v1/sites/{site}/events", get(analytics::events))
+        .route(
+            "/api/v1/sites/{site}/top-entry-pages",
             get(analytics::top_entry_pages),
         )
         .route(
-            "/api/v1/sites/:site/top-exit-pages",
+            "/api/v1/sites/{site}/top-exit-pages",
             get(analytics::top_exit_pages),
         )
-        .route("/api/v1/sites/:site/realtime", get(analytics::realtime))
+        .route("/api/v1/sites/{site}/realtime", get(analytics::realtime))
         .route(
-            "/api/v1/sites/:site/export/events",
+            "/api/v1/sites/{site}/export/events",
             get(analytics::export_events),
         )
         .route(
-            "/api/v1/sites/:site/export/sessions",
+            "/api/v1/sites/{site}/export/sessions",
             get(analytics::export_sessions),
         )
         .route(
-            "/api/v1/sites/:site/goals",
+            "/api/v1/sites/{site}/goals",
             get(analytics::list_goals).post(analytics::create_goal),
         )
         .route(
-            "/api/v1/sites/:site/goals/:goal_id",
+            "/api/v1/sites/{site}/goals/{goal_id}",
             axum::routing::delete(analytics::delete_goal),
         )
         .route(
-            "/api/v1/sites/:site/goals/:goal_id/stats",
+            "/api/v1/sites/{site}/goals/{goal_id}/stats",
             get(analytics::goal_stats),
         )
         .route(
-            "/api/v1/sites/:site/analytics-alerts",
+            "/api/v1/sites/{site}/analytics-alerts",
             get(analytics::list_analytics_alerts).post(analytics::create_analytics_alert),
         )
         .route(
-            "/api/v1/sites/:site/analytics-alerts/:id",
+            "/api/v1/sites/{site}/analytics-alerts/{id}",
             axum::routing::patch(analytics::patch_analytics_alert)
                 .delete(analytics::delete_analytics_alert),
         )
-        .route("/api/v1/sites/:site/campaigns", get(analytics::campaigns))
-        .route("/api/v1/sites/:site/retention", get(analytics::retention))
-        .route("/api/v1/sites/:site/paths", get(analytics::paths))
+        .route("/api/v1/sites/{site}/campaigns", get(analytics::campaigns))
+        .route("/api/v1/sites/{site}/retention", get(analytics::retention))
+        .route("/api/v1/sites/{site}/paths", get(analytics::paths))
         .route(
-            "/api/v1/sites/:site/annotations",
+            "/api/v1/sites/{site}/annotations",
             get(analytics::list_annotations).post(analytics::create_annotation),
         )
         .route(
-            "/api/v1/sites/:site/annotations/:id",
+            "/api/v1/sites/{site}/annotations/{id}",
             axum::routing::delete(analytics::delete_annotation),
         )
         .route(
-            "/api/v1/sites/:site/funnels",
+            "/api/v1/sites/{site}/funnels",
             get(analytics::list_funnels).post(analytics::create_funnel),
         )
         .route(
-            "/api/v1/sites/:site/funnels/:funnel_id",
+            "/api/v1/sites/{site}/funnels/{funnel_id}",
             get(analytics::funnel_result),
         )
         // ---- Tier-4 analytics ----
-        .route("/api/v1/sites/:site/vitals", get(analytics::vitals))
+        .route("/api/v1/sites/{site}/vitals", get(analytics::vitals))
         .route(
-            "/api/v1/sites/:site/vitals/pages",
+            "/api/v1/sites/{site}/vitals/pages",
             get(analytics::vitals_pages),
         )
-        .route("/api/v1/sites/:site/scroll", get(analytics::scroll))
+        .route("/api/v1/sites/{site}/scroll", get(analytics::scroll))
         .route(
-            "/api/v1/sites/:site/scroll/pages",
+            "/api/v1/sites/{site}/scroll/pages",
             get(analytics::scroll_pages),
         )
-        .route("/api/v1/sites/:site/search", get(analytics::search))
+        .route("/api/v1/sites/{site}/search", get(analytics::search))
         .route(
-            "/api/v1/sites/:site/search/zero-results",
+            "/api/v1/sites/{site}/search/zero-results",
             get(analytics::search_zero_results),
         )
         .route(
-            "/api/v1/sites/:site/search/timeseries",
+            "/api/v1/sites/{site}/search/timeseries",
             get(analytics::search_timeseries),
         )
-        .route("/api/v1/sites/:site/revenue", get(analytics::revenue))
+        .route("/api/v1/sites/{site}/revenue", get(analytics::revenue))
         .route(
-            "/api/v1/sites/:site/revenue/timeseries",
+            "/api/v1/sites/{site}/revenue/timeseries",
             get(analytics::revenue_timeseries),
         )
         .route(
-            "/api/v1/sites/:site/revenue/pages",
+            "/api/v1/sites/{site}/revenue/pages",
             get(analytics::revenue_pages),
         )
         .route(
-            "/api/v1/sites/:site/revenue/breakdown",
+            "/api/v1/sites/{site}/revenue/breakdown",
             get(analytics::revenue_breakdown),
         )
         .route(
-            "/api/v1/sites/:site/experiments",
+            "/api/v1/sites/{site}/experiments",
             get(analytics::experiments),
         )
         .route(
-            "/api/v1/sites/:site/experiments/:experiment",
+            "/api/v1/sites/{site}/experiments/{experiment}",
             get(analytics::experiment_result),
         )
         .route(
-            "/api/v1/sites/:site/heatmaps/clicks",
+            "/api/v1/sites/{site}/heatmaps/clicks",
             get(analytics::heatmap_clicks),
         )
         .route(
-            "/api/v1/sites/:site/heatmaps/scroll",
+            "/api/v1/sites/{site}/heatmaps/scroll",
             get(analytics::heatmap_scroll),
         )
         // ---- Share links (CRUD) ----
         .route(
-            "/api/v1/sites/:site/share-links",
+            "/api/v1/sites/{site}/share-links",
             get(share_links::list_share_links).post(share_links::create_share_link),
         )
         .route(
-            "/api/v1/sites/:site/share-links/:id",
+            "/api/v1/sites/{site}/share-links/{id}",
             axum::routing::patch(share_links::patch_share_link)
                 .delete(share_links::delete_share_link),
         )
+        // ---- API keys (CRUD): global + per-site ----
+        .route(
+            "/api/v1/keys",
+            get(api_keys::list_keys_api).post(api_keys::create_key_api),
+        )
+        .route(
+            "/api/v1/keys/{key_id}",
+            axum::routing::delete(api_keys::delete_key_api),
+        )
+        .route(
+            "/api/v1/sites/{site}/keys",
+            get(api_keys::list_site_keys_api).post(api_keys::create_site_key_api),
+        )
+        .route(
+            "/api/v1/sites/{site}/keys/{key_id}",
+            axum::routing::delete(api_keys::delete_site_key_api),
+        )
+        // ---- Alert channels (CRUD) + test-fire ----
+        .route(
+            "/api/v1/sites/{site}/alert-channels",
+            get(insights::list_channels_api).post(insights::create_channel_api),
+        )
+        .route(
+            "/api/v1/sites/{site}/alert-channels/{id}",
+            axum::routing::delete(insights::delete_channel_api),
+        )
+        .route(
+            "/api/v1/sites/{site}/alert-channels/{id}/test",
+            post(insights::test_channel_api),
+        )
         // ---- Email digest subscription ----
         .route(
-            "/api/v1/sites/:site/digest-subscription",
+            "/api/v1/sites/{site}/digest-subscription",
             get(digest::get_subscription)
                 .put(digest::put_subscription)
                 .delete(digest::delete_subscription),
         )
         .route(
-            "/api/v1/sites/:site/digest-subscription/test",
+            "/api/v1/sites/{site}/digest-subscription/test",
             post(digest::send_test),
         )
         .layer(middleware::from_fn_with_state(
@@ -197,146 +249,36 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     // Public, unauthenticated surfaces: token-scoped share dashboards and
     // one-click digest unsubscribe. No auth middleware.
     let public_share_routes = Router::new()
-        .route("/share/:token", get(share_links::public_page))
+        .route("/share/{token}", get(share_links::public_page))
         .route(
-            "/share/:token/api/pageviews",
+            "/share/{token}/api/pageviews",
             get(share_links::public_pageviews),
         )
         .route(
-            "/share/:token/api/top/:dimension",
+            "/share/{token}/api/top/{dimension}",
             get(share_links::public_top),
         )
-        .route("/share/:token/api/events", get(share_links::public_events))
-        .route("/share/:token/api/goals", get(share_links::public_goals))
-        .route("/digest/unsubscribe/:token", get(digest::unsubscribe));
+        .route("/share/{token}/api/events", get(share_links::public_events))
+        .route("/share/{token}/api/goals", get(share_links::public_goals))
+        .route("/digest/unsubscribe/{token}", get(digest::unsubscribe));
 
     // Auth routes (no auth required)
     let auth_routes = Router::new()
         .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout));
 
-    // Protected dashboard routes.
-    let dashboard_routes = Router::new()
-        .route("/app", get(dashboard::index))
-        .route("/app/docs", get(api::docs_page))
-        // Global feature pages with a site-filter dropdown.
-        .route("/app/realtime", get(insights::realtime_global))
-        .route("/app/goals", get(insights::goals_global))
-        .route("/app/alerts", get(insights::alerts_global))
-        .route("/app/campaigns", get(insights::campaigns_global))
-        .route("/app/retention", get(insights::retention_global))
-        .route("/app/paths", get(insights::paths_global))
-        .route("/app/compare", get(insights::compare_global))
+    // Legacy AI-firewall dashboards. Not part of the Dioxus SPA (their nav is
+    // commented out), so they remain concrete server-rendered routes. They live
+    // at the root now that the SPA owns `/` instead of `/app`, and stay behind
+    // the dashboard session guard.
+    let agents_routes = Router::new()
+        .route("/agents", get(agents_dashboard::agents_index))
+        .route("/agents/{agent_id}", get(agents_dashboard::agent_detail))
         .route(
-            "/app/sites",
-            get(sites::sites_list).post(sites::create_site),
-        )
-        .route(
-            "/app/keys",
-            get(api_keys::global_keys_page).post(api_keys::global_create_key),
-        )
-        .route(
-            "/app/keys/:key_id/delete",
-            post(api_keys::global_delete_key),
-        )
-        .route(
-            "/app/sites/:site_id",
-            get(dashboard::site_overview).post(sites::update_site),
-        )
-        .route("/app/sites/:site_id/settings", get(sites::site_settings))
-        .route(
-            "/app/sites/:site_id/keys",
-            get(api_keys::keys_page).post(api_keys::create_key),
-        )
-        .route(
-            "/app/sites/:site_id/keys/:key_id/delete",
-            post(api_keys::delete_key),
-        )
-        .route("/app/sites/:site_id/events", get(events::events_list))
-        // Tier-2 dashboard pages: real-time, goals, analytics alerts.
-        .route("/app/sites/:site_id/realtime", get(insights::realtime_page))
-        .route(
-            "/app/sites/:site_id/partials/realtime",
-            get(insights::realtime_panel),
-        )
-        .route(
-            "/app/sites/:site_id/goals",
-            get(insights::goals_page).post(insights::create_goal),
-        )
-        .route(
-            "/app/sites/:site_id/goals/:goal_id/delete",
-            post(insights::delete_goal),
-        )
-        .route(
-            "/app/sites/:site_id/annotations",
-            post(insights::create_annotation),
-        )
-        .route(
-            "/app/sites/:site_id/annotations/:annotation_id/delete",
-            post(insights::delete_annotation),
-        )
-        .route(
-            "/app/sites/:site_id/alerts",
-            get(insights::alerts_page).post(insights::create_alert),
-        )
-        .route(
-            "/app/sites/:site_id/alerts/:alert_id/delete",
-            post(insights::delete_alert),
-        )
-        .route(
-            "/app/sites/:site_id/channels",
-            post(insights::create_channel),
-        )
-        .route(
-            "/app/sites/:site_id/channels/:channel_id/delete",
-            post(insights::delete_channel),
-        )
-        .route(
-            "/app/sites/:site_id/channels/:channel_id/test",
-            post(insights::test_channel),
-        )
-        .route(
-            "/app/sites/:site_id/funnels",
-            get(funnels::funnels_page).post(funnels::create_funnel),
-        )
-        .route(
-            "/app/sites/:site_id/funnels/:funnel_id",
-            get(funnels::funnel_detail),
-        )
-        // AI firewall dashboard
-        .route("/app/agents", get(agents_dashboard::agents_index))
-        .route("/app/agents/:agent_id", get(agents_dashboard::agent_detail))
-        .route(
-            "/app/agents/:agent_id/spans",
+            "/agents/{agent_id}/spans",
             get(agents_dashboard::agent_spans_partial),
         )
-        .route("/app/incidents", get(agents_dashboard::incidents_page))
-        // HTMX partial routes
-        .route(
-            "/app/sites/:site_id/partials/top-pages",
-            get(partials::top_pages),
-        )
-        .route(
-            "/app/sites/:site_id/partials/top-referrers",
-            get(partials::top_referrers),
-        )
-        .route(
-            "/app/sites/:site_id/partials/top-countries",
-            get(partials::top_countries),
-        )
-        .route(
-            "/app/sites/:site_id/partials/top-browsers",
-            get(partials::top_browsers),
-        )
-        .route(
-            "/app/sites/:site_id/partials/top-devices",
-            get(partials::top_devices),
-        )
-        .route("/app/sites/:site_id/partials/top-os", get(partials::top_os))
-        .route(
-            "/app/sites/:site_id/partials/top-regions",
-            get(partials::top_regions),
-        )
+        .route("/incidents", get(agents_dashboard::incidents_page))
         .layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     // Sentinel SSE control stream — bearer-auth'd inline. MUST be
@@ -361,8 +303,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(public_share_routes)
         .merge(sentinel_control)
         .merge(auth_routes)
-        .merge(root_redirect)
-        .merge(dashboard_routes)
+        .merge(public_assets)
+        .merge(agents_routes)
         .layer(CompressionLayer::new());
 
     Router::new()

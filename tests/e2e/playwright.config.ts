@@ -18,6 +18,12 @@ const SERVER_ENV: Record<string, string> = {
     process.env.STOMATOPOD_ADMIN_EMAIL ?? "admin@e2e.test",
   STOMATOPOD_ADMIN_PASSWORD:
     process.env.STOMATOPOD_ADMIN_PASSWORD ?? "playwright-test-pw",
+  // Fullstack SSR + hydration needs the built wasm client bundle. Build it
+  // first with `dx build --platform web` (mise's e2e task does this); override
+  // for a release bundle via DIOXUS_PUBLIC_PATH.
+  DIOXUS_PUBLIC_PATH:
+    process.env.DIOXUS_PUBLIC_PATH ??
+    path.resolve(workspaceRoot, "target/dx/stomatopod/debug/web/public"),
 };
 
 export default defineConfig({
