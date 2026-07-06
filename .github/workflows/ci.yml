@@ -29,6 +29,13 @@ jobs:
       - name: Cache cargo + build artifacts
         uses: Swatinem/rust-cache@v2
 
+      # `asset!("/assets/tailwind.css")` requires the file to exist at compile
+      # time. It's a `dx`-generated artifact (untracked), and plain `cargo`
+      # doesn't run `dx`, so create an empty placeholder: the CSS content is
+      # irrelevant to clippy/test, only the file's presence is checked.
+      - name: Create Tailwind placeholder
+        run: touch crates/web/assets/tailwind.css
+
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
@@ -46,6 +53,11 @@ jobs:
 
       - name: Cache cargo + build artifacts
         uses: Swatinem/rust-cache@v2
+
+      # See the check job: `asset!` needs the file present; content is irrelevant
+      # to tests, and plain `cargo` doesn't run `dx` to generate it.
+      - name: Create Tailwind placeholder
+        run: touch crates/web/assets/tailwind.css
 
       - name: cargo test --all
         run: cargo test --all --all-features
