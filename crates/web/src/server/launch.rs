@@ -237,23 +237,18 @@ async fn serve(cfg: Config) -> Result<()> {
 
     let app = rest.merge(dioxus_app);
 
-    // `dx serve` (and PaaS platforms like Cloud Run) assign the listen address
-    // via the IP/PORT environment variables. Honor those when present so the
-    // Dioxus dev proxy and hot-reload can reach the server; otherwise fall back
-    // to the configured host/port.
-    let addr: SocketAddr = match std::env::var("PORT")
+    // `dx serve` and PaaS platforms (Cloud Run, Coolify, etc.) assign the
+    // listen port via the PORT environment variable; honor it when present.
+    // The interface follows IP if set, otherwise the configured host (which
+    // defaults to 0.0.0.0). Binding must NOT fall back to loopback here: a
+    // process on 127.0.0.1 inside a container is unreachable from the
+    // platform's reverse proxy, producing a 502.
+    let port = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse::<u16>().ok())
-    {
-        Some(port) => {
-            let ip = std::env::var("IP")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
-            SocketAddr::new(ip, port)
-        }
-        None => format!("{listen_host}:{listen_port}").parse()?,
-    };
+        .unwrap_or(listen_port);
+    let host = std::env::var("IP").unwrap_or(listen_host);
+    let addr: SocketAddr = format!("{host}:{port}").parse()?;
     let listener = TcpListener::bind(addr).await?;
     info!("Stomatopod listening on http://{addr}");
 
@@ -272,7 +267,16 @@ fn load_config(path: &str) -> Result<Config> {
         .add_source(
             Environment::with_prefix("STOMATOPOD")
                 .prefix_separator("_")
-                .separator("__"),
+                .separator("__")
+                // Coerce env-var strings into their target scalar type
+                // (`true` -> bool, `200` -> int). Required for typed fields
+                // under the internally-tagged `storage` enum
+                // (e.g. STOMATOPOD_STORAGE__ALLOW_EPHEMERAL=true), which is
+                // buffered through serde's self-describing path and would
+                // otherwise reject the raw string with "invalid type: string".
+                // `list_separator` is intentionally left unset so string
+                // fields are not split into arrays.
+                .try_parsing(true),
         )
         .build()?;
     Ok(cfg.try_deserialize()?)
