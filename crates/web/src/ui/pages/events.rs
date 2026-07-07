@@ -6,7 +6,7 @@ use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::table::{BreakdownRow, BreakdownTable};
 use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs};
-use crate::ui::pages::{active_filters, site_api_url, site_csv_url};
+use crate::ui::pages::{active_filters, site_api_url, site_csv_url, use_site_name, BTN_PRIMARY};
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
 use crate::ui::types::TopList;
@@ -21,6 +21,7 @@ use crate::ui::types::TopList;
 #[component]
 pub fn Events(site_id: String, q: DashQuery) -> Element {
     let route = use_route::<Route>();
+    let site_name = use_site_name(site_id.clone());
     let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
     let qs = q.to_string();
 
@@ -36,6 +37,15 @@ pub fn Events(site_id: String, q: DashQuery) -> Element {
         None => rsx! { Skeleton { lines: 4 } },
         Some(Err(e)) => rsx! {
             Card { EmptyState { message: e.to_string() } }
+        },
+        Some(Ok(list)) if list.rows.is_empty() => rsx! {
+            Card {
+                EmptyState {
+                    title: "No custom events yet",
+                    message: "Custom events track the actions that matter - signups, purchases, clicks. Fire them from the browser with stomatopod(\"event\", \"signup\") or POST to the ingest API, and they'll show up here.",
+                    Link { class: "{BTN_PRIMARY} mt-6", to: Route::Docs {}, "Learn how to send events" }
+                }
+            }
         },
         Some(Ok(list)) => {
             let rows = list
@@ -62,7 +72,7 @@ pub fn Events(site_id: String, q: DashQuery) -> Element {
     };
 
     rsx! {
-        PageHead { title: "Events", subtitle: "Site {site_id}",
+        PageHead { title: "Events", subtitle: "{site_name}",
             RangeTabs { active: range.clone() }
         }
         SiteTabs { site_id: site_id.clone(), range, active: SiteTab::Events }

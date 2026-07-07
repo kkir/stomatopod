@@ -16,6 +16,10 @@ pub struct SiteSummary {
     pub id: String,
     pub domain: String,
     pub name: String,
+    /// The site's public tracker key, embedded in the browser snippet's
+    /// `data-site`. Present in the list response; defaulted for older shapes.
+    #[serde(default)]
+    pub public_key: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
@@ -497,8 +501,19 @@ pub struct FunnelResult {
 
 // ---- Docs: GET /api/v1/docs (api::docs_api) ----
 
+/// One H2/H3 heading in the docs, for the right-side anchor navigation.
+/// Mirrors `api::TocItem`; `slug` matches the `id` stamped on the heading.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct DocsTocItem {
+    pub level: u8,
+    pub text: String,
+    pub slug: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub struct DocsHtml {
     #[serde(default)]
     pub html: String,
+    #[serde(default)]
+    pub toc: Vec<DocsTocItem>,
 }

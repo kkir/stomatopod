@@ -5,7 +5,7 @@ use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs};
-use crate::ui::pages::{active_filters, BTN_GHOST, BTN_PRIMARY, CTRL_INPUT};
+use crate::ui::pages::{active_filters, use_site_name, BTN_GHOST, BTN_PRIMARY, CTRL_INPUT};
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
 use crate::ui::types::{CreateGoalBody, Goal, GoalStats, GoalsList};
@@ -150,7 +150,12 @@ pub fn GoalsPanel(site_id: String, range: String) -> Element {
                 Some(Ok(list)) => {
                     if list.goals.is_empty() {
                         rsx! {
-                            Card { EmptyState { message: "No goals yet" } }
+                            Card {
+                                EmptyState {
+                                    title: "Set your first goal",
+                                    message: "Goals measure how often visitors complete an action you care about - a signup, a purchase, a plan upgrade - and track its conversion rate over time. Create one with the form above.",
+                                }
+                            }
                         }
                     } else {
                         rsx! {
@@ -178,10 +183,11 @@ pub fn GoalsPanel(site_id: String, range: String) -> Element {
 #[component]
 pub fn Goals(site_id: String, q: DashQuery) -> Element {
     let route = use_route::<Route>();
+    let site_name = use_site_name(site_id.clone());
     let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
 
     rsx! {
-        PageHead { title: "Goals", subtitle: "Site {site_id}",
+        PageHead { title: "Goals", subtitle: "{site_name}",
             RangeTabs { active: range.clone() }
         }
         SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Goals }

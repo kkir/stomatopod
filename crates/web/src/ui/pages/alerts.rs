@@ -5,7 +5,7 @@ use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::tabs::{SiteTab, SiteTabs};
-use crate::ui::pages::{BTN_GHOST, BTN_PRIMARY, CTRL_INPUT};
+use crate::ui::pages::{use_site_name, BTN_GHOST, BTN_PRIMARY, CTRL_INPUT};
 use crate::ui::types::{
     AlertsList, ChannelTestResult, ChannelsList, CreateAlertBody, CreateChannelBody, PatchAlertBody,
 };
@@ -424,8 +424,9 @@ fn AlertsCard(
 /// Per-site analytics-alerts + channels page.
 #[component]
 pub fn Alerts(site_id: String) -> Element {
+    let site_name = use_site_name(site_id.clone());
     rsx! {
-        PageHead { title: "Alerts", subtitle: "Site {site_id}" }
+        PageHead { title: "Alerts", subtitle: "{site_name}" }
         SiteTabs { site_id: site_id.clone(), range: "30d", active: SiteTab::Alerts }
         AlertsManager { site_id }
     }

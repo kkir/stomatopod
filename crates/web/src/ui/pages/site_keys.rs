@@ -6,12 +6,13 @@ use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::tabs::{SiteTab, SiteTabs};
-use crate::ui::pages::{BTN_PRIMARY, CTRL_INPUT};
+use crate::ui::pages::{use_site_name, BTN_PRIMARY, CTRL_INPUT};
 use crate::ui::types::{CreateSiteKeyBody, CreatedApiKey, KeysList};
 
 /// Per-site API keys page: keys bound to this site plus org-wide read keys.
 #[component]
 pub fn SiteKeys(site_id: String) -> Element {
+    let site_name = use_site_name(site_id.clone());
     let refresh = use_signal(|| 0u32);
     let keys = use_resource({
         let site_id = site_id.clone();
@@ -27,7 +28,7 @@ pub fn SiteKeys(site_id: String) -> Element {
     let created = use_signal(|| None::<CreatedApiKey>);
 
     rsx! {
-        PageHead { title: "API Keys", subtitle: "Site {site_id}" }
+        PageHead { title: "API Keys", subtitle: "{site_name}" }
         SiteTabs { site_id: site_id.clone(), range: "30d", active: SiteTab::Keys }
 
         Card { title: "New key",

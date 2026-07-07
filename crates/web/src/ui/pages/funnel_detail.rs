@@ -6,7 +6,7 @@ use crate::ui::components::funnel::FunnelBars;
 use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs};
-use crate::ui::pages::{active_filters, BTN_GHOST};
+use crate::ui::pages::{active_filters, use_site_name, BTN_GHOST};
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
 use crate::ui::types::FunnelResult;
@@ -16,6 +16,7 @@ use crate::ui::types::FunnelResult;
 #[component]
 pub fn FunnelDetail(site_id: String, funnel_id: String, q: DashQuery) -> Element {
     let route = use_route::<Route>();
+    let site_name = use_site_name(site_id.clone());
     let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
 
     let result = use_resource({
@@ -29,7 +30,7 @@ pub fn FunnelDetail(site_id: String, funnel_id: String, q: DashQuery) -> Element
     });
 
     rsx! {
-        PageHead { title: "Funnel", subtitle: "Site {site_id}",
+        PageHead { title: "Funnel", subtitle: "{site_name}",
             RangeTabs { active: range.clone() }
         }
         SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Funnels }
