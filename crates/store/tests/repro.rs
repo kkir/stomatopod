@@ -4,11 +4,7 @@ use stomatopod_core::domain::event::{DeviceType, Event, EventKind};
 use stomatopod_core::query::pageviews::PageviewsQuery;
 use stomatopod_core::traits::StorageBackend;
 use stomatopod_store::embedded::EmbeddedBackend;
-use tempfile::TempDir;
 use ulid::Ulid;
-
-// We use the public new() for config if available, or just mock it by using open_in_memory or whatever.
-// Let's just look at `stomatopod_store::embedded::EmbeddedBackend` methods.
 
 #[tokio::test]
 async fn test_pageview_metrics() {
@@ -23,6 +19,7 @@ async fn test_pageview_metrics() {
     .await
     .unwrap();
     let site_id = Ulid::new();
+    let session_id = Ulid::new().to_bytes();
     let now = Utc::now();
     let mut events = vec![];
     events.push(Event {
@@ -51,7 +48,7 @@ async fn test_pageview_metrics() {
         country_code: None,
         region: None,
         city: None,
-        session_id: Ulid::new().to_bytes(),
+        session_id,
         properties: None,
     });
     events.push(Event {
@@ -80,7 +77,7 @@ async fn test_pageview_metrics() {
         country_code: None,
         region: None,
         city: None,
-        session_id: Ulid::new().to_bytes(),
+        session_id,
         properties: None,
     });
     backend.ingest_events(events).await.unwrap();
@@ -100,9 +97,11 @@ async fn test_pageview_metrics() {
         .unwrap();
 
     assert_eq!(res.total_pageviews, 1);
+    assert_eq!(res.total_sessions, 1); // Because they have the same session ID
 }
+
 #[tokio::test]
-async fn test_pageview_metrics_sessions() {
+async fn test_pageview_metrics_custom_only() {
     let dir = tempfile::tempdir().unwrap();
     let backend = stomatopod_store::embedded::EmbeddedBackend::open(
         &stomatopod_core::config::EmbeddedConfig {
@@ -163,5 +162,6 @@ async fn test_pageview_metrics_sessions() {
         .await
         .unwrap();
 
-    assert_eq!(res.total_sessions, 0); // Is it 0?
+    assert_eq!(res.total_sessions, 0); 
+    assert_eq!(res.total_pageviews, 0); 
 }
