@@ -1,11 +1,39 @@
-FROM rust:1-bookworm AS builder
+# Shared toolchain base. This layer only busts when the toolchain block below
+# changes, so the GHA layer cache restores it (and everything it installs)
+# across CI runs instead of reinstalling. `dx` and cargo-chef come from
+# cargo-binstall as prebuilt releases (seconds) rather than compiling from
+# source (minutes, the old `cargo install dioxus-cli` cost).
+FROM rust:1-bookworm AS chef
 
 WORKDIR /app
 
-# Toolchain for the Dioxus fullstack build: the wasm target plus the pinned
-# `dx` CLI (matches the version in mise.toml).
 RUN rustup target add wasm32-unknown-unknown \
-    && cargo install dioxus-cli --version 0.7.9 --locked
+    && curl -L --proto '=https' --tlsv1.2 -sSf \
+        https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash \
+    && cargo binstall cargo-chef dioxus-cli@0.7.9 --locked --no-confirm
+
+# Capture the dependency graph. This stage sees the full source but its only
+# output is recipe.json, so it busts only when Cargo.toml/Cargo.lock change —
+# not on ordinary source edits.
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+
+# The release profile (thin LTO, codegen-units=1) lives in .cargo/config.toml;
+# it must be present during `cook` so the cached dependency artifacts share the
+# fingerprint dx's build expects, otherwise they'd recompile.
+COPY .cargo .cargo
+COPY --from=planner /app/recipe.json recipe.json
+
+# Compile just the dependencies against the recipe. This heavy layer (datafusion,
+# arrow, parquet, sqlx, ...) is keyed on the recipe, so app-only changes reuse it
+# from the GHA cache and skip straight to compiling our own crates.
+# Native only: cooking the whole workspace for wasm32 would try to build
+# datafusion for wasm and fail; the wasm client's own deps are small and compile
+# during `dx build` below.
+RUN cargo chef cook --release --recipe-path recipe.json
 
 COPY . .
 
