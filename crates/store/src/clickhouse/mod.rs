@@ -824,12 +824,13 @@ mod sql {
         format!(
             "SELECT \
                 formatDateTime({fn}(timestamp), '%Y-%m-%dT%H:%M:%S.000000Z') AS bucket, \
-                toString(countIf(kind = 'pageview')) AS pageviews, \
+                toString(count()) AS pageviews, \
                 toString(uniqExact(session_id)) AS sessions \
              FROM events \
              WHERE site_id = {site} \
                AND timestamp >= {start} \
                AND timestamp <= {end} \
+               AND kind = 'pageview' \
                {filters} \
              GROUP BY bucket \
              ORDER BY bucket",
@@ -952,9 +953,10 @@ mod sql {
     pub fn realtime_head(site_id: Ulid, window_minutes: u32) -> String {
         format!(
             "SELECT toString(uniqExact(session_id)) AS active, \
-                    toString(countIf(kind = 'pageview')) AS pvs \
+                    toString(count()) AS pvs \
              FROM events \
-             WHERE site_id = {site} AND timestamp >= now() - INTERVAL {w} MINUTE",
+             WHERE site_id = {site} AND timestamp >= now() - INTERVAL {w} MINUTE \
+               AND kind = 'pageview'",
             site = quote(&site_id.to_string()),
             w = window_minutes,
         )
@@ -1003,7 +1005,7 @@ mod sql {
     pub fn range_sessions(site_id: Ulid, range: &TimeRange) -> String {
         format!(
             "SELECT toString(uniqExact(session_id)) AS sessions FROM events \
-             WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end}",
+             WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end} AND kind = 'pageview'",
             site = quote(&site_id.to_string()),
             start = micros(range.start),
             end = micros(range.end),
@@ -1023,6 +1025,7 @@ mod sql {
                 SELECT formatDateTime({trunc}(timestamp), '%Y-%m-%d') AS date, \
                     uniqExact(session_id) AS sessions \
                 FROM events WHERE site_id = {site} AND timestamp >= {start} AND timestamp <= {end} \
+                  AND kind = 'pageview' \
                 GROUP BY date) AS sess USING (date) \
              ORDER BY date",
             site = quote(&q.site_id.to_string()),

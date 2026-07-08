@@ -154,10 +154,11 @@ impl StorageBackend for PostgresBackend {
         let (filter_sql, filter_vals) = pg_filter_clause(&q.filters, 4);
         let sql = format!(
             "SELECT date_trunc('{bucket}', timestamp) AS bucket, \
-                    COUNT(*) FILTER (WHERE kind = 'pageview')::BIGINT AS pageviews, \
+                    COUNT(*)::BIGINT AS pageviews, \
                     COUNT(DISTINCT session_id)::BIGINT AS sessions \
              FROM events \
-             WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 {filter_sql} \
+             WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
+               AND kind = 'pageview' {filter_sql} \
              GROUP BY 1 ORDER BY 1"
         );
         let mut query = sqlx::query(&sql)
@@ -404,8 +405,9 @@ impl StorageBackend for PostgresBackend {
 
         let head = sqlx::query(&format!(
             "SELECT COUNT(DISTINCT session_id)::BIGINT AS active, \
-                    COUNT(*) FILTER (WHERE kind = 'pageview')::BIGINT AS pvs \
-             FROM events WHERE site_id = $1 AND timestamp >= {since}"
+                    COUNT(*)::BIGINT AS pvs \
+             FROM events WHERE site_id = $1 AND timestamp >= {since} \
+               AND kind = 'pageview'"
         ))
         .bind(site_id.to_string())
         .fetch_one(&self.pool)
@@ -504,7 +506,8 @@ impl StorageBackend for PostgresBackend {
 
         let srow = sqlx::query(
             "SELECT COUNT(DISTINCT session_id)::BIGINT AS sessions FROM events \
-             WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3",
+             WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
+               AND kind = 'pageview'",
         )
         .bind(q.site_id.to_string())
         .bind(q.range.start)
@@ -526,7 +529,8 @@ impl StorageBackend for PostgresBackend {
                   AND kind = 'custom' AND name = $4 {filter_sql} GROUP BY 1), \
              sess AS (\
                 SELECT date_trunc('{bucket}', timestamp) AS b, COUNT(DISTINCT session_id) AS sessions \
-                FROM events WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 GROUP BY 1) \
+                FROM events WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
+                  AND kind = 'pageview' GROUP BY 1) \
              SELECT comp.b AS bucket, comp.uniq::BIGINT AS uniq, \
                     COALESCE(sess.sessions, 0)::BIGINT AS sessions \
              FROM comp LEFT JOIN sess ON comp.b = sess.b ORDER BY comp.b"

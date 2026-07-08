@@ -137,12 +137,13 @@ impl EmbeddedReader {
             r#"
             SELECT
                 date_trunc('{granularity_fn}', "timestamp") AS bucket,
-                CAST(SUM(CASE WHEN CAST(kind AS VARCHAR) = 'pageview' THEN 1 ELSE 0 END) AS BIGINT) AS pageviews,
+                CAST(COUNT(*) AS BIGINT) AS pageviews,
                 CAST(COUNT(DISTINCT session_id) AS BIGINT) AS sessions
             FROM {table}
             WHERE site_id = '{site_id}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
+              AND CAST(kind AS VARCHAR) = 'pageview'
               {filters}
             GROUP BY 1
             ORDER BY 1
@@ -509,11 +510,12 @@ impl EmbeddedReader {
         let head_sql = format!(
             r#"
             SELECT CAST(COUNT(DISTINCT session_id) AS BIGINT) AS active,
-                   CAST(SUM(CASE WHEN CAST(kind AS VARCHAR) = 'pageview' THEN 1 ELSE 0 END) AS BIGINT) AS pvs
+                   CAST(COUNT(*) AS BIGINT) AS pvs
             FROM {table}
             WHERE site_id = '{site}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
+              AND CAST(kind AS VARCHAR) = 'pageview'
             "#
         );
         let head = self.run(&head_sql).await?;
@@ -688,6 +690,7 @@ impl EmbeddedReader {
             WHERE site_id = '{site}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
+              AND CAST(kind AS VARCHAR) = 'pageview'
             GROUP BY 1 ORDER BY 1
             "#
         );
@@ -1148,6 +1151,7 @@ impl EmbeddedReader {
             WHERE site_id = '{site}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
+              AND CAST(kind AS VARCHAR) = 'pageview'
             "#
         );
         let batches = self.run(&sql).await?;
