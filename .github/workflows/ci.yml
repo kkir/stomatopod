@@ -102,6 +102,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Persist BuildKit layer cache in the GitHub Actions cache across runs.
+          # mode=max caches intermediate stages too (chef `cook`, dx install), so
+          # unchanged dependency layers are restored instead of recompiled.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   e2e:
     name: E2E Smoke Tests
