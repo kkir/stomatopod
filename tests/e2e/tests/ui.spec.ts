@@ -85,7 +85,9 @@ test("a created site appears and its overview loads", async ({ page }) => {
   await expect(page.getByText("Pageviews", { exact: true })).toBeVisible();
   await expect(page.getByText("Bounce Rate", { exact: true })).toBeVisible();
   // Entry/exit panels + export links (ported from legacy tier2 coverage).
-  await expect(page.getByRole("heading", { name: "Entry Pages" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Entry Pages" }),
+  ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Exit Pages" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Export" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Events CSV" })).toBeVisible();
@@ -116,7 +118,7 @@ test("all per-site tabs render without error", async ({ page }) => {
   const siteId = await createSite(page, "Tabs Co", "tabs.example");
 
   const tabs: Array<[string, RegExp]> = [
-    [`${UI}/sites/${siteId}`, /Overview/],
+    [`${UI}/sites/${siteId}`, /Tabs Co/],
     [`${UI}/sites/${siteId}/realtime`, /Real-time/],
     [`${UI}/sites/${siteId}/events`, /Events/],
     [`${UI}/sites/${siteId}/goals`, /Goals/],
@@ -129,7 +131,9 @@ test("all per-site tabs render without error", async ({ page }) => {
   for (const [url, heading] of tabs) {
     await page.goto(url);
     await waitForSpa(page);
-    await expect(page.getByRole("heading", { name: heading }).first()).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: heading }).first(),
+    ).toBeVisible();
     await expect(page.locator("body")).not.toContainText("Failed to load");
   }
 });
@@ -155,7 +159,9 @@ test("global pages render without error", async ({ page }) => {
   for (const [url, heading] of pages) {
     await page.goto(url);
     await waitForSpa(page);
-    await expect(page.getByRole("heading", { name: heading }).first()).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: heading }).first(),
+    ).toBeVisible();
     await expect(page.locator("body")).not.toContainText("Failed to load");
   }
 });
@@ -235,7 +241,9 @@ test("an alert channel can be added and an alert created", async ({ page }) => {
   await page.getByRole("button", { name: "Add channel" }).click();
   // The URL shows both in the channel list and later in the alert form's
   // channel <option>; the list entry is the first match.
-  await expect(page.getByText(hookUrl).first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(hookUrl).first()).toBeVisible({
+    timeout: 10_000,
+  });
 
   // With a channel present, create a traffic-spike alert. Assert on the
   // created row's config line ("threshold 200 · 60m"), which is unique to the

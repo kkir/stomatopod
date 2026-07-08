@@ -6,7 +6,7 @@ use crate::ui::components::funnel::FunnelBuilder;
 use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs};
-use crate::ui::pages::active_filters;
+use crate::ui::pages::{active_filters, use_site_name};
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
 use crate::ui::types::{CreateFunnelBody, FunnelsList};
@@ -16,6 +16,7 @@ use crate::ui::types::{CreateFunnelBody, FunnelsList};
 #[component]
 pub fn Funnels(site_id: String, q: DashQuery) -> Element {
     let route = use_route::<Route>();
+    let site_name = use_site_name(site_id.clone());
     let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
 
     let refresh = use_signal(|| 0u32);
@@ -29,7 +30,7 @@ pub fn Funnels(site_id: String, q: DashQuery) -> Element {
     });
 
     rsx! {
-        PageHead { title: "Funnels", subtitle: "Site {site_id}",
+        PageHead { title: "Funnels", subtitle: "{site_name}",
             RangeTabs { active: range.clone() }
         }
         SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Funnels }
@@ -47,7 +48,10 @@ pub fn Funnels(site_id: String, q: DashQuery) -> Element {
                     Some(Ok(list)) => {
                         if list.funnels.is_empty() {
                             rsx! {
-                                EmptyState { message: "No funnels yet" }
+                                EmptyState {
+                                    title: "Map your conversion funnel",
+                                    message: "A funnel tracks how visitors move through a sequence of steps - for example landing \u{2192} signup \u{2192} purchase - so you can see exactly where they drop off. Define your first one below.",
+                                }
                             }
                         } else {
                             let site_id = site_id.clone();

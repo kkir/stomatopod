@@ -40,6 +40,23 @@ impl std::fmt::Display for ApiError {
     }
 }
 
+/// The current page origin (e.g. `https://analytics.example.com`), for
+/// building copy-pasteable absolute URLs like the tracker snippet. Empty
+/// during SSR (the native build has no `window`); hydration re-renders the
+/// component with the real value.
+pub fn origin() -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|w| w.location().origin().ok())
+            .unwrap_or_default()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        String::new()
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 mod transport {
     use super::ApiError;

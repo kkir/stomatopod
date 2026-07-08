@@ -50,11 +50,30 @@ pub(crate) const BTN_PRIMARY: &str = "inline-flex items-center gap-1.5 px-[15px]
 pub(crate) const BTN_GHOST: &str = "inline-flex items-center gap-1.5 px-[13px] py-1.5 rounded-[10px] text-[12px] font-semibold tracking-tight cursor-pointer bg-text-1/3 text-text-2 border border-border-2 shadow-inner-hi hover:text-text-1 no-underline";
 pub(crate) const CTRL_INPUT: &str = "bg-black/32 border border-border-2 text-text-1 rounded-[10px] px-3 py-2 text-[13px] shadow-inner-hi focus:outline-none focus:border-teal/55";
 
+use crate::ui::api::get_json;
 use crate::ui::components::form::SelectField;
 use crate::ui::components::pill::FilterPill;
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
-use crate::ui::types::SiteSummary;
+use crate::ui::types::{SiteSummary, SitesList};
+
+/// Resolves a site's display name from the org site list, for per-site page
+/// headers (there is no single-site GET endpoint). Falls back to the raw id
+/// while the list loads or if the site isn't found, so a header never renders
+/// blank. Call at the top of a component like any other hook.
+pub(crate) fn use_site_name(site_id: String) -> String {
+    let sites = use_resource(move || async move { get_json::<SitesList>("/api/v1/sites").await });
+    let guard = sites.read();
+    match guard.as_ref() {
+        Some(Ok(list)) => list
+            .sites
+            .iter()
+            .find(|s| s.id == site_id)
+            .map(|s| s.name.clone())
+            .unwrap_or(site_id),
+        _ => site_id,
+    }
+}
 
 /// A site picker for the global insight pages (campaigns/retention/paths/
 /// alerts), which the legacy server scoped to one site via `resolve_scope`.

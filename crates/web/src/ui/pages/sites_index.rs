@@ -6,6 +6,7 @@ use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::form::Field;
 use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
+use crate::ui::pages::BTN_PRIMARY;
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
 use crate::ui::types::{CreateSiteBody, CreatedSite, SitesList};
@@ -57,7 +58,18 @@ pub fn SitesIndex() -> Element {
             Card { EmptyState { message: e.to_string() } }
         },
         Some(Ok(list)) if list.sites.is_empty() => rsx! {
-            Card { EmptyState { message: "No sites yet. Add your first site to get started." } }
+            Card {
+                EmptyState {
+                    title: "Track your first site",
+                    message: "A site is any website or app you want to measure. Create one to get a lightweight, cookie-free tracking snippet and start seeing pageviews, referrers, devices, and conversions in real time.",
+                    button {
+                        r#type: "button",
+                        class: "{BTN_PRIMARY} mt-6",
+                        onclick: move |_| show_form.set(true),
+                        "New Site"
+                    }
+                }
+            }
         },
         Some(Ok(list)) => rsx! {
             div { class: "flex flex-col gap-2.5 mt-2",

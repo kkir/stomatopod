@@ -64,18 +64,30 @@
     }
 }
 
-/* Kept as plain CSS (not expressible as utilities). */
-@keyframes skeleton-shimmer {
-    0% {
-        background-position:
-            -100% 0,
-            0 0;
+/* Kept as plain CSS (not expressible as utilities). A gentle two-tone pulse
+   for the loading Skeleton. The former moving shimmer reset its
+   background-position hard from 100% back to -100% each cycle, which read as a
+   distracting flicker; a symmetric pulse (identical 0%/100% frames) has no
+   seam. `skeleton-fade-in` delays the reveal so quick loads never flash a
+   placeholder at all. */
+@keyframes skeleton-pulse {
+    0%,
+    100% {
+        background-color: var(--color-surface-2);
     }
 
-    100% {
-        background-position:
-            100% 0,
-            0 0;
+    50% {
+        background-color: var(--color-surface-3);
+    }
+}
+
+@keyframes skeleton-fade-in {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
     }
 }
 
@@ -125,19 +137,15 @@
     color: transparent;
 }
 
-/* Shimmering placeholder bar (Skeleton), reusing skeleton-shimmer above. */
+/* Placeholder bar (Skeleton). Base opacity is 1, so under
+   `prefers-reduced-motion` (where `motion-reduce:animate-none` strips the
+   animations) the bar is still visible. When animating, `both` fill + the
+   0.3s delay holds the bar invisible for a beat before fading in, so loads
+   that resolve quickly never flash a skeleton. */
 @utility skeleton-bar {
     border-radius: var(--radius-sm);
-    background:
-        linear-gradient(
-            90deg,
-            transparent 0%,
-            rgba(186, 240, 245, 0.05) 50%,
-            transparent 100%
-        ),
-        var(--color-surface-2);
-    background-size:
-        200% 100%,
-        100% 100%;
-    animation: skeleton-shimmer 1.6s ease-in-out infinite;
+    background-color: var(--color-surface-2);
+    animation:
+        skeleton-fade-in 0.3s ease-out 0.3s both,
+        skeleton-pulse 1.8s ease-in-out 0.3s infinite;
 }

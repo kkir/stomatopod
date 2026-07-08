@@ -277,9 +277,21 @@ fn ShareLinksCard(site_id: String) -> Element {
 #[component]
 pub fn SiteSettings(site_id: String) -> Element {
     let sites = use_resource(move || async move { get_json::<SitesList>("/api/v1/sites").await });
+    let site_name = {
+        let guard = sites.read();
+        match guard.as_ref() {
+            Some(Ok(list)) => list
+                .sites
+                .iter()
+                .find(|s| s.id == site_id)
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| site_id.clone()),
+            _ => site_id.clone(),
+        }
+    };
 
     rsx! {
-        PageHead { title: "Site Settings", subtitle: "Site {site_id}" }
+        PageHead { title: "Site Settings", subtitle: "{site_name}" }
         SiteTabs { site_id: site_id.clone(), range: "30d", active: SiteTab::Settings }
 
         {match &*sites.read() {

@@ -3,6 +3,7 @@ use dioxus::prelude::*;
 use crate::ui::api::{delete, get_json, post_json};
 use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::chart::{ChartPoint, TimeseriesChart};
+use crate::ui::components::install::InstallCard;
 use crate::ui::components::layout::PageHead;
 use crate::ui::components::stat::{DeltaDir, DeltaInfo, StatTile};
 use crate::ui::components::table::{BreakdownRow, BreakdownTable, EntryExitRow, EntryExitTable};
@@ -13,7 +14,8 @@ use crate::ui::pages::{
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
 use crate::ui::types::{
-    AnnotationsList, CreateAnnotationBody, EntryPages, ExitPages, PageviewsResult, TopList,
+    AnnotationsList, CreateAnnotationBody, EntryPages, ExitPages, PageviewsResult, SitesList,
+    TopList,
 };
 
 /// Percent change of `cur` vs `prev`, classified for the delta badge.
@@ -123,6 +125,33 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
     let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
     let qs = q.to_string();
 
+    // Resolve this site's name/domain/public key from the org list (there is
+    // no single-site GET). Drives the page title and the install snippet.
+    let site = use_resource({
+        let site_id = site_id.clone();
+        move || {
+            let site_id = site_id.clone();
+            async move {
+                get_json::<SitesList>("/api/v1/sites")
+                    .await
+                    .ok()
+                    .and_then(|l| l.sites.into_iter().find(|s| s.id == site_id))
+            }
+        }
+    });
+    let (site_name, site_domain, public_key) = {
+        let guard = site.read();
+        match guard.as_ref().and_then(|o| o.as_ref()) {
+            Some(s) => (
+                Some(s.name.clone()),
+                Some(s.domain.clone()),
+                Some(s.public_key.clone()),
+            ),
+            None => (None, None, None),
+        }
+    };
+    let head_title = site_name.clone().unwrap_or_else(|| "Overview".to_string());
+
     let pv = use_resource({
         let site_id = site_id.clone();
         let qs = qs.clone();
@@ -177,13 +206,28 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
     let sessions_csv = site_csv_url(&site_id, "export/sessions", &qs);
     let pageviews_csv = site_csv_url(&site_id, "pageviews", &qs);
 
+    // The install snippet needs a resolved public key; `zero_data` decides
+    // whether it leads the page (onboarding) or trails it (reference).
+    let can_install = public_key.as_deref().is_some_and(|k| !k.is_empty());
+    let zero_data = matches!(&*pv.read(), Some(Ok(d)) if d.total_pageviews == 0);
+
     rsx! {
-        PageHead { title: "Overview",
+        PageHead { title: head_title, subtitle: site_domain.clone(),
             RangeTabs { active: range.clone() }
         }
         SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Overview }
 
         {active_filters(&route, &q)}
+
+        if can_install && zero_data {
+            div { class: "mb-4",
+                InstallCard {
+                    public_key: public_key.clone().unwrap_or_default(),
+                    domain: site_domain.clone().unwrap_or_default(),
+                    prominent: true,
+                }
+            }
+        }
 
         form {
             class: "flex flex-wrap items-center gap-2 mb-6",
@@ -518,6 +562,16 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                     a { class: BTN_GHOST, href: "{events_csv}", "Events CSV" }
                     a { class: BTN_GHOST, href: "{sessions_csv}", "Sessions CSV" }
                     a { class: BTN_GHOST, href: "{pageviews_csv}", "Pageviews CSV" }
+                }
+            }
+        }
+
+        if can_install && !zero_data {
+            div { class: "mt-4",
+                InstallCard {
+                    public_key: public_key.clone().unwrap_or_default(),
+                    domain: site_domain.clone().unwrap_or_default(),
+                    prominent: false,
                 }
             }
         }

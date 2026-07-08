@@ -6,6 +6,7 @@ use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::stat::StatTile;
 use crate::ui::components::tabs::{SiteTab, SiteTabs};
+use crate::ui::pages::use_site_name;
 
 /// The live panel shared by the per-site [`Realtime`] page and the global
 /// real-time page: active sessions + pageviews/min stat tiles, a top active
@@ -113,8 +114,9 @@ pub fn RealtimePanel(site_id: String) -> Element {
 /// Per-site real-time page: tab row + live [`RealtimePanel`].
 #[component]
 pub fn Realtime(site_id: String) -> Element {
+    let site_name = use_site_name(site_id.clone());
     rsx! {
-        PageHead { title: "Real-time", subtitle: "Site {site_id}" }
+        PageHead { title: "Real-time", subtitle: "{site_name}" }
         SiteTabs { site_id: site_id.clone(), range: "30d", active: SiteTab::Realtime }
         RealtimePanel { site_id }
     }
