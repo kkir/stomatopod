@@ -3,7 +3,11 @@
 # across CI runs instead of reinstalling. `dx` and cargo-chef come from
 # cargo-binstall as prebuilt releases (seconds) rather than compiling from
 # source (minutes, the old `cargo install dioxus-cli` cost).
-FROM rust:1-bookworm AS chef
+#
+# trixie (not bookworm): the prebuilt `dx` release links against glibc 2.39,
+# which bookworm (2.36) lacks. Keep the runtime image on the same suite so the
+# server binary's glibc requirement is satisfied there too.
+FROM rust:1-trixie AS chef
 
 WORKDIR /app
 
@@ -42,7 +46,7 @@ COPY . .
 # `.../web/{server, public/}` — the server binary next to its static assets.
 RUN cd crates/web && dx build --platform web --release
 
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates gosu \
