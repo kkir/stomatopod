@@ -124,9 +124,9 @@ impl EmbeddedReader {
 
         // `timestamp` is a reserved keyword in DataFusion's SQL parser (it
         // expects `timestamp '2024-...'` literal syntax after it); quote the
-        // column to force identifier parsing. We also avoid the `FILTER
-        // (WHERE ...)` aggregate clause, which the parser rejects — `CASE
-        // WHEN ... THEN 1 END` is equivalent.
+        // column to force identifier parsing. By strictly pre-filtering on
+        // `kind = 'pageview'`, we can use standard `COUNT(*)` and avoid conditional
+        // aggregate hacks.
         //
         // Each aggregate is wrapped in `CAST(... AS BIGINT)` so the read
         // side can rely on a single `Int64Array` downcast — DataFusion

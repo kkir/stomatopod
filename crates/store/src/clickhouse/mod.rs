@@ -1433,7 +1433,8 @@ mod tests {
         };
         let sql = sql::pageviews(&q);
         assert!(sql.contains("toStartOfHour"));
-        assert!(sql.contains("countIf(kind = 'pageview')"));
+        assert!(sql.contains("count()"));
+        assert!(sql.contains("AND kind = 'pageview'"));
         assert!(sql.contains("uniqExact(session_id)"));
         assert!(sql.contains("site_id = '01ARZ3NDEKTSV4RRFFQ69G5FAV'"));
         assert!(sql.contains("fromUnixTimestamp64Micro"));
