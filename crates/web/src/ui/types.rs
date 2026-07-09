@@ -133,35 +133,6 @@ pub struct CreateAnnotationBody {
     pub text: String,
 }
 
-// ---- Real-time: GET /api/v1/sites/:site/realtime (analytics::realtime,
-// serializes stomatopod_core::query::analytics::RealtimeSnapshot) ----
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct RealtimeTopPage {
-    pub url: String,
-    pub active_sessions: u64,
-    pub pct: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct RealtimeEvent {
-    pub name: String,
-    pub url: String,
-    pub seconds_ago: i64,
-    #[serde(default)]
-    pub properties: serde_json::Value,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
-pub struct RealtimeSnapshot {
-    pub active_sessions: u64,
-    pub pageviews_per_minute: f64,
-    #[serde(default)]
-    pub top_pages: Vec<RealtimeTopPage>,
-    #[serde(default)]
-    pub recent_events: Vec<RealtimeEvent>,
-}
-
 // ---- Goals: GET/POST /api/v1/sites/:site/goals, GET .../goals/:id/stats
 // (analytics::list_goals / create_goal / goal_stats) ----
 

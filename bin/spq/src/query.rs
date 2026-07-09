@@ -186,11 +186,6 @@ pub enum QueryCommand {
         #[arg(long = "start-url")]
         start_url: Option<String>,
     },
-    /// Live visitors in the last few minutes
-    Realtime {
-        #[arg(long)]
-        site: String,
-    },
     /// Custom events breakdown
     Events {
         #[arg(long)]
@@ -475,7 +470,6 @@ pub fn build(cmd: &QueryCommand) -> anyhow::Result<Req> {
                 "/api/v1/sites/{site}/paths?{rq}&depth={steps}&limit={limit}{su}"
             ))
         }
-        QueryCommand::Realtime { site } => Req::Get(format!("/api/v1/sites/{site}/realtime")),
         QueryCommand::Events {
             site,
             name,
@@ -710,14 +704,6 @@ mod tests {
         // `--depth` remains accepted as an alias for `--steps`.
         let aliased = get_path(&["paths", "--site", "s", "--depth", "4"]);
         assert!(aliased.contains("depth=4"));
-    }
-
-    #[test]
-    fn realtime_has_no_query() {
-        assert_eq!(
-            get_path(&["realtime", "--site", "s"]),
-            "/api/v1/sites/s/realtime"
-        );
     }
 
     #[test]

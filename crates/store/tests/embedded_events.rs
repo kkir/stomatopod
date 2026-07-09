@@ -609,7 +609,7 @@ async fn legacy_flat_partitions_are_migrated_on_open() {
     assert_eq!(result.total_pageviews, 1);
 }
 
-// ---- Tier-2 analytics: entry/exit, realtime, goals, export ----
+// ---- Tier-2 analytics: entry/exit, goals, export ----
 
 /// Build a single event with explicit session, url, kind/name and timestamp.
 #[allow(clippy::too_many_arguments)]
@@ -721,30 +721,6 @@ async fn exit_pages_report_counts_exits() {
             .iter()
             .any(|r| r.url == "/pricing" && r.exits == 1),
         "/pricing is an exit page with one exit"
-    );
-}
-
-#[tokio::test]
-async fn realtime_snapshot_reports_active_sessions_and_events() {
-    let dir = tempfile::tempdir().unwrap();
-    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
-    let (site_id, _range) = seed_sessions(&backend).await;
-
-    let rt = backend.query_realtime(site_id, 30).await.unwrap();
-    assert_eq!(rt.active_sessions, 3, "three distinct sessions are active");
-    assert!(rt.pageviews_per_minute > 0.0);
-    // Last pageview per session: A→/pricing, B→/home, C→/home.
-    let home = rt
-        .top_pages
-        .iter()
-        .find(|p| p.url == "/home")
-        .expect("/home is an active page");
-    assert_eq!(home.active_sessions, 2);
-    // The signup custom event shows up in the live feed.
-    assert!(
-        rt.recent_events.iter().any(|e| e.name == "signup"),
-        "recent events should include the signup, got {:?}",
-        rt.recent_events
     );
 }
 

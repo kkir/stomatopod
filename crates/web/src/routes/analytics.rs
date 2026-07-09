@@ -144,8 +144,6 @@ pub struct AnalyticsParams {
     pub filter: Vec<String>,
     /// `csv` triggers a CSV download; anything else (or absent) is JSON.
     pub format: Option<String>,
-    /// Real-time window in minutes (defaults to 30).
-    pub window: Option<u32>,
     /// Path-report depth (number of steps per sequence; defaults to 3).
     pub depth: Option<u32>,
 }
@@ -687,27 +685,6 @@ pub async fn top_exit_pages(
                 Json(serde_json::to_value(result).unwrap()).into_response()
             }
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-// ---- Real-time ----
-
-/// GET /api/v1/sites/:site/realtime
-pub async fn realtime(
-    State(state): State<Arc<AppState>>,
-    Extension(principal): Extension<Principal>,
-    Path(site): Path<String>,
-    FormQuery(params): FormQuery<AnalyticsParams>,
-) -> impl IntoResponse {
-    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
-        Ok(id) => id,
-        Err(resp) => return resp,
-    };
-    // Window capped to 1 hour; defaults to the spec's 30 minutes.
-    let window = params.window.unwrap_or(30).clamp(1, 60);
-    match state.backend.query_realtime(site_id, window).await {
-        Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

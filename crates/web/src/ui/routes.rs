@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 
 use crate::ui::components::layout::Shell;
 use crate::ui::pages::{
-    Alerts, Campaigns, Docs, Events, FunnelDetail, Funnels, Goals, Keys, NotFound, Paths, Realtime,
-    SiteKeys, SiteOverview, SiteSettings, SitesIndex,
+    Alerts, Campaigns, Docs, Events, FunnelDetail, Funnels, Goals, Keys, NotFound, Paths, SiteKeys,
+    SiteOverview, SiteSettings, SitesIndex,
 };
 use crate::ui::query::DashQuery;
 
@@ -17,9 +17,6 @@ pub enum Route {
 
     #[route("/sites/:site_id?:..q")]
     SiteOverview { site_id: String, q: DashQuery },
-
-    #[route("/sites/:site_id/realtime")]
-    Realtime { site_id: String },
 
     #[route("/sites/:site_id/events?:..q")]
     Events { site_id: String, q: DashQuery },

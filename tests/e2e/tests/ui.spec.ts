@@ -116,7 +116,6 @@ test("all per-site tabs render without error", async ({ page }) => {
 
   const tabs: Array<[string, RegExp]> = [
     [`${UI}/sites/${siteId}`, /Tabs Co/],
-    [`${UI}/sites/${siteId}/realtime`, /Real-time/],
     [`${UI}/sites/${siteId}/events`, /Events/],
     [`${UI}/sites/${siteId}/goals`, /Goals/],
     [`${UI}/sites/${siteId}/funnels`, /Funnels/],

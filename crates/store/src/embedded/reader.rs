@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use anyhow::Result;
 use datafusion::{
     datasource::listing::{ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl},
-    execution::context::SessionContext,
+    execution::context::{SessionConfig, SessionContext},
 };
 use parking_lot::RwLock;
 use std::collections::HashSet;
@@ -15,8 +15,7 @@ use stomatopod_core::{
     query::{
         analytics::{
             EntryPageRow, EntryPages, ExitPageRow, ExitPages, GoalBucket, GoalQuery, GoalStats,
-            PathReport, RawEventRow, RealtimeEvent, RealtimeSnapshot, RealtimeTopPage, SessionRow,
-            TopSparklines,
+            PathReport, RawEventRow, SessionRow, TopSparklines,
         },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
@@ -35,7 +34,10 @@ pub struct EmbeddedReader {
 
 impl EmbeddedReader {
     pub async fn new(data_dir: PathBuf) -> Result<Self> {
-        let ctx = SessionContext::new();
+        // Cap parallel partitions: self-hosted boxes rarely benefit from
+        // DataFusion's default (num_cpus) and it multiplies memory use.
+        let config = SessionConfig::new().with_target_partitions(2);
+        let ctx = SessionContext::new_with_config(config);
 
         // Register all existing site directories on startup
         let reader = Self {
@@ -136,7 +138,7 @@ impl EmbeddedReader {
             r#"
             SELECT
                 date_trunc('{granularity_fn}', "timestamp") AS bucket,
-                CAST(SUM(CASE WHEN CAST(kind AS VARCHAR) = 'pageview' THEN 1 ELSE 0 END) AS BIGINT) AS pageviews,
+                CAST(SUM(CASE WHEN kind = 'pageview' THEN 1 ELSE 0 END) AS BIGINT) AS pageviews,
                 CAST(COUNT(DISTINCT session_id) AS BIGINT) AS sessions
             FROM {table}
             WHERE site_id = '{site_id}'
@@ -231,7 +233,7 @@ impl EmbeddedReader {
             WHERE site_id = '{site_id_str}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'pageview'
+              AND kind = 'pageview'
               {filter_sql}
             GROUP BY 1
             ORDER BY pageviews DESC
@@ -270,7 +272,7 @@ impl EmbeddedReader {
             WHERE site_id = '{site_id_str}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'custom'
+              AND kind = 'custom'
               {name_filter}
             GROUP BY 1
             ORDER BY pageviews DESC
@@ -374,7 +376,7 @@ impl EmbeddedReader {
                 WHERE site_id = '{site}'
                   AND "timestamp" >= to_timestamp_micros({start})
                   AND "timestamp" <= to_timestamp_micros({end})
-                  AND CAST(kind AS VARCHAR) = 'pageview'
+                  AND kind = 'pageview'
                   {filter_sql}
             )
             SELECT url AS value,
@@ -443,7 +445,7 @@ impl EmbeddedReader {
                 WHERE site_id = '{site}'
                   AND "timestamp" >= to_timestamp_micros({start})
                   AND "timestamp" <= to_timestamp_micros({end})
-                  AND CAST(kind AS VARCHAR) = 'pageview'
+                  AND kind = 'pageview'
                   {filter_sql}
             )
             SELECT url AS value,
@@ -489,133 +491,6 @@ impl EmbeddedReader {
         Ok(ExitPages { rows })
     }
 
-    pub async fn query_realtime(
-        &self,
-        site_id: Ulid,
-        window_minutes: u32,
-    ) -> Result<RealtimeSnapshot, StoreError> {
-        let site = site_id.to_string();
-        if !self.ensure_site_table_available(&site).await? {
-            return Ok(RealtimeSnapshot::default());
-        }
-        let table = table_name(&site);
-        let now = chrono::Utc::now();
-        let start =
-            (now - chrono::Duration::minutes(window_minutes.max(1) as i64)).timestamp_micros();
-        let end = now.timestamp_micros();
-
-        // Headline counts.
-        let head_sql = format!(
-            r#"
-            SELECT CAST(COUNT(DISTINCT session_id) AS BIGINT) AS active,
-                   CAST(SUM(CASE WHEN CAST(kind AS VARCHAR) = 'pageview' THEN 1 ELSE 0 END) AS BIGINT) AS pvs
-            FROM {table}
-            WHERE site_id = '{site}'
-              AND "timestamp" >= to_timestamp_micros({start})
-              AND "timestamp" <= to_timestamp_micros({end})
-            "#
-        );
-        let head = self.run(&head_sql).await?;
-        let mut active_sessions = 0u64;
-        let mut pageviews = 0u64;
-        if let Some(b) = head.first() {
-            if let Some(a) = i64_col(b, "active") {
-                if b.num_rows() > 0 {
-                    active_sessions = a.value(0).max(0) as u64;
-                }
-            }
-            if let Some(p) = i64_col(b, "pvs") {
-                if b.num_rows() > 0 {
-                    pageviews = p.value(0).max(0) as u64;
-                }
-            }
-        }
-        let pageviews_per_minute = pageviews as f64 / window_minutes.max(1) as f64;
-
-        // Active pages: last pageview per session.
-        let pages_sql = format!(
-            r#"
-            WITH ranked AS (
-                SELECT COALESCE(CAST(url AS VARCHAR), '') AS url, session_id,
-                    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY "timestamp" DESC, id DESC) AS rn
-                FROM {table}
-                WHERE site_id = '{site}'
-                  AND "timestamp" >= to_timestamp_micros({start})
-                  AND "timestamp" <= to_timestamp_micros({end})
-                  AND CAST(kind AS VARCHAR) = 'pageview'
-            )
-            SELECT url AS value, CAST(COUNT(DISTINCT session_id) AS BIGINT) AS active
-            FROM ranked WHERE rn = 1
-            GROUP BY url ORDER BY active DESC LIMIT 10
-            "#
-        );
-        let page_batches = self.run(&pages_sql).await?;
-        let mut top_pages = Vec::new();
-        for b in &page_batches {
-            if let (Some(urls), Some(act)) = (str_col(b, "value"), i64_col(b, "active")) {
-                for i in 0..b.num_rows() {
-                    let a = act.value(i) as u64;
-                    let pct = if active_sessions > 0 {
-                        a as f64 / active_sessions as f64 * 100.0
-                    } else {
-                        0.0
-                    };
-                    top_pages.push(RealtimeTopPage {
-                        url: urls.value(i).to_string(),
-                        active_sessions: a,
-                        pct,
-                    });
-                }
-            }
-        }
-
-        // Recent custom events, newest first.
-        let events_sql = format!(
-            r#"
-            SELECT CAST(name AS VARCHAR) AS name, COALESCE(CAST(url AS VARCHAR), '') AS url,
-                   "timestamp" AS ts, CAST(properties AS VARCHAR) AS props
-            FROM {table}
-            WHERE site_id = '{site}'
-              AND "timestamp" >= to_timestamp_micros({start})
-              AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'custom'
-            ORDER BY "timestamp" DESC LIMIT 50
-            "#
-        );
-        let ev_batches = self.run(&events_sql).await?;
-        let mut recent_events = Vec::new();
-        for b in &ev_batches {
-            let names = str_col(b, "name");
-            let urls = str_col(b, "url");
-            let props = str_col(b, "props");
-            let ts = ts_micros_col(b, "ts");
-            if let (Some(names), Some(urls), Some(ts)) = (names, urls, ts) {
-                for i in 0..b.num_rows() {
-                    let event_ts =
-                        chrono::DateTime::from_timestamp_micros(ts.value(i)).unwrap_or(now);
-                    let seconds_ago = (now - event_ts).num_seconds().max(0);
-                    let properties = props
-                        .filter(|p| p.is_valid(i))
-                        .and_then(|p| serde_json::from_str(p.value(i)).ok())
-                        .unwrap_or(serde_json::Value::Null);
-                    recent_events.push(RealtimeEvent {
-                        name: names.value(i).to_string(),
-                        url: urls.value(i).to_string(),
-                        seconds_ago,
-                        properties,
-                    });
-                }
-            }
-        }
-
-        Ok(RealtimeSnapshot {
-            active_sessions,
-            pageviews_per_minute,
-            top_pages,
-            recent_events,
-        })
-    }
-
     pub async fn query_goal(&self, q: &GoalQuery) -> Result<GoalStats, StoreError> {
         let site = q.site_id.to_string();
         if !self.ensure_site_table_available(&site).await? {
@@ -637,7 +512,7 @@ impl EmbeddedReader {
             WHERE site_id = '{site}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'custom'
+              AND kind = 'custom'
               AND CAST(name AS VARCHAR) = '{name}'
               {filter_sql}
             "#
@@ -673,7 +548,7 @@ impl EmbeddedReader {
             WHERE site_id = '{site}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'custom'
+              AND kind = 'custom'
               AND CAST(name AS VARCHAR) = '{name}'
               {filter_sql}
             GROUP BY 1 ORDER BY 1
@@ -753,7 +628,7 @@ impl EmbeddedReader {
                 WHERE site_id = '{site}'
                   AND "timestamp" >= to_timestamp_micros({start})
                   AND "timestamp" <= to_timestamp_micros({end})
-                  AND CAST(kind AS VARCHAR) = 'pageview'
+                  AND kind = 'pageview'
             )
             SELECT session_id,
                    MIN(ts) AS started,
@@ -921,7 +796,7 @@ impl EmbeddedReader {
             WHERE site_id = '{site}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'pageview'
+              AND kind = 'pageview'
               {filter_sql}
             GROUP BY 1, 2
             "#
@@ -981,7 +856,7 @@ impl EmbeddedReader {
                 WHERE site_id = '{site}'
                   AND "timestamp" >= to_timestamp_micros({start})
                   AND "timestamp" <= to_timestamp_micros({end})
-                  AND CAST(kind AS VARCHAR) = 'pageview'
+                  AND kind = 'pageview'
             )
             SELECT session_id, CAST(rn AS BIGINT) AS seq, url FROM ranked WHERE rn <= {depth}
             "#

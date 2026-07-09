@@ -1,5 +1,5 @@
-//! Tier-2 analytics query types: entry/exit pages, the real-time view,
-//! goal conversion stats, and the raw session/event export rows.
+//! Tier-2 analytics query types: entry/exit pages, goal conversion stats,
+//! and the raw session/event export rows.
 //!
 //! These mirror the shape of the JSON the API returns so handlers can
 //! serialize them directly. The actual SQL lives in each storage backend.
@@ -41,31 +41,6 @@ pub struct ExitPageRow {
     pub exits: u64,
     pub pct: f64,
     pub exit_rate: f64,
-}
-
-// ---- Real-time view ----
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RealtimeSnapshot {
-    pub active_sessions: u64,
-    pub pageviews_per_minute: f64,
-    pub top_pages: Vec<RealtimeTopPage>,
-    pub recent_events: Vec<RealtimeEvent>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RealtimeTopPage {
-    pub url: String,
-    pub active_sessions: u64,
-    pub pct: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RealtimeEvent {
-    pub name: String,
-    pub url: String,
-    pub seconds_ago: i64,
-    pub properties: serde_json::Value,
 }
 
 // ---- Goals ----

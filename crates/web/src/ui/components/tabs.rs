@@ -35,7 +35,6 @@ pub fn RangeTabs(active: String) -> Element {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum SiteTab {
     Overview,
-    Realtime,
     Events,
     Goals,
     Funnels,
@@ -53,20 +52,13 @@ pub fn SiteTabs(site_id: String, range: String, active: SiteTab) -> Element {
         range: Some(range),
         ..Default::default()
     };
-    let tabs: [(SiteTab, &str, Route); 10] = [
+    let tabs: [(SiteTab, &str, Route); 9] = [
         (
             SiteTab::Overview,
             "Overview",
             Route::SiteOverview {
                 site_id: site_id.clone(),
                 q: q.clone(),
-            },
-        ),
-        (
-            SiteTab::Realtime,
-            "Real-time",
-            Route::Realtime {
-                site_id: site_id.clone(),
             },
         ),
         (

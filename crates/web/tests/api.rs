@@ -982,7 +982,7 @@ async fn send_json(
 }
 
 #[tokio::test]
-async fn entry_exit_realtime_routes_resolve() {
+async fn entry_exit_routes_resolve() {
     let ctx = setup().await;
     let (site, token) = site_and_token(&ctx).await;
 
@@ -996,18 +996,6 @@ async fn entry_exit_realtime_routes_resolve() {
         assert_eq!(status, StatusCode::OK, "{path} should resolve");
         assert!(json.get("rows").is_some(), "{path} carries rows");
     }
-
-    let (status, json) = get_json(
-        ctx.state.clone(),
-        &format!("/api/v1/sites/{}/realtime", site.id),
-        &token,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    // Zero active sessions is a valid empty state, not an error.
-    assert_eq!(json["active_sessions"], 0);
-    assert!(json.get("top_pages").is_some());
-    assert!(json.get("recent_events").is_some());
 }
 
 #[tokio::test]

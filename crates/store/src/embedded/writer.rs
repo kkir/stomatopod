@@ -1,4 +1,8 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use arrow::{
     array::{
@@ -48,24 +52,72 @@ impl ParquetWriter {
     ) {
         let mut interval = tokio::time::interval(Duration::from_secs(self.flush_interval_s));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut last_fsync = Instant::now();
 
         loop {
             tokio::select! {
-                Some(events) = rx.recv() => {
-                    // Write to WAL first for durability, then buffer for queries
+                Some(mut events) = rx.recv() => {
+                    // Hard cap: never let the buffer grow past capacity. Flush
+                    // (and retry) until the batch fits.
+                    let n = events.len();
+                    if n <= buffer.capacity() {
+                        while buffer.len() + n > buffer.capacity() {
+                            self.flush_buffer(&buffer, &reader, &wal).await;
+                            if buffer.len() + n > buffer.capacity() {
+                                error!(
+                                    "event buffer still full after flush (len={}, cap={}); retrying",
+                                    buffer.len(),
+                                    buffer.capacity()
+                                );
+                                tokio::time::sleep(Duration::from_millis(100)).await;
+                            }
+                        }
+                    }
+
+                    // Write to WAL first for durability, then buffer for queries.
                     if let Err(e) = wal.append(&events) {
                         error!("WAL append error: {e}");
                     }
-                    buffer.push_batch(events);
+                    if last_fsync.elapsed() >= wal.fsync_interval() {
+                        if let Err(e) = wal.fsync() {
+                            error!("WAL fsync error: {e}");
+                        }
+                        last_fsync = Instant::now();
+                    }
 
-                    // Flush if buffer is getting full
+                    if n > buffer.capacity() {
+                        // Rare oversized batch: force-push so we do not hang.
+                        error!(
+                            "batch size {n} exceeds buffer capacity {}; force-pushing",
+                            buffer.capacity()
+                        );
+                        buffer.push_batch(events);
+                    } else if let Err(returned) = buffer.try_push_batch(events) {
+                        // Race / accounting glitch: keep flushing until accepted.
+                        events = returned;
+                        loop {
+                            self.flush_buffer(&buffer, &reader, &wal).await;
+                            match buffer.try_push_batch(events) {
+                                Ok(()) => break,
+                                Err(again) => {
+                                    events = again;
+                                    error!(
+                                        "event buffer rejected batch after flush; retrying"
+                                    );
+                                    tokio::time::sleep(Duration::from_millis(100)).await;
+                                }
+                            }
+                        }
+                    }
+
+                    // Flush if buffer is getting full.
                     if buffer.is_above_threshold() {
-                        self.flush_buffer(&buffer, &reader).await;
+                        self.flush_buffer(&buffer, &reader, &wal).await;
                     }
                 }
                 _ = interval.tick() => {
                     if !buffer.is_empty() {
-                        self.flush_buffer(&buffer, &reader).await;
+                        self.flush_buffer(&buffer, &reader, &wal).await;
                     }
                 }
                 else => break,
@@ -73,7 +125,7 @@ impl ParquetWriter {
         }
     }
 
-    async fn flush_buffer(&self, buffer: &EventBuffer, reader: &EmbeddedReader) {
+    async fn flush_buffer(&self, buffer: &EventBuffer, reader: &EmbeddedReader, wal: &Wal) {
         let events = buffer.drain(self.flush_rows);
         if events.is_empty() {
             return;
@@ -95,6 +147,14 @@ impl ParquetWriter {
                 .await
             {
                 error!("Parquet write error for {site_id}/{date}: {e}");
+            }
+        }
+
+        // WAL segments hold durable copies of buffered events. Once the
+        // buffer is empty those segments are fully covered by Parquet.
+        if buffer.is_empty() {
+            if let Err(e) = wal.reclaim_sealed() {
+                error!("WAL reclaim error: {e}");
             }
         }
     }

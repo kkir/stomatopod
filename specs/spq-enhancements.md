@@ -17,7 +17,6 @@ spq query top-exit-pages      --site <id> [--range] [--limit]
 spq query utm                 --site <id> --dimension source|medium|campaign|term|content [--range] [--limit] [--utm-source <s>] [--utm-medium <m>]
 spq query paths               --site <id> --steps 2|3 [--range] [--limit] [--start-url <url>]
 spq query retention           --site <id> [--granularity week|month] [--range]
-spq query realtime            --site <id>
 spq query vitals              --site <id> [--range] [--url <path>]
 spq query scroll              --site <id> [--range] [--url <path>]
 spq query search              --site <id> [--range] [--limit]

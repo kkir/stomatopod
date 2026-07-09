@@ -197,7 +197,7 @@ pub struct LimitsConfig {
 impl Default for LimitsConfig {
     fn default() -> Self {
         Self {
-            ingest_channel_size: 65_536,
+            ingest_channel_size: 8_192,
             ingest_batch_size: 1_000,
             ingest_flush_interval_ms: 100,
             max_events_per_request: 10,

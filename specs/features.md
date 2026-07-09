@@ -9,7 +9,7 @@ a roadmap of what ships today.
 
 - Pageviews timeseries, top-N breakdowns, filters, period comparison
 - Custom events, goals, funnels
-- Realtime, campaigns (UTM), paths
+- Campaigns (UTM), paths
 - Analytics alerts + channels, share links, email digests
 - Annotations, data export, entry/exit pages
 - `spq` CLI and `/llms.txt`

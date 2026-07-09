@@ -263,11 +263,6 @@ fn describe() -> serde_json::Value {
                 ]
             },
             {
-                "name": "query realtime",
-                "description": "Live visitors in the last few minutes.",
-                "args": [ { "name": "--site", "required": true } ]
-            },
-                                                                                                {
                 "name": "annotations list",
                 "description": "List chart annotations for a site.",
                 "args": [

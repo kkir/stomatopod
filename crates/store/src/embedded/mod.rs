@@ -21,8 +21,8 @@ use stomatopod_core::{
     error::StoreError,
     query::{
         analytics::{
-            EntryPages, ExitPages, GoalQuery, GoalStats, PathReport, RawEventRow, RealtimeSnapshot,
-            SessionRow, TopSparklines,
+            EntryPages, ExitPages, GoalQuery, GoalStats, PathReport, RawEventRow, SessionRow,
+            TopSparklines,
         },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
@@ -131,14 +131,6 @@ impl StorageBackend for EmbeddedBackend {
         self.reader
             .query_exit_pages(site_id, range, limit, filters)
             .await
-    }
-
-    async fn query_realtime(
-        &self,
-        site_id: Ulid,
-        window_minutes: u32,
-    ) -> Result<RealtimeSnapshot, StoreError> {
-        self.reader.query_realtime(site_id, window_minutes).await
     }
 
     async fn query_goal(&self, q: &GoalQuery) -> Result<GoalStats, StoreError> {

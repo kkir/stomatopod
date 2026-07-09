@@ -16,8 +16,8 @@ use crate::{
     error::StoreError,
     query::{
         analytics::{
-            EntryPages, ExitPages, GoalQuery, GoalStats, PathReport, RawEventRow, RealtimeSnapshot,
-            SessionRow, TopSparklines,
+            EntryPages, ExitPages, GoalQuery, GoalStats, PathReport, RawEventRow, SessionRow,
+            TopSparklines,
         },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
@@ -78,13 +78,6 @@ pub trait StorageBackend: Send + Sync + 'static {
         limit: u32,
         filters: &[Filter],
     ) -> Result<ExitPages, StoreError>;
-
-    /// Live snapshot of the last `window_minutes` of activity.
-    async fn query_realtime(
-        &self,
-        site_id: Ulid,
-        window_minutes: u32,
-    ) -> Result<RealtimeSnapshot, StoreError>;
 
     /// Goal completions + conversion-rate timeseries.
     async fn query_goal(&self, q: &GoalQuery) -> Result<GoalStats, StoreError>;

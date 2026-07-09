@@ -80,7 +80,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/api/v1/sites/{site}/top-exit-pages",
             get(analytics::top_exit_pages),
         )
-        .route("/api/v1/sites/{site}/realtime", get(analytics::realtime))
         .route(
             "/api/v1/sites/{site}/export/events",
             get(analytics::export_events),

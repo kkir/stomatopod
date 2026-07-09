@@ -34,7 +34,7 @@ impl SqliteMeta {
             conn.execute_batch(
                 "PRAGMA journal_mode=WAL;
                  PRAGMA synchronous=NORMAL;
-                 PRAGMA cache_size=-32000;
+                 PRAGMA cache_size=-8000;
                  PRAGMA foreign_keys=ON;",
             )?;
             migrate(&conn)?;

@@ -33,8 +33,7 @@ use stomatopod_core::{
     query::{
         analytics::{
             EntryPageRow, EntryPages, ExitPageRow, ExitPages, GoalBucket, GoalQuery, GoalStats,
-            PathReport, RawEventRow, RealtimeEvent, RealtimeSnapshot, RealtimeTopPage, SessionRow,
-            TopSparklines,
+            PathReport, RawEventRow, SessionRow, TopSparklines,
         },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
@@ -388,91 +387,6 @@ impl StorageBackend for PostgresBackend {
             }
         }
         Ok(ExitPages { rows: out })
-    }
-
-    async fn query_realtime(
-        &self,
-        site_id: Ulid,
-        window_minutes: u32,
-    ) -> Result<RealtimeSnapshot, StoreError> {
-        let window = window_minutes.max(1);
-        let since = format!("NOW() - INTERVAL '{window} minutes'");
-
-        let head = sqlx::query(&format!(
-            "SELECT COUNT(DISTINCT session_id)::BIGINT AS active, \
-                    COUNT(*) FILTER (WHERE kind = 'pageview')::BIGINT AS pvs \
-             FROM events WHERE site_id = $1 AND timestamp >= {since}"
-        ))
-        .bind(site_id.to_string())
-        .fetch_one(&self.pool)
-        .await
-        .map_err(StoreError::query)?;
-        let active: i64 = head.try_get("active").map_err(StoreError::query)?;
-        let pvs: i64 = head.try_get("pvs").map_err(StoreError::query)?;
-        let active_sessions = active as u64;
-        let pageviews_per_minute = pvs as f64 / window as f64;
-
-        let page_rows = sqlx::query(&format!(
-            "WITH ranked AS (\
-                SELECT url, session_id, \
-                    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY timestamp DESC, id DESC) AS rn \
-                FROM events WHERE site_id = $1 AND timestamp >= {since} AND kind = 'pageview') \
-             SELECT COALESCE(url, '') AS value, COUNT(DISTINCT session_id)::BIGINT AS active \
-             FROM ranked WHERE rn = 1 GROUP BY url ORDER BY active DESC LIMIT 10"
-        ))
-        .bind(site_id.to_string())
-        .fetch_all(&self.pool)
-        .await
-        .map_err(StoreError::query)?;
-        let mut top_pages = Vec::new();
-        for row in page_rows {
-            let url: String = row.try_get("value").map_err(StoreError::query)?;
-            let a: i64 = row.try_get("active").map_err(StoreError::query)?;
-            let a = a as u64;
-            let pct = if active_sessions > 0 {
-                a as f64 / active_sessions as f64 * 100.0
-            } else {
-                0.0
-            };
-            top_pages.push(RealtimeTopPage {
-                url,
-                active_sessions: a,
-                pct,
-            });
-        }
-
-        let ev_rows = sqlx::query(&format!(
-            "SELECT name, COALESCE(url, '') AS url, timestamp, properties \
-             FROM events WHERE site_id = $1 AND timestamp >= {since} AND kind = 'custom' \
-             ORDER BY timestamp DESC LIMIT 50"
-        ))
-        .bind(site_id.to_string())
-        .fetch_all(&self.pool)
-        .await
-        .map_err(StoreError::query)?;
-        let now = Utc::now();
-        let mut recent_events = Vec::new();
-        for row in ev_rows {
-            let name: String = row.try_get("name").map_err(StoreError::query)?;
-            let url: String = row.try_get("url").map_err(StoreError::query)?;
-            let ts: DateTime<Utc> = row.try_get("timestamp").map_err(StoreError::query)?;
-            let props: Option<String> = row.try_get("properties").map_err(StoreError::query)?;
-            recent_events.push(RealtimeEvent {
-                name,
-                url,
-                seconds_ago: (now - ts).num_seconds().max(0),
-                properties: props
-                    .and_then(|p| serde_json::from_str(&p).ok())
-                    .unwrap_or(serde_json::Value::Null),
-            });
-        }
-
-        Ok(RealtimeSnapshot {
-            active_sessions,
-            pageviews_per_minute,
-            top_pages,
-            recent_events,
-        })
     }
 
     async fn query_goal(&self, q: &GoalQuery) -> Result<GoalStats, StoreError> {
