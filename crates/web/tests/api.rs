@@ -1057,79 +1057,6 @@ async fn export_endpoints_serve_csv_and_json() {
 }
 
 #[tokio::test]
-async fn goals_crud_lifecycle() {
-    let ctx = setup().await;
-    let (site, token) = site_and_token(&ctx).await;
-
-    // Create.
-    let (status, json) = send_json(
-        ctx.state.clone(),
-        "POST",
-        &format!("/api/v1/sites/{}/goals", site.id),
-        &token,
-        Some(serde_json::json!({"name": "Signup", "event_name": "user_signed_up"})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "goal create, got {json}");
-    let goal_id = json["id"].as_str().unwrap().to_string();
-
-    // List shows it.
-    let (status, json) = get_json(
-        ctx.state.clone(),
-        &format!("/api/v1/sites/{}/goals", site.id),
-        &token,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["goals"].as_array().unwrap().len(), 1);
-
-    // Stats resolve and carry the conversion fields.
-    let (status, json) = get_json(
-        ctx.state.clone(),
-        &format!("/api/v1/sites/{}/goals/{goal_id}/stats", site.id),
-        &token,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["goal_id"], goal_id);
-    assert_eq!(json["name"], "Signup");
-    assert!(json.get("conversion_rate").is_some());
-
-    // Delete.
-    let (status, _) = send_json(
-        ctx.state.clone(),
-        "DELETE",
-        &format!("/api/v1/sites/{}/goals/{goal_id}", site.id),
-        &token,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    let (_, json) = get_json(
-        ctx.state.clone(),
-        &format!("/api/v1/sites/{}/goals", site.id),
-        &token,
-    )
-    .await;
-    assert!(json["goals"].as_array().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn create_goal_rejects_blank_event_name() {
-    let ctx = setup().await;
-    let (site, token) = site_and_token(&ctx).await;
-    let (status, _) = send_json(
-        ctx.state.clone(),
-        "POST",
-        &format!("/api/v1/sites/{}/goals", site.id),
-        &token,
-        Some(serde_json::json!({"name": "Bad", "event_name": ""})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
 async fn analytics_alert_requires_valid_channel_then_round_trips() {
     use stomatopod_core::domain::agent::{AlertChannel, AlertChannelKind};
 
@@ -1235,9 +1162,6 @@ fn analytics_alert_decide_logic() {
     // Drop fires when current is far below baseline.
     assert!(decide(TrafficDrop, 50.0, 30.0, 100.0).is_some());
     assert!(decide(TrafficDrop, 50.0, 80.0, 100.0).is_none());
-    // Goal threshold is an absolute crossing.
-    assert!(decide(GoalThreshold, 100.0, 100.0, 0.0).is_some());
-    assert!(decide(GoalThreshold, 100.0, 99.0, 0.0).is_none());
     // Referrer spike: share above threshold percent.
     assert!(decide(NewReferrerSpike, 40.0, 55.0, 0.0).is_some());
     assert!(decide(NewReferrerSpike, 40.0, 12.0, 0.0).is_none());
@@ -1295,16 +1219,16 @@ async fn analytics_alert_fires_records_and_respects_cooldown() {
         .await
         .unwrap();
 
-    // A goal-threshold alert with threshold 0 fires unconditionally
-    // (0 completions >= 0), exercising the full fire + dispatch path.
+    // A new-referrer-spike alert with a negative threshold fires when
+    // the top referrer share is 0 (empty site), exercising the full
+    // fire + dispatch path without needing seeded traffic.
     let alert = AnalyticsAlert {
         id: Ulid::new(),
         site_id: site.id,
-        kind: AnalyticsAlertKind::GoalThreshold,
+        kind: AnalyticsAlertKind::NewReferrerSpike,
         config: AnalyticsAlertConfig {
-            threshold: 0.0,
+            threshold: -1.0,
             window_minutes: 60,
-            goal_event_name: Some("signup".into()),
         },
         channel_id: channel.id,
         enabled: true,
@@ -1326,7 +1250,7 @@ async fn analytics_alert_fires_records_and_respects_cooldown() {
 
     // First evaluation fires + records.
     let fired = process_alert(&alert, &backend, &meta, &webhook, &slack, &telegram, now).await;
-    assert!(fired, "threshold-0 goal alert should fire");
+    assert!(fired, "negative-threshold referrer alert should fire");
     let last = ctx
         .backend
         .meta
@@ -1347,7 +1271,7 @@ async fn analytics_alert_fires_records_and_respects_cooldown() {
     assert!(!again, "cooldown should suppress a re-fire within the hour");
 }
 
-// ---- Tier-3 analytics endpoints: campaigns, retention, paths, annotations ----
+// ---- Tier-3 analytics endpoints: campaigns ----
 
 #[tokio::test]
 async fn api_campaigns_returns_utm_breakdowns() {
@@ -1374,77 +1298,7 @@ async fn api_campaigns_returns_utm_breakdowns() {
         );
     }
 }
-#[tokio::test]
-async fn api_paths_returns_report() {
-    let ctx = setup().await;
-    let (site, token) = site_and_token(&ctx).await;
 
-    let (status, json) = get_json(
-        ctx.state.clone(),
-        &format!("/api/v1/sites/{}/paths?depth=3", site.id),
-        &token,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(
-        json.get("rows").map(|r| r.is_array()).unwrap_or(false),
-        "paths response should carry a rows array, got {json}"
-    );
-    assert!(json.get("total_sessions").is_some());
-}
-
-#[tokio::test]
-async fn api_annotations_create_list_delete_round_trip() {
-    let ctx = setup().await;
-    let (site, token) = site_and_token(&ctx).await;
-
-    // Create.
-    let body = serde_json::json!({ "date": "2026-06-01", "text": "Deployed v2" });
-    let req = Request::builder()
-        .method("POST")
-        .uri(format!("/api/v1/sites/{}/annotations", site.id))
-        .header("authorization", format!("Bearer {token}"))
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap();
-    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::CREATED);
-    let created: serde_json::Value = serde_json::from_slice(&body_bytes(resp).await).unwrap();
-    let id = created["id"].as_str().unwrap().to_string();
-
-    // List (within range).
-    let (status, json) = get_json(
-        ctx.state.clone(),
-        &format!(
-            "/api/v1/sites/{}/annotations?from=2026-05-01&to=2026-06-30",
-            site.id
-        ),
-        &token,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let anns = json["annotations"].as_array().unwrap();
-    assert_eq!(anns.len(), 1);
-    assert_eq!(anns[0]["text"], "Deployed v2");
-
-    // Delete.
-    let req = Request::builder()
-        .method("DELETE")
-        .uri(format!("/api/v1/sites/{}/annotations/{id}", site.id))
-        .header("authorization", format!("Bearer {token}"))
-        .body(Body::empty())
-        .unwrap();
-    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-}
-
-// ============================================================================
-// Tier-4 API contract tests
-//
-// Assert the new analytics surfaces resolve and return their documented
-// top-level fields. Deep aggregation correctness is covered by the
-// store-level tier-4 tests; here we lock the HTTP contract.
-// ============================================================================
 // ============================================================================
 // Share links
 // ============================================================================

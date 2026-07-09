@@ -20,10 +20,7 @@ use stomatopod_core::{
     domain::event::Event,
     error::StoreError,
     query::{
-        analytics::{
-            EntryPages, ExitPages, GoalQuery, GoalStats, PathReport, RawEventRow, SessionRow,
-            TopSparklines,
-        },
+        analytics::{EntryPages, ExitPages, RawEventRow, SessionRow, TopSparklines},
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
         pageviews::{Filter, PageviewsQuery, PageviewsResult, TimeRange, TopList, TopListField},
@@ -133,10 +130,6 @@ impl StorageBackend for EmbeddedBackend {
             .await
     }
 
-    async fn query_goal(&self, q: &GoalQuery) -> Result<GoalStats, StoreError> {
-        self.reader.query_goal(q).await
-    }
-
     async fn query_sessions(
         &self,
         site_id: Ulid,
@@ -166,16 +159,6 @@ impl StorageBackend for EmbeddedBackend {
         self.reader
             .query_top_sparklines(site_id, field, range, limit, filters)
             .await
-    }
-
-    async fn query_paths(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        depth: u32,
-        limit: u32,
-    ) -> Result<PathReport, StoreError> {
-        self.reader.query_paths(site_id, range, depth, limit).await
     }
 }
 
@@ -292,58 +275,6 @@ impl MetaStore for EmbeddedBackend {
 
     async fn delete_funnel(&self, id: Ulid) -> Result<(), StoreError> {
         self.meta.delete_funnel(id).await
-    }
-
-    async fn create_goal(
-        &self,
-        goal: &stomatopod_core::domain::goal::Goal,
-    ) -> Result<(), StoreError> {
-        self.meta.create_goal(goal).await
-    }
-
-    async fn get_goal(
-        &self,
-        id: Ulid,
-    ) -> Result<Option<stomatopod_core::domain::goal::Goal>, StoreError> {
-        self.meta.get_goal(id).await
-    }
-
-    async fn list_goals(
-        &self,
-        site_id: Ulid,
-    ) -> Result<Vec<stomatopod_core::domain::goal::Goal>, StoreError> {
-        self.meta.list_goals(site_id).await
-    }
-
-    async fn delete_goal(&self, id: Ulid) -> Result<(), StoreError> {
-        self.meta.delete_goal(id).await
-    }
-
-    async fn create_annotation(
-        &self,
-        annotation: &stomatopod_core::domain::annotation::Annotation,
-    ) -> Result<(), StoreError> {
-        self.meta.create_annotation(annotation).await
-    }
-
-    async fn get_annotation(
-        &self,
-        id: Ulid,
-    ) -> Result<Option<stomatopod_core::domain::annotation::Annotation>, StoreError> {
-        self.meta.get_annotation(id).await
-    }
-
-    async fn list_annotations(
-        &self,
-        site_id: Ulid,
-        start: chrono::NaiveDate,
-        end: chrono::NaiveDate,
-    ) -> Result<Vec<stomatopod_core::domain::annotation::Annotation>, StoreError> {
-        self.meta.list_annotations(site_id, start, end).await
-    }
-
-    async fn delete_annotation(&self, id: Ulid) -> Result<(), StoreError> {
-        self.meta.delete_annotation(id).await
     }
 
     async fn create_analytics_alert(

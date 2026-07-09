@@ -175,8 +175,7 @@ The public surface needs no auth:
 - `GET /share/:token` — read-only HTML dashboard shell.
 - `GET /share/:token/api/pageviews` — pageview timeseries.
 - `GET /share/:token/api/top/:dimension` — `pages`, `referrers`, `countries`, `browsers`, `devices`, `os`, `regions`.
-- `GET /share/:token/api/events` — custom event summary.
-- `GET /share/:token/api/goals` — goal completions + conversion rate.
+- `GET /share/:token/api/events` - custom event summary.
 
 Share links expose only aggregate reports — never raw events, sessions, API
 keys, or settings. A revoked token returns `404` (existence is never leaked);

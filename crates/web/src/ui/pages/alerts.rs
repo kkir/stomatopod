@@ -10,10 +10,9 @@ use crate::ui::types::{
     AlertsList, ChannelTestResult, ChannelsList, CreateAlertBody, CreateChannelBody, PatchAlertBody,
 };
 
-const ALERT_KINDS: [(&str, &str); 4] = [
+const ALERT_KINDS: [(&str, &str); 3] = [
     ("traffic_spike", "Traffic spike"),
     ("traffic_drop", "Traffic drop"),
-    ("goal_threshold", "Goal threshold"),
     ("new_referrer_spike", "New referrer spike"),
 ];
 
@@ -225,7 +224,6 @@ fn AlertsCard(
     let mut kind = use_signal(|| "traffic_spike".to_string());
     let mut threshold = use_signal(|| "100".to_string());
     let mut window = use_signal(|| "60".to_string());
-    let mut goal_event = use_signal(String::new);
     let mut channel_id = use_signal(String::new);
 
     // Channel <select> options, plus a default selection once channels load.
@@ -249,7 +247,6 @@ fn AlertsCard(
         channel_id()
     };
     let has_channels = !channel_options.is_empty();
-    let is_goal = kind() == "goal_threshold";
 
     rsx! {
         Card { title: "Alerts",
@@ -267,16 +264,10 @@ fn AlertsCard(
                         if chan.is_empty() {
                             return;
                         }
-                        let goal = goal_event().trim().to_string();
                         let body = CreateAlertBody {
                             alert_type: kind(),
                             threshold: threshold().trim().parse().unwrap_or(0.0),
                             window_minutes: window().trim().parse().unwrap_or(0),
-                            goal_event_name: if is_goal && !goal.is_empty() {
-                                Some(goal)
-                            } else {
-                                None
-                            },
                             channel_id: chan,
                         };
                         let site_id = site_id.clone();
@@ -310,15 +301,6 @@ fn AlertsCard(
                     value: "{window}",
                     placeholder: "window (min)",
                     oninput: move |e| window.set(e.value()),
-                }
-                if is_goal {
-                    input {
-                        class: CTRL_INPUT,
-                        r#type: "text",
-                        value: "{goal_event}",
-                        placeholder: "goal event name",
-                        oninput: move |e| goal_event.set(e.value()),
-                    }
                 }
                 select {
                     class: CTRL_INPUT,

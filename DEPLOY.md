@@ -4,7 +4,7 @@
 
 With the default **embedded** storage backend, Stomatopod keeps *all* state under
 `storage.data_dir` (default `/app/data` in the container): the SQLite metadata
-database (organizations, users, sites, API keys, funnels, goals), the write-ahead
+database (organizations, users, sites, API keys, funnels), the write-ahead
 logs, and the Parquet event files.
 
 Inside a container that directory lives in the writable image layer **unless you

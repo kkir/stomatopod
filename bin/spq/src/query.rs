@@ -167,25 +167,6 @@ pub enum QueryCommand {
         #[arg(long = "filter")]
         filters: Vec<String>,
     },
-    /// Top user paths (page-navigation sequences)
-    Paths {
-        #[arg(long)]
-        site: String,
-        #[arg(long, default_value = "30d")]
-        range: String,
-        #[arg(long)]
-        from: Option<String>,
-        #[arg(long)]
-        to: Option<String>,
-        /// Steps per sequence (2–10). `--depth` is accepted as an alias.
-        #[arg(long = "steps", alias = "depth", default_value = "3")]
-        steps: u32,
-        #[arg(long, default_value = "25")]
-        limit: u32,
-        /// Only include paths beginning at this URL.
-        #[arg(long = "start-url")]
-        start_url: Option<String>,
-    },
     /// Custom events breakdown
     Events {
         #[arg(long)]
@@ -277,29 +258,6 @@ pub(crate) fn enc(s: &str) -> String {
         }
     }
     out
-}
-
-/// Parse a repeatable `field:op:value` filter into the JSON object shape the
-/// API expects (`{"field":..,"op":..,"value":..}`). The value may contain
-/// colons (e.g. URLs), so only the first two separators are split on.
-pub(crate) fn filter_objects(filters: &[String]) -> anyhow::Result<Vec<Value>> {
-    filters
-        .iter()
-        .map(|f| {
-            let mut parts = f.splitn(3, ':');
-            let field = parts.next().unwrap_or_default();
-            let op = parts.next();
-            let value = parts.next();
-            match (op, value) {
-                (Some(op), Some(value)) if !field.is_empty() && !value.is_empty() => {
-                    Ok(serde_json::json!({ "field": field, "op": op, "value": value }))
-                }
-                _ => Err(anyhow::anyhow!(
-                    "invalid --filter '{f}'; expected field:op:value"
-                )),
-            }
-        })
-        .collect()
 }
 
 /// Build the HTTP request for a query command without performing any I/O. Kept
@@ -453,21 +411,6 @@ pub fn build(cmd: &QueryCommand) -> anyhow::Result<Req> {
             Req::Get(format!(
                 "/api/v1/sites/{site}/utm?{rq}&dimension={}&limit={limit}{src}{med}{fq}",
                 enc(dimension)
-            ))
-        }
-        QueryCommand::Paths {
-            site,
-            range,
-            from,
-            to,
-            steps,
-            limit,
-            start_url,
-        } => {
-            let rq = range_qs(range, from, to);
-            let su = opt_qs("start_url", start_url);
-            Req::Get(format!(
-                "/api/v1/sites/{site}/paths?{rq}&depth={steps}&limit={limit}{su}"
             ))
         }
         QueryCommand::Events {
@@ -687,26 +630,6 @@ mod tests {
     }
 
     #[test]
-    fn paths_steps_alias_and_start_url() {
-        let p = get_path(&[
-            "paths",
-            "--site",
-            "s",
-            "--steps",
-            "2",
-            "--start-url",
-            "/pricing",
-        ]);
-        assert_eq!(
-            p,
-            "/api/v1/sites/s/paths?range=30d&depth=2&limit=25&start_url=%2Fpricing"
-        );
-        // `--depth` remains accepted as an alias for `--steps`.
-        let aliased = get_path(&["paths", "--site", "s", "--depth", "4"]);
-        assert!(aliased.contains("depth=4"));
-    }
-
-    #[test]
     fn events_filters() {
         let p = get_path(&[
             "events",
@@ -744,15 +667,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn filter_objects_parse() {
-        let objs = filter_objects(&["country:eq:US".to_string()]).unwrap();
-        assert_eq!(objs[0]["field"], "country");
-        assert_eq!(objs[0]["op"], "eq");
-        assert_eq!(objs[0]["value"], "US");
-        // URLs with colons keep their value intact.
-        let objs = filter_objects(&["url:eq:https://x/y".to_string()]).unwrap();
-        assert_eq!(objs[0]["value"], "https://x/y");
-        assert!(filter_objects(&["bogus".to_string()]).is_err());
-    }
 }

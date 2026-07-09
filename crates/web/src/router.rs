@@ -89,18 +89,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(analytics::export_sessions),
         )
         .route(
-            "/api/v1/sites/{site}/goals",
-            get(analytics::list_goals).post(analytics::create_goal),
-        )
-        .route(
-            "/api/v1/sites/{site}/goals/{goal_id}",
-            axum::routing::delete(analytics::delete_goal),
-        )
-        .route(
-            "/api/v1/sites/{site}/goals/{goal_id}/stats",
-            get(analytics::goal_stats),
-        )
-        .route(
             "/api/v1/sites/{site}/analytics-alerts",
             get(analytics::list_analytics_alerts).post(analytics::create_analytics_alert),
         )
@@ -110,15 +98,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 .delete(analytics::delete_analytics_alert),
         )
         .route("/api/v1/sites/{site}/campaigns", get(analytics::campaigns))
-        .route("/api/v1/sites/{site}/paths", get(analytics::paths))
-        .route(
-            "/api/v1/sites/{site}/annotations",
-            get(analytics::list_annotations).post(analytics::create_annotation),
-        )
-        .route(
-            "/api/v1/sites/{site}/annotations/{id}",
-            axum::routing::delete(analytics::delete_annotation),
-        )
         .route(
             "/api/v1/sites/{site}/funnels",
             get(analytics::list_funnels).post(analytics::create_funnel),
@@ -196,7 +175,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(share_links::public_top),
         )
         .route("/share/{token}/api/events", get(share_links::public_events))
-        .route("/share/{token}/api/goals", get(share_links::public_goals))
         .route("/digest/unsubscribe/{token}", get(digest::unsubscribe));
 
     // Auth routes (no auth required)

@@ -36,10 +36,8 @@ pub fn RangeTabs(active: String) -> Element {
 pub enum SiteTab {
     Overview,
     Events,
-    Goals,
     Funnels,
     Campaigns,
-    Paths,
     Alerts,
     Keys,
     Settings,
@@ -52,7 +50,7 @@ pub fn SiteTabs(site_id: String, range: String, active: SiteTab) -> Element {
         range: Some(range),
         ..Default::default()
     };
-    let tabs: [(SiteTab, &str, Route); 9] = [
+    let tabs: [(SiteTab, &str, Route); 7] = [
         (
             SiteTab::Overview,
             "Overview",
@@ -70,14 +68,6 @@ pub fn SiteTabs(site_id: String, range: String, active: SiteTab) -> Element {
             },
         ),
         (
-            SiteTab::Goals,
-            "Goals",
-            Route::Goals {
-                site_id: site_id.clone(),
-                q: q.clone(),
-            },
-        ),
-        (
             SiteTab::Funnels,
             "Funnels",
             Route::Funnels {
@@ -89,14 +79,6 @@ pub fn SiteTabs(site_id: String, range: String, active: SiteTab) -> Element {
             SiteTab::Campaigns,
             "Campaigns",
             Route::Campaigns {
-                site_id: site_id.clone(),
-                q: q.clone(),
-            },
-        ),
-        (
-            SiteTab::Paths,
-            "Paths",
-            Route::Paths {
                 site_id: site_id.clone(),
                 q: q.clone(),
             },

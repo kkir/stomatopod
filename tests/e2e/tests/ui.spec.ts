@@ -117,10 +117,8 @@ test("all per-site tabs render without error", async ({ page }) => {
   const tabs: Array<[string, RegExp]> = [
     [`${UI}/sites/${siteId}`, /Tabs Co/],
     [`${UI}/sites/${siteId}/events`, /Events/],
-    [`${UI}/sites/${siteId}/goals`, /Goals/],
     [`${UI}/sites/${siteId}/funnels`, /Funnels/],
     [`${UI}/sites/${siteId}/campaigns`, /Tabs Co/],
-    [`${UI}/sites/${siteId}/paths`, /Tabs Co/],
     [`${UI}/sites/${siteId}/alerts`, /Alerts/],
     [`${UI}/sites/${siteId}/keys`, /API Keys/],
     [`${UI}/sites/${siteId}/settings`, /Site Settings/],
@@ -187,24 +185,6 @@ test("funnel builder creates a funnel", async ({ page }) => {
 
   // The new funnel appears in the list above the builder.
   await expect(page.getByText(funnelName)).toBeVisible({ timeout: 10_000 });
-});
-
-// ---- Goals (SPA interactivity, ported from legacy tier2) ----
-
-test("a goal can be created and is listed", async ({ page }) => {
-  await login(page);
-  const siteId = await createSite(page, "Goals Co", "goals.example");
-
-  await page.goto(`${UI}/sites/${siteId}/goals`);
-  await waitForSpa(page);
-
-  const goalName = `Signup ${Date.now().toString(36)}`;
-  await page.getByPlaceholder("Goal name").fill(goalName);
-  await page.getByPlaceholder(/Event name/).fill("user_signed_up");
-  await page.getByRole("button", { name: "Add goal" }).click();
-
-  await expect(page.getByText(goalName)).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText("Event: user_signed_up")).toBeVisible();
 });
 
 // ---- Alerts + channels (SPA interactivity, ported from legacy tier2) ----

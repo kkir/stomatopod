@@ -4,7 +4,8 @@
 Alert dispatcher + webhook/Slack sinks already exist (`crates/web/src/alerts/`) but are wired exclusively to AI firewall incidents. Analytics has no alerting — users discover traffic spikes or drops manually.
 
 ## Goal
-Reuse alert infrastructure to fire on analytics conditions: traffic spikes/drops, goal completions, and referrer/country anomalies.
+Reuse alert infrastructure to fire on analytics conditions: traffic spikes/drops
+and referrer anomalies.
 
 ## Alert Types
 
@@ -12,7 +13,6 @@ Reuse alert infrastructure to fire on analytics conditions: traffic spikes/drops
 |------|------------------|
 | `traffic_spike` | Pageviews in last N minutes > X% above rolling baseline |
 | `traffic_drop` | Pageviews in last N minutes < X% below rolling baseline |
-| `goal_threshold` | Cumulative goal event count today crosses N |
 | `new_referrer_spike` | Single referrer > X% of traffic in last hour (viral spike detection) |
 | `daily_summary` | Fixed-time daily digest (optional, see email-digest spec) |
 
@@ -23,8 +23,8 @@ New table: `analytics_alerts`
 CREATE TABLE analytics_alerts (
     id          TEXT PRIMARY KEY,  -- ULID
     site_id     TEXT NOT NULL REFERENCES sites(id),
-    type        TEXT NOT NULL,     -- traffic_spike | traffic_drop | goal_threshold | new_referrer_spike
-    config      JSONB NOT NULL,    -- type-specific params (threshold, window_minutes, goal_event_name)
+    type        TEXT NOT NULL,     -- traffic_spike | traffic_drop | new_referrer_spike
+    config      JSONB NOT NULL,    -- type-specific params (threshold, window_minutes)
     channel_id  TEXT NOT NULL REFERENCES alert_channels(id),  -- reuse existing
     enabled     BOOLEAN NOT NULL DEFAULT TRUE,
     created_at  TIMESTAMPTZ NOT NULL

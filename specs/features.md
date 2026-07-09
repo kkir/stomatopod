@@ -8,14 +8,17 @@ a roadmap of what ships today.
 ## What remains product surface
 
 - Pageviews timeseries, top-N breakdowns, filters, period comparison
-- Custom events, goals, funnels
-- Campaigns (UTM), paths
+- Custom events, funnels
+- Campaigns (UTM)
 - Analytics alerts + channels, share links, email digests
-- Annotations, data export, entry/exit pages
+- Data export, entry/exit pages
 - `spq` CLI and `/llms.txt`
 
 ## Intentionally removed
 
+- Goals / conversion tracking (use custom events + funnels instead)
+- Chart annotations
+- User paths / flow report
 - Sentinel / AI firewall (sidecar, spans, agents/incidents UI)
 - Retention / cohort analysis (meaningless under daily cookieless session IDs)
 - ClickHouse backend (unfinished, never routable)
@@ -25,6 +28,5 @@ a roadmap of what ships today.
 
 ## Specs still useful as design notes
 
-See sibling files for goals, alerts, annotations, digests, share links, paths,
-campaigns, filtering, period comparison, etc. Specs for removed features were
-deleted with the code.
+See sibling files for alerts, digests, share links, campaigns, filtering,
+period comparison, etc. Specs for removed features were deleted with the code.

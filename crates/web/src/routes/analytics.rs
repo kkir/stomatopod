@@ -12,12 +12,9 @@ use ulid::Ulid;
 use stomatopod_core::{
     domain::{
         analytics_alert::{AnalyticsAlert, AnalyticsAlertConfig, AnalyticsAlertKind},
-        annotation::Annotation,
-        goal::Goal,
         org::Funnel,
     },
     query::{
-        analytics::GoalQuery,
         events::EventQuery,
         funnel::{FunnelQuery, FunnelStep},
         pageviews::{Filter, Granularity, PageviewsQuery, TimeRange, TopListField},
@@ -144,8 +141,6 @@ pub struct AnalyticsParams {
     pub filter: Vec<String>,
     /// `csv` triggers a CSV download; anything else (or absent) is JSON.
     pub format: Option<String>,
-    /// Path-report depth (number of steps per sequence; defaults to 3).
-    pub depth: Option<u32>,
 }
 
 impl AnalyticsParams {
@@ -689,150 +684,6 @@ pub async fn top_exit_pages(
     }
 }
 
-// ---- Goals ----
-
-#[derive(Deserialize)]
-pub struct CreateGoalBody {
-    pub name: String,
-    pub event_name: String,
-    #[serde(default)]
-    pub filters: Vec<Filter>,
-}
-
-/// GET /api/v1/sites/:site/goals
-pub async fn list_goals(
-    State(state): State<Arc<AppState>>,
-    Extension(principal): Extension<Principal>,
-    Path(site): Path<String>,
-) -> impl IntoResponse {
-    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
-        Ok(id) => id,
-        Err(resp) => return resp,
-    };
-    match state.meta.list_goals(site_id).await {
-        Ok(goals) => Json(serde_json::json!({ "goals": goals })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-/// POST /api/v1/sites/:site/goals
-pub async fn create_goal(
-    State(state): State<Arc<AppState>>,
-    Extension(principal): Extension<Principal>,
-    Path(site): Path<String>,
-    Json(body): Json<CreateGoalBody>,
-) -> impl IntoResponse {
-    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
-        Ok(id) => id,
-        Err(resp) => return resp,
-    };
-    if body.name.trim().is_empty() || body.event_name.trim().is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "name and event_name are required"})),
-        )
-            .into_response();
-    }
-    let filters = if body.filters.is_empty() {
-        None
-    } else {
-        serde_json::to_string(&body.filters).ok()
-    };
-    let goal = Goal {
-        id: Ulid::new(),
-        site_id,
-        name: body.name,
-        event_name: body.event_name,
-        filters,
-        created_at: chrono::Utc::now(),
-    };
-    match state.meta.create_goal(&goal).await {
-        Ok(_) => (
-            StatusCode::CREATED,
-            Json(serde_json::to_value(&goal).unwrap()),
-        )
-            .into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-/// DELETE /api/v1/sites/:site/goals/:goal_id
-pub async fn delete_goal(
-    State(state): State<Arc<AppState>>,
-    Extension(principal): Extension<Principal>,
-    Path((site, goal_id)): Path<(String, String)>,
-) -> impl IntoResponse {
-    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
-        Ok(id) => id,
-        Err(resp) => return resp,
-    };
-    let id = match Ulid::from_string(&goal_id) {
-        Ok(id) => id,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "invalid goal id"})),
-            )
-                .into_response()
-        }
-    };
-    // Confirm the goal belongs to this site before deleting.
-    match state.meta.get_goal(id).await {
-        Ok(Some(g)) if g.site_id == site_id => {}
-        Ok(_) => return not_found(),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-    match state.meta.delete_goal(id).await {
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-/// GET /api/v1/sites/:site/goals/:goal_id/stats
-pub async fn goal_stats(
-    State(state): State<Arc<AppState>>,
-    Extension(principal): Extension<Principal>,
-    Path((site, goal_id)): Path<(String, String)>,
-    FormQuery(params): FormQuery<AnalyticsParams>,
-) -> impl IntoResponse {
-    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
-        Ok(id) => id,
-        Err(resp) => return resp,
-    };
-    let id = match Ulid::from_string(&goal_id) {
-        Ok(id) => id,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "invalid goal id"})),
-            )
-                .into_response()
-        }
-    };
-    let goal = match state.meta.get_goal(id).await {
-        Ok(Some(g)) if g.site_id == site_id => g,
-        Ok(_) => return not_found(),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    };
-    let range = params.range();
-    let q = GoalQuery {
-        site_id,
-        event_name: goal.event_name.clone(),
-        filters: goal.parsed_filters(),
-        granularity: Granularity::auto_for_range(&range),
-        range,
-    };
-    match state.backend.query_goal(&q).await {
-        Ok(stats) => {
-            let mut body = serde_json::to_value(&stats).unwrap();
-            body["goal_id"] = serde_json::Value::String(goal.id.to_string());
-            body["name"] = serde_json::Value::String(goal.name);
-            Json(body).into_response()
-        }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
 // ---- Analytics alerts ----
 
 #[derive(Deserialize)]
@@ -842,8 +693,6 @@ pub struct CreateAlertBody {
     pub threshold: f64,
     #[serde(default)]
     pub window_minutes: u32,
-    #[serde(default)]
-    pub goal_event_name: Option<String>,
     pub channel_id: String,
 }
 
@@ -923,7 +772,6 @@ pub async fn create_analytics_alert(
             } else {
                 body.window_minutes
             },
-            goal_event_name: body.goal_event_name,
         },
         channel_id,
         enabled: true,
@@ -1138,136 +986,6 @@ pub async fn campaigns(
         }
     }
     Json(serde_json::Value::Object(out)).into_response()
-}
-
-/// GET /api/v1/sites/:site/paths — top page-navigation sequences.
-pub async fn paths(
-    State(state): State<Arc<AppState>>,
-    Extension(principal): Extension<Principal>,
-    Path(site): Path<String>,
-    FormQuery(params): FormQuery<AnalyticsParams>,
-) -> impl IntoResponse {
-    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
-        Ok(id) => id,
-        Err(resp) => return resp,
-    };
-    let depth = params.depth.unwrap_or(3);
-    let limit = params.limit_or_default();
-    match state
-        .backend
-        .query_paths(site_id, &params.range(), depth, limit)
-        .await
-    {
-        Ok(report) => Json(serde_json::to_value(report).unwrap()).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-// ---- Tier-3: annotations ----
-
-#[derive(Deserialize)]
-pub struct CreateAnnotationBody {
-    /// `YYYY-MM-DD`.
-    pub date: String,
-    pub text: String,
-}
-
-/// GET /api/v1/sites/:site/annotations — annotations within the range.
-pub async fn list_annotations(
-    State(state): State<Arc<AppState>>,
-    Extension(principal): Extension<Principal>,
-    Path(site): Path<String>,
-    FormQuery(params): FormQuery<AnalyticsParams>,
-) -> impl IntoResponse {
-    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
-        Ok(id) => id,
-        Err(resp) => return resp,
-    };
-    let range = params.range();
-    match state
-        .meta
-        .list_annotations(site_id, range.start.date_naive(), range.end.date_naive())
-        .await
-    {
-        Ok(rows) => Json(serde_json::json!({ "annotations": rows })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-/// POST /api/v1/sites/:site/annotations — create an annotation.
-pub async fn create_annotation(
-    State(state): State<Arc<AppState>>,
-    Extension(principal): Extension<Principal>,
-    Path(site): Path<String>,
-    Json(body): Json<CreateAnnotationBody>,
-) -> impl IntoResponse {
-    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
-        Ok(id) => id,
-        Err(resp) => return resp,
-    };
-    let date = match chrono::NaiveDate::parse_from_str(body.date.trim(), "%Y-%m-%d") {
-        Ok(d) => d,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "date must be YYYY-MM-DD"})),
-            )
-                .into_response()
-        }
-    };
-    if body.text.trim().is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "text is required"})),
-        )
-            .into_response();
-    }
-    let annotation = Annotation {
-        id: Ulid::new(),
-        site_id,
-        date,
-        text: body.text,
-        created_at: chrono::Utc::now(),
-    };
-    match state.meta.create_annotation(&annotation).await {
-        Ok(_) => (
-            StatusCode::CREATED,
-            Json(serde_json::to_value(&annotation).unwrap()),
-        )
-            .into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-/// DELETE /api/v1/sites/:site/annotations/:id
-pub async fn delete_annotation(
-    State(state): State<Arc<AppState>>,
-    Extension(principal): Extension<Principal>,
-    Path((site, annotation_id)): Path<(String, String)>,
-) -> impl IntoResponse {
-    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
-        Ok(id) => id,
-        Err(resp) => return resp,
-    };
-    let id = match Ulid::from_string(&annotation_id) {
-        Ok(id) => id,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "invalid annotation id"})),
-            )
-                .into_response()
-        }
-    };
-    match state.meta.get_annotation(id).await {
-        Ok(Some(a)) if a.site_id == site_id => {}
-        Ok(_) => return not_found(),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-    match state.meta.delete_annotation(id).await {
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
 }
 
 // ---------------------------------------------------------------------------

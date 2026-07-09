@@ -5,12 +5,9 @@ use ulid::Ulid;
 
 use stomatopod_core::{
     config::EmbeddedConfig,
-    domain::{
-        annotation::Annotation,
-        event::{DeviceType, Event, EventKind},
-    },
+    domain::event::{DeviceType, Event, EventKind},
     query::pageviews::{Filter, Granularity, PageviewsQuery, TimeRange, TopListField},
-    traits::{MetaStore, StorageBackend},
+    traits::StorageBackend,
 };
 use stomatopod_store::embedded::EmbeddedBackend;
 
@@ -609,7 +606,7 @@ async fn legacy_flat_partitions_are_migrated_on_open() {
     assert_eq!(result.total_pageviews, 1);
 }
 
-// ---- Tier-2 analytics: entry/exit, goals, export ----
+// ---- Tier-2 analytics: entry/exit, export ----
 
 /// Build a single event with explicit session, url, kind/name and timestamp.
 #[allow(clippy::too_many_arguments)]
@@ -725,39 +722,6 @@ async fn exit_pages_report_counts_exits() {
 }
 
 #[tokio::test]
-async fn goal_stats_compute_completions_and_conversion_rate() {
-    use stomatopod_core::query::{analytics::GoalQuery, pageviews::Granularity};
-
-    let dir = tempfile::tempdir().unwrap();
-    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
-    let (site_id, range) = seed_sessions(&backend).await;
-
-    let stats = backend
-        .query_goal(&GoalQuery {
-            site_id,
-            event_name: "signup".into(),
-            filters: vec![],
-            granularity: Granularity::Day,
-            range,
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(stats.completions, 1, "one signup event");
-    assert_eq!(stats.unique_completions, 1);
-    // 1 converting session out of 3 total → ~33.3%.
-    assert!(
-        (stats.conversion_rate - 33.333).abs() < 0.1,
-        "conversion rate should be ~33.3%, got {}",
-        stats.conversion_rate
-    );
-    assert!(
-        !stats.timeseries.is_empty(),
-        "timeseries should have a bucket"
-    );
-}
-
-#[tokio::test]
 async fn sessions_export_derives_entry_exit_and_bounce() {
     let dir = tempfile::tempdir().unwrap();
     let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
@@ -809,25 +773,6 @@ async fn events_export_returns_raw_rows() {
 }
 
 #[tokio::test]
-async fn paths_report_counts_top_sequences() {
-    let dir = tempfile::tempdir().unwrap();
-    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
-    let (site_id, range) = seed_sessions(&backend).await;
-
-    let report = backend.query_paths(site_id, &range, 3, 25).await.unwrap();
-    assert_eq!(report.total_sessions, 3, "three pageview sessions");
-    // Session A walked /home -> /pricing (custom signup excluded).
-    assert!(
-        report
-            .rows
-            .iter()
-            .any(|r| r.steps == vec!["/home".to_string(), "/pricing".to_string()]),
-        "expected /home -> /pricing path, got {:?}",
-        report.rows
-    );
-}
-
-#[tokio::test]
 async fn sparklines_rank_top_pages() {
     let dir = tempfile::tempdir().unwrap();
     let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
@@ -845,69 +790,4 @@ async fn sparklines_rank_top_pages() {
     // /home was viewed by all three sessions.
     assert_eq!(home.total, 3);
     assert_eq!(home.points.iter().sum::<u64>(), 3);
-}
-#[tokio::test]
-async fn annotations_round_trip_through_meta() {
-    use stomatopod_core::domain::{
-        org::{Organization, Plan},
-        site::Site,
-    };
-    let dir = tempfile::tempdir().unwrap();
-    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
-    // Annotations carry a FK to sites, so seed an org + site first.
-    let org = Organization {
-        id: Ulid::new(),
-        name: "Org".into(),
-        slug: format!("org-{}", Ulid::new()),
-        plan: Plan::SelfHosted,
-        created_at: Utc::now(),
-    };
-    backend.create_org(&org).await.unwrap();
-    let site = Site {
-        id: Ulid::new(),
-        org_id: org.id,
-        domain: "ann.example.com".into(),
-        name: "Ann".into(),
-        timezone: "UTC".into(),
-        public_key: format!("pk-{}", Ulid::new()),
-        created_at: Utc::now(),
-        is_active: true,
-    };
-    backend.create_site(&site).await.unwrap();
-    let site_id = site.id;
-    let day = chrono::NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
-
-    let ann = Annotation {
-        id: Ulid::new(),
-        site_id,
-        date: day,
-        text: "Deployed v2".into(),
-        created_at: Utc::now(),
-    };
-    backend.create_annotation(&ann).await.unwrap();
-
-    let in_range = backend
-        .list_annotations(
-            site_id,
-            chrono::NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(),
-            chrono::NaiveDate::from_ymd_opt(2026, 6, 30).unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(in_range.len(), 1);
-    assert_eq!(in_range[0].text, "Deployed v2");
-
-    // A window before the annotation date excludes it.
-    let out_of_range = backend
-        .list_annotations(
-            site_id,
-            chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
-            chrono::NaiveDate::from_ymd_opt(2026, 1, 31).unwrap(),
-        )
-        .await
-        .unwrap();
-    assert!(out_of_range.is_empty());
-
-    backend.delete_annotation(ann.id).await.unwrap();
-    assert!(backend.get_annotation(ann.id).await.unwrap().is_none());
 }

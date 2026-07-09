@@ -5,20 +5,15 @@ use crate::{
     domain::{
         agent::AlertChannel,
         analytics_alert::{AnalyticsAlert, AnalyticsAlertFire},
-        annotation::Annotation,
         api_key::ApiKey,
         digest::DigestSubscription,
-        goal::Goal,
         org::{Funnel, Organization, User},
         share_link::ShareLink,
         site::Site,
     },
     error::StoreError,
     query::{
-        analytics::{
-            EntryPages, ExitPages, GoalQuery, GoalStats, PathReport, RawEventRow, SessionRow,
-            TopSparklines,
-        },
+        analytics::{EntryPages, ExitPages, RawEventRow, SessionRow, TopSparklines},
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
         pageviews::{Filter, PageviewsQuery, PageviewsResult, TimeRange, TopList, TopListField},
@@ -79,9 +74,6 @@ pub trait StorageBackend: Send + Sync + 'static {
         filters: &[Filter],
     ) -> Result<ExitPages, StoreError>;
 
-    /// Goal completions + conversion-rate timeseries.
-    async fn query_goal(&self, q: &GoalQuery) -> Result<GoalStats, StoreError>;
-
     /// Derived session rows for export (newest first).
     async fn query_sessions(
         &self,
@@ -110,15 +102,6 @@ pub trait StorageBackend: Send + Sync + 'static {
         limit: u32,
         filters: &[Filter],
     ) -> Result<TopSparklines, StoreError>;
-
-    /// Top page-navigation sequences (first `depth` pageviews per session).
-    async fn query_paths(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        depth: u32,
-        limit: u32,
-    ) -> Result<PathReport, StoreError>;
 }
 
 /// Metadata CRUD: sites, orgs, users, funnels.
@@ -150,25 +133,6 @@ pub trait MetaStore: Send + Sync + 'static {
     async fn get_funnel(&self, id: Ulid) -> Result<Option<Funnel>, StoreError>;
     async fn list_funnels(&self, site_id: Ulid) -> Result<Vec<Funnel>, StoreError>;
     async fn delete_funnel(&self, id: Ulid) -> Result<(), StoreError>;
-
-    // ---- Goals ----
-    async fn create_goal(&self, goal: &Goal) -> Result<(), StoreError>;
-    async fn get_goal(&self, id: Ulid) -> Result<Option<Goal>, StoreError>;
-    async fn list_goals(&self, site_id: Ulid) -> Result<Vec<Goal>, StoreError>;
-    async fn delete_goal(&self, id: Ulid) -> Result<(), StoreError>;
-
-    // ---- Annotations ----
-    async fn create_annotation(&self, annotation: &Annotation) -> Result<(), StoreError>;
-    async fn get_annotation(&self, id: Ulid) -> Result<Option<Annotation>, StoreError>;
-    /// Annotations whose date falls within `[start, end]` (inclusive),
-    /// newest-dated first.
-    async fn list_annotations(
-        &self,
-        site_id: Ulid,
-        start: chrono::NaiveDate,
-        end: chrono::NaiveDate,
-    ) -> Result<Vec<Annotation>, StoreError>;
-    async fn delete_annotation(&self, id: Ulid) -> Result<(), StoreError>;
 
     // ---- Analytics alerts ----
     async fn create_analytics_alert(&self, alert: &AnalyticsAlert) -> Result<(), StoreError>;

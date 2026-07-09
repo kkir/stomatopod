@@ -10,10 +10,8 @@ use stomatopod_core::{
     domain::{
         agent::{AlertChannel, AlertChannelKind},
         analytics_alert::{AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind},
-        annotation::Annotation,
         api_key::{ApiKey, ApiKeyScope},
         digest::{DigestFrequency, DigestSubscription},
-        goal::Goal,
         org::{Funnel, Organization, Plan, User, UserRole},
         share_link::ShareLink,
         site::Site,
@@ -121,25 +119,6 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
             last_error_at   TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_alert_channels_site ON alert_channels(site_id);
-
-        CREATE TABLE IF NOT EXISTS goals (
-            id          TEXT PRIMARY KEY,
-            site_id     TEXT NOT NULL REFERENCES sites(id),
-            name        TEXT NOT NULL,
-            event_name  TEXT NOT NULL,
-            filters     TEXT,
-            created_at  TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_goals_site ON goals(site_id);
-
-        CREATE TABLE IF NOT EXISTS annotations (
-            id          TEXT PRIMARY KEY,
-            site_id     TEXT NOT NULL REFERENCES sites(id),
-            date        TEXT NOT NULL,
-            text        TEXT NOT NULL,
-            created_at  TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_annotations_site_date ON annotations(site_id, date);
 
         CREATE TABLE IF NOT EXISTS analytics_alerts (
             id          TEXT PRIMARY KEY,
@@ -309,34 +288,6 @@ fn row_to_funnel(row: &rusqlite::Row<'_>) -> rusqlite::Result<Funnel> {
         created_at: chrono::DateTime::parse_from_rfc3339(&created_at_str)
             .map(|d| d.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now()),
-    })
-}
-
-fn row_to_goal(row: &rusqlite::Row<'_>) -> rusqlite::Result<Goal> {
-    let id_str: String = row.get(0)?;
-    let site_id_str: String = row.get(1)?;
-    let created_at_str: String = row.get(5)?;
-    Ok(Goal {
-        id: Ulid::from_string(&id_str).unwrap_or_default(),
-        site_id: Ulid::from_string(&site_id_str).unwrap_or_default(),
-        name: row.get(2)?,
-        event_name: row.get(3)?,
-        filters: row.get(4)?,
-        created_at: parse_utc(&created_at_str),
-    })
-}
-
-fn row_to_annotation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Annotation> {
-    let id_str: String = row.get(0)?;
-    let site_id_str: String = row.get(1)?;
-    let date_str: String = row.get(2)?;
-    let created_at_str: String = row.get(4)?;
-    Ok(Annotation {
-        id: Ulid::from_string(&id_str).unwrap_or_default(),
-        site_id: Ulid::from_string(&site_id_str).unwrap_or_default(),
-        date: chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").unwrap_or_default(),
-        text: row.get(3)?,
-        created_at: parse_utc(&created_at_str),
     })
 }
 
@@ -675,132 +626,6 @@ impl MetaStore for SqliteMeta {
             conn.execute("DELETE FROM funnels WHERE id = ?1", params![id.to_string()])
                 .map(|_| ())
                 .map_err(StoreError::db)
-        })
-    }
-
-    // ---- Goals ----
-    async fn create_goal(&self, goal: &Goal) -> Result<(), StoreError> {
-        let goal = goal.clone();
-        db!(self.conn, |conn: &Connection| {
-            conn.execute(
-                "INSERT INTO goals (id, site_id, name, event_name, filters, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    goal.id.to_string(),
-                    goal.site_id.to_string(),
-                    goal.name,
-                    goal.event_name,
-                    goal.filters,
-                    goal.created_at.to_rfc3339(),
-                ],
-            )
-            .map(|_| ())
-            .map_err(StoreError::db)
-        })
-    }
-
-    async fn get_goal(&self, id: Ulid) -> Result<Option<Goal>, StoreError> {
-        db!(self.conn, |conn: &Connection| {
-            conn.query_row(
-                "SELECT id, site_id, name, event_name, filters, created_at FROM goals WHERE id = ?1",
-                params![id.to_string()],
-                row_to_goal,
-            )
-            .optional()
-            .map_err(StoreError::db)
-        })
-    }
-
-    async fn list_goals(&self, site_id: Ulid) -> Result<Vec<Goal>, StoreError> {
-        db!(self.conn, |conn: &Connection| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, site_id, name, event_name, filters, created_at
-                     FROM goals WHERE site_id = ?1 ORDER BY created_at ASC",
-                )
-                .map_err(StoreError::db)?;
-            let rows = stmt
-                .query_map(params![site_id.to_string()], row_to_goal)
-                .map_err(StoreError::db)?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(StoreError::db)
-        })
-    }
-
-    async fn delete_goal(&self, id: Ulid) -> Result<(), StoreError> {
-        db!(self.conn, |conn: &Connection| {
-            conn.execute("DELETE FROM goals WHERE id = ?1", params![id.to_string()])
-                .map(|_| ())
-                .map_err(StoreError::db)
-        })
-    }
-
-    // ---- Annotations ----
-    async fn create_annotation(&self, annotation: &Annotation) -> Result<(), StoreError> {
-        let a = annotation.clone();
-        db!(self.conn, |conn: &Connection| {
-            conn.execute(
-                "INSERT INTO annotations (id, site_id, date, text, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    a.id.to_string(),
-                    a.site_id.to_string(),
-                    a.date.format("%Y-%m-%d").to_string(),
-                    a.text,
-                    a.created_at.to_rfc3339(),
-                ],
-            )
-            .map(|_| ())
-            .map_err(StoreError::db)
-        })
-    }
-
-    async fn get_annotation(&self, id: Ulid) -> Result<Option<Annotation>, StoreError> {
-        db!(self.conn, |conn: &Connection| {
-            conn.query_row(
-                "SELECT id, site_id, date, text, created_at FROM annotations WHERE id = ?1",
-                params![id.to_string()],
-                row_to_annotation,
-            )
-            .optional()
-            .map_err(StoreError::db)
-        })
-    }
-
-    async fn list_annotations(
-        &self,
-        site_id: Ulid,
-        start: chrono::NaiveDate,
-        end: chrono::NaiveDate,
-    ) -> Result<Vec<Annotation>, StoreError> {
-        db!(self.conn, |conn: &Connection| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, site_id, date, text, created_at FROM annotations
-                     WHERE site_id = ?1 AND date >= ?2 AND date <= ?3 ORDER BY date DESC",
-                )
-                .map_err(StoreError::db)?;
-            let rows = stmt
-                .query_map(
-                    params![
-                        site_id.to_string(),
-                        start.format("%Y-%m-%d").to_string(),
-                        end.format("%Y-%m-%d").to_string(),
-                    ],
-                    row_to_annotation,
-                )
-                .map_err(StoreError::db)?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(StoreError::db)
-        })
-    }
-
-    async fn delete_annotation(&self, id: Ulid) -> Result<(), StoreError> {
-        db!(self.conn, |conn: &Connection| {
-            conn.execute(
-                "DELETE FROM annotations WHERE id = ?1",
-                params![id.to_string()],
-            )
-            .map(|_| ())
-            .map_err(StoreError::db)
         })
     }
 

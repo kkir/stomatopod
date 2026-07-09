@@ -14,8 +14,7 @@ use stomatopod_core::{
     error::StoreError,
     query::{
         analytics::{
-            EntryPageRow, EntryPages, ExitPageRow, ExitPages, GoalBucket, GoalQuery, GoalStats,
-            PathReport, RawEventRow, SessionRow, TopSparklines,
+            EntryPageRow, EntryPages, ExitPageRow, ExitPages, RawEventRow, SessionRow, TopSparklines,
         },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
@@ -491,110 +490,6 @@ impl EmbeddedReader {
         Ok(ExitPages { rows })
     }
 
-    pub async fn query_goal(&self, q: &GoalQuery) -> Result<GoalStats, StoreError> {
-        let site = q.site_id.to_string();
-        if !self.ensure_site_table_available(&site).await? {
-            return Ok(GoalStats::default());
-        }
-        let table = table_name(&site);
-        let start = q.range.start.timestamp_micros();
-        let end = q.range.end.timestamp_micros();
-        let name = q.event_name.replace('\'', "''");
-        let filter_sql = datafusion_filter_clause(&q.filters);
-        let g = granularity_trunc(&q.granularity);
-
-        // Headline completions.
-        let totals_sql = format!(
-            r#"
-            SELECT CAST(COUNT(*) AS BIGINT) AS completions,
-                   CAST(COUNT(DISTINCT session_id) AS BIGINT) AS uniq
-            FROM {table}
-            WHERE site_id = '{site}'
-              AND "timestamp" >= to_timestamp_micros({start})
-              AND "timestamp" <= to_timestamp_micros({end})
-              AND kind = 'custom'
-              AND CAST(name AS VARCHAR) = '{name}'
-              {filter_sql}
-            "#
-        );
-        let tb = self.run(&totals_sql).await?;
-        let mut completions = 0u64;
-        let mut unique_completions = 0u64;
-        if let Some(b) = tb.first() {
-            if b.num_rows() > 0 {
-                if let Some(c) = i64_col(b, "completions") {
-                    completions = c.value(0).max(0) as u64;
-                }
-                if let Some(u) = i64_col(b, "uniq") {
-                    unique_completions = u.value(0).max(0) as u64;
-                }
-            }
-        }
-
-        // Total sessions over the range, for the conversion-rate denominator.
-        let total_sessions = self.distinct_sessions(&table, &site, start, end).await?;
-        let conversion_rate = if total_sessions > 0 {
-            unique_completions as f64 / total_sessions as f64 * 100.0
-        } else {
-            0.0
-        };
-
-        // Per-bucket completions and sessions, merged by bucket.
-        let comp_sql = format!(
-            r#"
-            SELECT date_trunc('{g}', "timestamp") AS bucket,
-                   CAST(COUNT(DISTINCT session_id) AS BIGINT) AS uniq
-            FROM {table}
-            WHERE site_id = '{site}'
-              AND "timestamp" >= to_timestamp_micros({start})
-              AND "timestamp" <= to_timestamp_micros({end})
-              AND kind = 'custom'
-              AND CAST(name AS VARCHAR) = '{name}'
-              {filter_sql}
-            GROUP BY 1 ORDER BY 1
-            "#
-        );
-        let sess_sql = format!(
-            r#"
-            SELECT date_trunc('{g}', "timestamp") AS bucket,
-                   CAST(COUNT(DISTINCT session_id) AS BIGINT) AS sessions
-            FROM {table}
-            WHERE site_id = '{site}'
-              AND "timestamp" >= to_timestamp_micros({start})
-              AND "timestamp" <= to_timestamp_micros({end})
-            GROUP BY 1 ORDER BY 1
-            "#
-        );
-        let comp_b = self.run(&comp_sql).await?;
-        let sess_b = self.run(&sess_sql).await?;
-        let comp_map = bucket_counts(&comp_b, "uniq");
-        let sess_map = bucket_counts(&sess_b, "sessions");
-        let mut timeseries: Vec<GoalBucket> = comp_map
-            .iter()
-            .map(|(date, &c)| {
-                let s = sess_map.get(date).copied().unwrap_or(0);
-                let cr = if s > 0 {
-                    c as f64 / s as f64 * 100.0
-                } else {
-                    0.0
-                };
-                GoalBucket {
-                    date: date.clone(),
-                    completions: c,
-                    conversion_rate: cr,
-                }
-            })
-            .collect();
-        timeseries.sort_by(|a, b| a.date.cmp(&b.date));
-
-        Ok(GoalStats {
-            completions,
-            unique_completions,
-            conversion_rate,
-            timeseries,
-        })
-    }
-
     pub async fn query_sessions(
         &self,
         site_id: Ulid,
@@ -831,80 +726,10 @@ impl EmbeddedReader {
         ))
     }
 
-    pub async fn query_paths(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        depth: u32,
-        limit: u32,
-    ) -> Result<PathReport, StoreError> {
-        let site = site_id.to_string();
-        if !self.ensure_site_table_available(&site).await? {
-            return Ok(PathReport::default());
-        }
-        let table = table_name(&site);
-        let start = range.start.timestamp_micros();
-        let end = range.end.timestamp_micros();
-        let depth = depth.clamp(2, 10);
-        let sql = format!(
-            r#"
-            WITH ranked AS (
-                SELECT session_id,
-                    COALESCE(CAST(url AS VARCHAR), '') AS url,
-                    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY "timestamp" ASC, id ASC) AS rn
-                FROM {table}
-                WHERE site_id = '{site}'
-                  AND "timestamp" >= to_timestamp_micros({start})
-                  AND "timestamp" <= to_timestamp_micros({end})
-                  AND kind = 'pageview'
-            )
-            SELECT session_id, CAST(rn AS BIGINT) AS seq, url FROM ranked WHERE rn <= {depth}
-            "#
-        );
-        let batches = self.run(&sql).await?;
-        let mut steps = Vec::new();
-        for b in &batches {
-            let sid = fixedbin_col(b, "session_id");
-            let seq = i64_col(b, "seq");
-            let url = str_col(b, "url");
-            if let (Some(sid), Some(seq), Some(url)) = (sid, seq, url) {
-                for i in 0..b.num_rows() {
-                    steps.push((
-                        hex_encode(sid.value(i)),
-                        seq.value(i).max(0) as u32,
-                        url.value(i).to_string(),
-                    ));
-                }
-            }
-        }
-        Ok(PathReport::from_steps(steps, limit as usize))
-    }
-
     /// Run a SQL string and collect the result batches.
     async fn run(&self, sql: &str) -> Result<Vec<arrow::record_batch::RecordBatch>, StoreError> {
         let df = self.ctx.sql(sql).await.map_err(StoreError::query)?;
         df.collect().await.map_err(StoreError::query)
-    }
-
-    /// COUNT(DISTINCT session_id) over a window — the conversion denominator.
-    async fn distinct_sessions(
-        &self,
-        table: &str,
-        site: &str,
-        start: i64,
-        end: i64,
-    ) -> Result<u64, StoreError> {
-        let sql = format!(
-            r#"
-            SELECT CAST(COUNT(DISTINCT session_id) AS BIGINT) AS sessions
-            FROM {table}
-            WHERE site_id = '{site}'
-              AND "timestamp" >= to_timestamp_micros({start})
-              AND "timestamp" <= to_timestamp_micros({end})
-            "#
-        );
-        let batches = self.run(&sql).await?;
-        Ok(extract_count(&batches).unwrap_or(0))
     }
 
     fn batches_to_top_list(
@@ -998,27 +823,6 @@ fn ts_micros_col<'a>(b: &'a RecordBatch, name: &str) -> Option<&'a TimestampMicr
 fn opt_str(col: Option<&StringArray>, i: usize) -> Option<String> {
     col.filter(|c| c.is_valid(i))
         .map(|c| c.value(i).to_string())
-}
-
-/// Collapse a `date_trunc(...) AS bucket, <count> AS <field>` result into a
-/// `YYYY-MM-DD → count` map. `date_trunc` returns nanosecond timestamps.
-fn bucket_counts(batches: &[RecordBatch], field: &str) -> std::collections::HashMap<String, u64> {
-    let mut map = std::collections::HashMap::new();
-    for b in batches {
-        let buckets = b
-            .column_by_name("bucket")
-            .and_then(|c| c.as_any().downcast_ref::<TimestampNanosecondArray>());
-        let counts = i64_col(b, field);
-        if let (Some(buckets), Some(counts)) = (buckets, counts) {
-            for i in 0..b.num_rows() {
-                let ts = chrono::DateTime::from_timestamp_nanos(buckets.value(i))
-                    .with_timezone(&chrono::Utc);
-                let date = ts.format("%Y-%m-%d").to_string();
-                map.insert(date, counts.value(i).max(0) as u64);
-            }
-        }
-    }
-    map
 }
 
 /// Build the `AND <col> <op> '<value>'` fragment for a set of analytics
