@@ -6,7 +6,7 @@
 //! ignores unknown JSON fields by default, so trimming a DTO down to what a
 //! page actually uses is safe.
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 // ---- Sites: GET/POST /api/v1/sites (analytics::list_sites, sites::create_site_api) ----
@@ -111,95 +111,6 @@ pub struct ExitPages {
     pub rows: Vec<ExitPageRow>,
 }
 
-// ---- Annotations: GET/POST/DELETE /api/v1/sites/:site/annotations[/:id]
-// (analytics::list_annotations / create_annotation / delete_annotation) ----
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct AnnotationDto {
-    pub id: String,
-    pub date: NaiveDate,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
-pub struct AnnotationsList {
-    #[serde(default)]
-    pub annotations: Vec<AnnotationDto>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CreateAnnotationBody {
-    pub date: String,
-    pub text: String,
-}
-
-// ---- Real-time: GET /api/v1/sites/:site/realtime (analytics::realtime,
-// serializes stomatopod_core::query::analytics::RealtimeSnapshot) ----
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct RealtimeTopPage {
-    pub url: String,
-    pub active_sessions: u64,
-    pub pct: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct RealtimeEvent {
-    pub name: String,
-    pub url: String,
-    pub seconds_ago: i64,
-    #[serde(default)]
-    pub properties: serde_json::Value,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
-pub struct RealtimeSnapshot {
-    pub active_sessions: u64,
-    pub pageviews_per_minute: f64,
-    #[serde(default)]
-    pub top_pages: Vec<RealtimeTopPage>,
-    #[serde(default)]
-    pub recent_events: Vec<RealtimeEvent>,
-}
-
-// ---- Goals: GET/POST /api/v1/sites/:site/goals, GET .../goals/:id/stats
-// (analytics::list_goals / create_goal / goal_stats) ----
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct Goal {
-    pub id: String,
-    pub name: String,
-    pub event_name: String,
-    /// A serialized filter list, or null when the goal has no filters.
-    #[serde(default)]
-    pub filters: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
-pub struct GoalsList {
-    #[serde(default)]
-    pub goals: Vec<Goal>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CreateGoalBody {
-    pub name: String,
-    pub event_name: String,
-}
-
-/// `goal_id` and `name` are injected by the handler on top of the core
-/// `GoalStats` shape.
-#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
-pub struct GoalStats {
-    #[serde(default)]
-    pub goal_id: String,
-    #[serde(default)]
-    pub name: String,
-    pub completions: u64,
-    pub unique_completions: u64,
-    pub conversion_rate: f64,
-}
-
 // ---- Campaigns: GET /api/v1/sites/:site/campaigns (analytics::campaigns);
 // an object keyed by the five UTM `TopListField` tokens. ----
 
@@ -217,49 +128,6 @@ pub struct Campaigns {
     pub utm_content: TopList,
 }
 
-// ---- Retention: GET /api/v1/sites/:site/retention (analytics::retention,
-// serializes RetentionGrid) ----
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct RetentionCell {
-    pub returning: u64,
-    pub pct: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct RetentionCohort {
-    /// Cohort start week, ISO `YYYY-MM-DD`.
-    pub week: String,
-    pub size: u64,
-    #[serde(default)]
-    pub cells: Vec<RetentionCell>,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
-pub struct RetentionGrid {
-    #[serde(default)]
-    pub cohorts: Vec<RetentionCohort>,
-    #[serde(default)]
-    pub max_offset: usize,
-}
-
-// ---- Paths: GET /api/v1/sites/:site/paths (analytics::paths) ----
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct PathRow {
-    #[serde(default)]
-    pub steps: Vec<String>,
-    pub sessions: u64,
-    pub pct: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
-pub struct PathReport {
-    #[serde(default)]
-    pub rows: Vec<PathRow>,
-    pub total_sessions: u64,
-}
-
 // ---- Analytics alerts: GET/POST /api/v1/sites/:site/analytics-alerts,
 // PATCH/DELETE .../:id (analytics::*, serializes AnalyticsAlert) ----
 
@@ -268,15 +136,12 @@ pub struct AnalyticsAlertConfig {
     pub threshold: f64,
     #[serde(default)]
     pub window_minutes: u32,
-    #[serde(default)]
-    pub goal_event_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct AnalyticsAlert {
     pub id: String,
-    /// One of `traffic_spike`, `traffic_drop`, `goal_threshold`,
-    /// `new_referrer_spike`.
+    /// One of `traffic_spike`, `traffic_drop`, `new_referrer_spike`.
     pub kind: String,
     #[serde(default)]
     pub config: AnalyticsAlertConfig,
@@ -296,8 +161,6 @@ pub struct CreateAlertBody {
     pub alert_type: String,
     pub threshold: f64,
     pub window_minutes: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub goal_event_name: Option<String>,
     pub channel_id: String,
 }
 

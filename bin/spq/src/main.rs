@@ -7,9 +7,7 @@
 #![recursion_limit = "512"]
 
 mod alerts;
-mod annotations;
 mod client;
-mod goals;
 mod query;
 mod req;
 mod share;
@@ -51,16 +49,6 @@ enum Commands {
         #[command(subcommand)]
         cmd: sites::SitesCommand,
     },
-    /// Manage chart annotations.
-    Annotations {
-        #[command(subcommand)]
-        cmd: annotations::AnnotationsCommand,
-    },
-    /// Manage conversion goals.
-    Goals {
-        #[command(subcommand)]
-        cmd: goals::GoalsCommand,
-    },
     /// Manage analytics alerts.
     Alerts {
         #[command(subcommand)]
@@ -88,8 +76,6 @@ async fn main() -> anyhow::Result<()> {
     match &cli.command {
         Commands::Query { cmd, human } => query::run(cmd, &client, *human).await,
         Commands::Sites { cmd } => sites::run(cmd, &client).await,
-        Commands::Annotations { cmd } => annotations::run(cmd, &client).await,
-        Commands::Goals { cmd } => goals::run(cmd, &client).await,
         Commands::Alerts { cmd } => alerts::run(cmd, &client).await,
         Commands::Share { cmd } => share::run(cmd, &client).await,
         Commands::Describe => {
@@ -250,165 +236,6 @@ fn describe() -> serde_json::Value {
                 ]
             },
             {
-                "name": "query retention",
-                "description": "Retention cohort grid.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--range", "default": "90d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false },
-                    { "name": "--granularity", "default": "week", "note": "week|month." }
-                ]
-            },
-            {
-                "name": "query paths",
-                "description": "Top user paths (page-navigation sequences).",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false },
-                    { "name": "--steps", "default": "3", "note": "Steps per sequence (2-10). Alias: --depth." },
-                    { "name": "--limit", "default": "25" },
-                    { "name": "--start-url", "required": false, "note": "Only paths beginning at this URL." }
-                ]
-            },
-            {
-                "name": "query realtime",
-                "description": "Live visitors in the last few minutes.",
-                "args": [ { "name": "--site", "required": true } ]
-            },
-            {
-                "name": "query vitals",
-                "description": "Core Web Vitals (LCP/CLS/INP) percentiles.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false },
-                    { "name": "--url", "required": false, "note": "Restrict to a single page path." },
-                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
-                ]
-            },
-            {
-                "name": "query scroll",
-                "description": "Scroll-depth distribution.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false },
-                    { "name": "--url", "required": false, "note": "Restrict to a single page path." },
-                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
-                ]
-            },
-            {
-                "name": "query search",
-                "description": "Top site-search terms.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false },
-                    { "name": "--limit", "default": "20" },
-                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
-                ]
-            },
-            {
-                "name": "query revenue",
-                "description": "Revenue totals.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false },
-                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
-                ]
-            },
-            {
-                "name": "query revenue-breakdown",
-                "description": "Revenue split by a dimension.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--dimension", "required": true, "note": "referrer|country|utm_source." },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false },
-                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
-                ]
-            },
-            {
-                "name": "query experiments",
-                "description": "List A/B experiments and their results.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false }
-                ]
-            },
-            {
-                "name": "query experiment",
-                "description": "Detailed results for a single experiment.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--experiment", "required": true },
-                    { "name": "--goal", "required": false, "note": "Goal id to score variants against." },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false }
-                ]
-            },
-            {
-                "name": "annotations list",
-                "description": "List chart annotations for a site.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--range", "default": "90d" }
-                ]
-            },
-            {
-                "name": "annotations create",
-                "description": "Create a chart annotation (requires a write-capable key).",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--date", "required": true, "note": "YYYY-MM-DD." },
-                    { "name": "--label", "required": true, "note": "Alias: --text." },
-                    { "name": "--note", "required": false }
-                ]
-            },
-            {
-                "name": "annotations delete",
-                "description": "Delete a chart annotation by id.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--id", "required": true }
-                ]
-            },
-            {
-                "name": "goals list",
-                "description": "List conversion goals for a site.",
-                "args": [ { "name": "--site", "required": true } ]
-            },
-            {
-                "name": "goals create",
-                "description": "Create a conversion goal (requires a write-capable key).",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--name", "required": true },
-                    { "name": "--event", "required": true, "note": "Custom event name." },
-                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
-                ]
-            },
-            {
-                "name": "goals delete",
-                "description": "Delete a conversion goal by id.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--goal", "required": true }
-                ]
-            },
-            {
                 "name": "alerts list",
                 "description": "List analytics alerts for a site.",
                 "args": [ { "name": "--site", "required": true } ]
@@ -418,11 +245,10 @@ fn describe() -> serde_json::Value {
                 "description": "Create an analytics alert (requires a write-capable key).",
                 "args": [
                     { "name": "--site", "required": true },
-                    { "name": "--type", "required": true, "note": "e.g. traffic_spike, traffic_drop." },
+                    { "name": "--type", "required": true, "note": "e.g. traffic_spike, traffic_drop, new_referrer_spike." },
                     { "name": "--threshold", "required": true },
                     { "name": "--window", "default": "60", "note": "Window in minutes." },
-                    { "name": "--channel", "required": true, "note": "Alert channel id." },
-                    { "name": "--goal-event", "required": false }
+                    { "name": "--channel", "required": true, "note": "Alert channel id." }
                 ]
             },
             {

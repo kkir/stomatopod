@@ -3,7 +3,6 @@ pub mod buffer;
 pub mod meta;
 pub mod persistence;
 pub mod reader;
-pub mod spans;
 pub mod util;
 pub mod wal;
 pub mod wal_common;
@@ -18,36 +17,25 @@ use ulid::Ulid;
 
 use stomatopod_core::{
     config::EmbeddedConfig,
-    domain::{agent_span::AgentSpan, event::Event},
+    domain::event::Event,
     error::StoreError,
     query::{
-        analytics::{
-            EntryPages, ExitPages, GoalQuery, GoalStats, PathReport, RawEventRow, RealtimeSnapshot,
-            RetentionGrid, SessionRow, TopSparklines,
-        },
+        analytics::{EntryPages, ExitPages, RawEventRow, SessionRow, TopSparklines},
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult},
         pageviews::{Filter, PageviewsQuery, PageviewsResult, TimeRange, TopList, TopListField},
-        spans::{AgentSummary, SpanQuery, SpanRow},
     },
-    traits::{AgentStore, MetaStore, StorageBackend},
+    traits::{MetaStore, StorageBackend},
 };
 
 use self::{
-    buffer::EventBuffer,
-    meta::SqliteMeta,
-    reader::EmbeddedReader,
-    spans::{buffer::SpanBuffer, reader::SpanReader, wal::SpanWal, writer::SpanParquetWriter},
-    wal::Wal,
-    writer::ParquetWriter,
+    buffer::EventBuffer, meta::SqliteMeta, reader::EmbeddedReader, wal::Wal, writer::ParquetWriter,
 };
 
 pub struct EmbeddedBackend {
     pub meta: Arc<SqliteMeta>,
     pub reader: Arc<EmbeddedReader>,
-    pub span_reader: Arc<SpanReader>,
     tx: mpsc::Sender<Vec<Event>>,
-    span_tx: mpsc::Sender<Vec<AgentSpan>>,
 }
 
 impl EmbeddedBackend {
@@ -59,26 +47,17 @@ impl EmbeddedBackend {
         persistence::ensure_persistent(cfg, &data_dir)?;
         tokio::fs::create_dir_all(data_dir.join("parquet")).await?;
         tokio::fs::create_dir_all(data_dir.join("wal")).await?;
-        tokio::fs::create_dir_all(data_dir.join("parquet_spans").join("v1")).await?;
-        tokio::fs::create_dir_all(data_dir.join("wal_spans")).await?;
 
         let meta = Arc::new(SqliteMeta::open(&data_dir.join("meta.db")).await?);
         let wal = Wal::open(&data_dir.join("wal"), cfg.wal_fsync_interval_ms)?;
         let buffer = Arc::new(EventBuffer::new(cfg.parquet_flush_rows * 4));
         let reader = Arc::new(EmbeddedReader::new(data_dir.join("parquet")).await?);
 
-        let span_wal = SpanWal::open(&data_dir.join("wal_spans"))?;
-        let span_buffer = Arc::new(SpanBuffer::new(cfg.parquet_flush_rows * 4));
-        let span_reader =
-            Arc::new(SpanReader::new(data_dir.join("parquet_spans").join("v1")).await?);
-
         // Channel for batched writes from the ingest handler
         let (tx, rx) = mpsc::channel::<Vec<Event>>(256);
-        let (span_tx, span_rx) = mpsc::channel::<Vec<AgentSpan>>(256);
 
         // Replay WAL into buffer on startup
         wal.replay(&buffer)?;
-        span_wal.replay(&span_buffer)?;
         info!("WAL replay complete, starting Parquet flush workers");
 
         // Start background Parquet flush task
@@ -89,25 +68,7 @@ impl EmbeddedBackend {
         );
         tokio::spawn(flush_writer.run(rx, buffer.clone(), wal.clone(), reader.clone()));
 
-        let span_writer = SpanParquetWriter::new(
-            data_dir.join("parquet_spans").join("v1"),
-            cfg.parquet_flush_rows,
-            cfg.parquet_flush_interval_s,
-        );
-        tokio::spawn(span_writer.run(
-            span_rx,
-            span_buffer.clone(),
-            span_wal.clone(),
-            span_reader.clone(),
-        ));
-
-        Ok(Self {
-            meta,
-            reader,
-            span_reader,
-            tx,
-            span_tx,
-        })
+        Ok(Self { meta, reader, tx })
     }
 }
 
@@ -169,18 +130,6 @@ impl StorageBackend for EmbeddedBackend {
             .await
     }
 
-    async fn query_realtime(
-        &self,
-        site_id: Ulid,
-        window_minutes: u32,
-    ) -> Result<RealtimeSnapshot, StoreError> {
-        self.reader.query_realtime(site_id, window_minutes).await
-    }
-
-    async fn query_goal(&self, q: &GoalQuery) -> Result<GoalStats, StoreError> {
-        self.reader.query_goal(q).await
-    }
-
     async fn query_sessions(
         &self,
         site_id: Ulid,
@@ -209,36 +158,6 @@ impl StorageBackend for EmbeddedBackend {
     ) -> Result<TopSparklines, StoreError> {
         self.reader
             .query_top_sparklines(site_id, field, range, limit, filters)
-            .await
-    }
-
-    async fn query_retention(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-    ) -> Result<RetentionGrid, StoreError> {
-        self.reader.query_retention(site_id, range).await
-    }
-
-    async fn query_paths(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        depth: u32,
-        limit: u32,
-    ) -> Result<PathReport, StoreError> {
-        self.reader.query_paths(site_id, range, depth, limit).await
-    }
-
-    async fn query_event_props(
-        &self,
-        site_id: Ulid,
-        names: &[String],
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<Vec<stomatopod_core::query::tier4::EventPropRow>, StoreError> {
-        self.reader
-            .query_event_props(site_id, names, range, limit)
             .await
     }
 }
@@ -356,58 +275,6 @@ impl MetaStore for EmbeddedBackend {
 
     async fn delete_funnel(&self, id: Ulid) -> Result<(), StoreError> {
         self.meta.delete_funnel(id).await
-    }
-
-    async fn create_goal(
-        &self,
-        goal: &stomatopod_core::domain::goal::Goal,
-    ) -> Result<(), StoreError> {
-        self.meta.create_goal(goal).await
-    }
-
-    async fn get_goal(
-        &self,
-        id: Ulid,
-    ) -> Result<Option<stomatopod_core::domain::goal::Goal>, StoreError> {
-        self.meta.get_goal(id).await
-    }
-
-    async fn list_goals(
-        &self,
-        site_id: Ulid,
-    ) -> Result<Vec<stomatopod_core::domain::goal::Goal>, StoreError> {
-        self.meta.list_goals(site_id).await
-    }
-
-    async fn delete_goal(&self, id: Ulid) -> Result<(), StoreError> {
-        self.meta.delete_goal(id).await
-    }
-
-    async fn create_annotation(
-        &self,
-        annotation: &stomatopod_core::domain::annotation::Annotation,
-    ) -> Result<(), StoreError> {
-        self.meta.create_annotation(annotation).await
-    }
-
-    async fn get_annotation(
-        &self,
-        id: Ulid,
-    ) -> Result<Option<stomatopod_core::domain::annotation::Annotation>, StoreError> {
-        self.meta.get_annotation(id).await
-    }
-
-    async fn list_annotations(
-        &self,
-        site_id: Ulid,
-        start: chrono::NaiveDate,
-        end: chrono::NaiveDate,
-    ) -> Result<Vec<stomatopod_core::domain::annotation::Annotation>, StoreError> {
-        self.meta.list_annotations(site_id, start, end).await
-    }
-
-    async fn delete_annotation(&self, id: Ulid) -> Result<(), StoreError> {
-        self.meta.delete_annotation(id).await
     }
 
     async fn create_analytics_alert(
@@ -534,57 +401,6 @@ impl MetaStore for EmbeddedBackend {
         self.meta.record_digest_bounce(id, disable_at).await
     }
 
-    async fn upsert_agent(
-        &self,
-        agent: &stomatopod_core::domain::agent::Agent,
-    ) -> Result<(), StoreError> {
-        self.meta.upsert_agent(agent).await
-    }
-
-    async fn list_agents(
-        &self,
-        site_id: Ulid,
-    ) -> Result<Vec<stomatopod_core::domain::agent::Agent>, StoreError> {
-        self.meta.list_agents(site_id).await
-    }
-
-    async fn get_agent(
-        &self,
-        site_id: Ulid,
-        agent_id: &str,
-    ) -> Result<Option<stomatopod_core::domain::agent::Agent>, StoreError> {
-        self.meta.get_agent(site_id, agent_id).await
-    }
-
-    async fn create_sentinel_token(
-        &self,
-        token: &stomatopod_core::domain::agent::SentinelToken,
-    ) -> Result<(), StoreError> {
-        self.meta.create_sentinel_token(token).await
-    }
-
-    async fn list_sentinel_tokens(
-        &self,
-        site_id: Ulid,
-    ) -> Result<Vec<stomatopod_core::domain::agent::SentinelToken>, StoreError> {
-        self.meta.list_sentinel_tokens(site_id).await
-    }
-
-    async fn get_sentinel_token_by_hash(
-        &self,
-        token_hash: &str,
-    ) -> Result<Option<stomatopod_core::domain::agent::SentinelToken>, StoreError> {
-        self.meta.get_sentinel_token_by_hash(token_hash).await
-    }
-
-    async fn touch_sentinel_token(&self, id: Ulid) -> Result<(), StoreError> {
-        self.meta.touch_sentinel_token(id).await
-    }
-
-    async fn delete_sentinel_token(&self, id: Ulid) -> Result<(), StoreError> {
-        self.meta.delete_sentinel_token(id).await
-    }
-
     async fn create_api_key(
         &self,
         key: &stomatopod_core::domain::api_key::ApiKey,
@@ -630,74 +446,5 @@ impl MetaStore for EmbeddedBackend {
 
     async fn delete_alert_channel(&self, id: Ulid) -> Result<(), StoreError> {
         self.meta.delete_alert_channel(id).await
-    }
-
-    async fn upsert_policy(
-        &self,
-        policy: &stomatopod_core::domain::policy::Policy,
-    ) -> Result<(), StoreError> {
-        self.meta.upsert_policy(policy).await
-    }
-
-    async fn get_policy(
-        &self,
-        site_id: Ulid,
-    ) -> Result<Option<stomatopod_core::domain::policy::Policy>, StoreError> {
-        self.meta.get_policy(site_id).await
-    }
-
-    async fn record_incident(
-        &self,
-        incident: &stomatopod_core::domain::incident::Incident,
-    ) -> Result<(), StoreError> {
-        self.meta.record_incident(incident).await
-    }
-
-    async fn list_incidents(
-        &self,
-        site_id: Ulid,
-        limit: u32,
-    ) -> Result<Vec<stomatopod_core::domain::incident::Incident>, StoreError> {
-        self.meta.list_incidents(site_id, limit).await
-    }
-
-    async fn update_incident_status(
-        &self,
-        id: Ulid,
-        status: stomatopod_core::domain::incident::IncidentStatus,
-    ) -> Result<(), StoreError> {
-        self.meta.update_incident_status(id, status).await
-    }
-}
-
-#[async_trait]
-impl AgentStore for EmbeddedBackend {
-    async fn ingest_spans(&self, spans: Vec<AgentSpan>) -> Result<(), StoreError> {
-        self.span_tx
-            .send(spans)
-            .await
-            .map_err(|_| StoreError::Unavailable("span ingest channel closed".into()))
-    }
-
-    async fn query_spans(&self, q: &SpanQuery) -> Result<Vec<SpanRow>, StoreError> {
-        self.span_reader.query_spans(q).await
-    }
-
-    async fn summarize_agents(
-        &self,
-        site_id: Ulid,
-        since: chrono::DateTime<chrono::Utc>,
-    ) -> Result<Vec<AgentSummary>, StoreError> {
-        self.span_reader.summarize_agents(site_id, since).await
-    }
-
-    async fn session_cost_usd(
-        &self,
-        site_id: Ulid,
-        agent_session_id: &str,
-    ) -> Result<f64, StoreError> {
-        self.span_reader
-            .session_cost_usd(site_id, agent_session_id)
-            .await
     }
 }

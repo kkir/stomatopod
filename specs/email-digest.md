@@ -15,7 +15,6 @@ Send opt-in weekly and/or monthly email digests summarizing key site metrics: pa
 - Top 3 pages (with pageview counts)
 - Top 3 referrers
 - Top country
-- Goal completions (if any goals defined)
 - Link to full dashboard
 
 ### Monthly digest (sent 1st of month)

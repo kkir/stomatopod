@@ -11,7 +11,6 @@ pub struct Config {
     pub geo: GeoConfig,
     pub auth: AuthConfig,
     pub limits: LimitsConfig,
-    pub sentinel: SentinelConfig,
     pub email: EmailConfig,
     /// Public base URL used to build share-link and digest URLs in emails
     /// and the share UI, e.g. `https://analytics.example.com`. No trailing
@@ -56,37 +55,13 @@ impl Config {
     }
 }
 
-/// AI firewall server-side settings.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
-pub struct SentinelConfig {
-    /// Object keys whose values are stripped from span `properties`
-    /// before storage. Case-insensitive.
-    pub redact_keys: Vec<String>,
-}
-
-impl Default for SentinelConfig {
-    fn default() -> Self {
-        Self {
-            redact_keys: vec![
-                "authorization".into(),
-                "api_key".into(),
-                "apikey".into(),
-                "password".into(),
-                "secret".into(),
-                "token".into(),
-            ],
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
-    /// Single org, auto-created on first boot. No plan limits enforced.
+    /// Single org, auto-created on first boot.
     #[default]
     SelfHosted,
-    /// Multi-org. Requires explicit org creation; plan limits enforced.
+    /// Multi-org. Requires explicit org creation.
     Saas,
 }
 
@@ -115,7 +90,6 @@ impl Default for ListenConfig {
 pub enum StorageConfig {
     Embedded(EmbeddedConfig),
     Postgres(PostgresConfig),
-    Clickhouse(ClickhouseConfig),
 }
 
 impl Default for StorageConfig {
@@ -189,19 +163,6 @@ fn default_pg_max_connections() -> u32 {
     20
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ClickhouseConfig {
-    pub url: String,
-    #[serde(default = "default_ch_database")]
-    pub database: String,
-    pub username: String,
-    pub password: String,
-}
-
-fn default_ch_database() -> String {
-    "stomatopod".into()
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct GeoConfig {
@@ -236,7 +197,7 @@ pub struct LimitsConfig {
 impl Default for LimitsConfig {
     fn default() -> Self {
         Self {
-            ingest_channel_size: 65_536,
+            ingest_channel_size: 8_192,
             ingest_batch_size: 1_000,
             ingest_flush_interval_ms: 100,
             max_events_per_request: 10,

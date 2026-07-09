@@ -14,10 +14,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use stomatopod_core::{
     domain::digest::{due_cadences, DigestFrequency, DigestSubscription},
-    query::{
-        analytics::GoalQuery,
-        pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},
-    },
+    query::pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},
     traits::{MetaStore, StorageBackend},
 };
 use tracing::{info, warn};
@@ -65,7 +62,6 @@ pub struct DigestStats {
     pub top_pages: Vec<(String, u64)>,
     pub top_referrers: Vec<(String, u64)>,
     pub top_country: Option<String>,
-    pub goal_completions: u64,
 }
 
 impl DigestStats {
@@ -90,10 +86,10 @@ fn pct_delta(now: u64, prev: u64) -> Option<f64> {
 }
 
 /// Compute digest stats for a site over `range`, including the prior-period
-/// totals for delta badges and a roll-up of all defined goals' completions.
+/// totals for delta badges.
 pub async fn compute_digest_stats(
     backend: &Arc<dyn StorageBackend>,
-    meta: &Arc<dyn MetaStore>,
+    _meta: &Arc<dyn MetaStore>,
     site_id: Ulid,
     range: &TimeRange,
 ) -> DigestStats {
@@ -134,25 +130,6 @@ pub async fn compute_digest_stats(
         .ok()
         .and_then(|t| t.rows.into_iter().next().map(|r| r.value));
 
-    // Roll up completions across every defined goal.
-    let mut goal_completions = 0u64;
-    if let Ok(goals) = meta.list_goals(site_id).await {
-        for goal in goals {
-            if let Ok(stats) = backend
-                .query_goal(&GoalQuery {
-                    site_id,
-                    event_name: goal.event_name.clone(),
-                    filters: vec![],
-                    range: range.clone(),
-                    granularity: Granularity::Day,
-                })
-                .await
-            {
-                goal_completions += stats.completions;
-            }
-        }
-    }
-
     DigestStats {
         pageviews: cur.total_pageviews,
         prev_pageviews: prior.total_pageviews,
@@ -162,7 +139,6 @@ pub async fn compute_digest_stats(
         top_pages,
         top_referrers,
         top_country,
-        goal_completions,
     }
 }
 
@@ -170,7 +146,7 @@ fn delta_badge(delta: Option<f64>) -> String {
     match delta {
         Some(d) if d >= 0.0 => format!("<span style=\"color:#2e7d32\">+{d:.0}%</span>"),
         Some(d) => format!("<span style=\"color:#c62828\">{d:.0}%</span>"),
-        None => "<span style=\"color:#888\">—</span>".to_string(),
+        None => "<span style=\"color:#888\">-</span>".to_string(),
     }
 }
 
@@ -226,15 +202,6 @@ pub fn render_digest_html(
         )
     };
 
-    let goals = if stats.goal_completions > 0 {
-        format!(
-            "<p style=\"font-size:15px\"><strong>{}</strong> goal completions</p>",
-            stats.goal_completions
-        )
-    } else {
-        String::new()
-    };
-
     let country = stats
         .top_country
         .as_deref()
@@ -248,9 +215,8 @@ pub fn render_digest_html(
 
     format!(
         "<div style=\"font-family:system-ui,sans-serif;max-width:600px;margin:0 auto;color:#222\">\
-           <h1 style=\"font-size:20px\">{domain} — {period}</h1>\
+           <h1 style=\"font-size:20px\">{domain} - {period}</h1>\
            {activity}\
-           {goals}\
            {country}\
            <h2 style=\"font-size:16px;margin-top:24px\">Top pages</h2>{pages}\
            <h2 style=\"font-size:16px;margin-top:24px\">Top referrers</h2>{refs}\
@@ -262,7 +228,6 @@ pub fn render_digest_html(
         domain = html_escape(site_domain),
         period = html_escape(period_label),
         activity = activity,
-        goals = goals,
         country = country,
         pages = rows_table(&stats.top_pages),
         refs = rows_table(&stats.top_referrers),

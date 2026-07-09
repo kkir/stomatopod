@@ -1,8 +1,7 @@
-//! Server-rendered HTML for the handful of non-SPA pages: the login screen and
-//! the legacy AI-firewall agents/incidents dashboards. These used to be
-//! minijinja templates; they are now plain Rust string builders (the same
-//! approach `routes::share_links` and `routes::digest` already use for their
-//! public pages), so the crate carries no template engine.
+//! Server-rendered HTML for the login screen. These used to be minijinja
+//! templates; they are now plain Rust string builders (the same approach
+//! `routes::share_links` and `routes::digest` already use for their public
+//! pages), so the crate carries no template engine.
 //!
 //! The main dashboard is the Dioxus app and is server-rendered by
 //! `dioxus-server`; nothing here overlaps with it.
@@ -78,30 +77,5 @@ pub fn login_page(error: Option<&str>) -> String {
   </body>
 </html>"#,
         head = head("Login - Stomatopod"),
-    )
-}
-
-/// A minimal document shell for the legacy agents/incidents pages. Unlike the
-/// old `base.jinja` it carries no sidebar nav - the sidebar now belongs to the
-/// Dioxus dashboard - just a titled container plus a link back to it.
-pub fn dashboard_page(title: &str, content: &str) -> String {
-    format!(
-        r#"<!doctype html>
-<html lang="en">
-  <head>
-    {head}
-  </head>
-  <body class="app">
-    <main class="main">
-      <div class="container">
-        <div class="page-head">
-          <a href="/" class="logo"><span class="logo-mark" aria-hidden="true"></span> Stomatopod</a>
-        </div>
-        {content}
-      </div>
-    </main>
-  </body>
-</html>"#,
-        head = head(&format!("{title} - Stomatopod")),
     )
 }

@@ -37,6 +37,10 @@ backend = "embedded"
 # would otherwise be wiped on every redeploy. Override with
 # STOMATOPOD_STORAGE__DATA_DIR. See DEPLOY.md.
 data_dir = "./data"
+# Group-commit fsync cadence for the write-ahead log (ms). Appends are
+# flushed to the OS page cache immediately; durable fsync is batched at
+# this interval. Sealed WAL segments are deleted after a successful
+# Parquet flush once the in-memory buffer is empty.
 wal_fsync_interval_ms = 200
 parquet_flush_rows = 50000
 parquet_flush_interval_s = 30
@@ -50,7 +54,7 @@ allow_ephemeral = false
 
 # Ingest pipeline tuning.
 [limits]
-ingest_channel_size = 65536
+ingest_channel_size = 8192
 ingest_batch_size = 1000
 ingest_flush_interval_ms = 100
 max_events_per_request = 10

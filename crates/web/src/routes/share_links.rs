@@ -21,7 +21,6 @@ use ulid::Ulid;
 use stomatopod_core::{
     domain::share_link::ShareLink,
     query::{
-        analytics::GoalQuery,
         events::EventQuery,
         pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},
     },
@@ -482,44 +481,4 @@ pub async fn public_events(
         Ok(r) => Json(serde_json::to_value(r).unwrap()).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
-}
-
-/// GET /share/:token/api/goals  — goal completions + conversion rate.
-pub async fn public_goals(
-    State(state): State<Arc<AppState>>,
-    Path(token): Path<String>,
-    Query(params): Query<PublicParams>,
-) -> Response {
-    let link = match resolve_token(&state, &token).await {
-        Ok(l) => l,
-        Err(resp) => return resp,
-    };
-    let range = params.range();
-    let goals = state
-        .meta
-        .list_goals(link.site_id)
-        .await
-        .unwrap_or_default();
-    let mut out = Vec::new();
-    for goal in goals {
-        if let Ok(stats) = state
-            .backend
-            .query_goal(&GoalQuery {
-                site_id: link.site_id,
-                event_name: goal.event_name.clone(),
-                filters: vec![],
-                range: range.clone(),
-                granularity: Granularity::Day,
-            })
-            .await
-        {
-            out.push(serde_json::json!({
-                "name": goal.name,
-                "event_name": goal.event_name,
-                "completions": stats.completions,
-                "conversion_rate": stats.conversion_rate,
-            }));
-        }
-    }
-    Json(serde_json::json!({ "goals": out })).into_response()
 }

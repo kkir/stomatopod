@@ -1,4 +1,4 @@
-//! `spq alerts` — manage analytics alerts (traffic spikes/drops, goal alerts).
+//! `spq alerts` - manage analytics alerts (traffic spikes/drops, referrer spikes).
 
 use clap::Subcommand;
 
@@ -19,7 +19,7 @@ pub enum AlertsCommand {
         /// Alert type, e.g. `traffic_spike` or `traffic_drop`.
         #[arg(long = "type")]
         alert_type: String,
-        /// Trigger threshold (percent or absolute, per type).
+        /// Trigger threshold (percent).
         #[arg(long)]
         threshold: f64,
         /// Evaluation window in minutes.
@@ -28,9 +28,6 @@ pub enum AlertsCommand {
         /// Alert channel id to notify.
         #[arg(long)]
         channel: String,
-        /// Optional goal event name (for goal-based alerts).
-        #[arg(long = "goal-event")]
-        goal_event: Option<String>,
     },
     /// Delete an alert by id.
     Delete {
@@ -60,17 +57,13 @@ pub fn build(cmd: &AlertsCommand) -> anyhow::Result<Req> {
             threshold,
             window,
             channel,
-            goal_event,
         } => {
-            let mut body = serde_json::json!({
+            let body = serde_json::json!({
                 "type": alert_type,
                 "threshold": threshold,
                 "window_minutes": window,
                 "channel_id": channel,
             });
-            if let Some(g) = goal_event {
-                body["goal_event_name"] = serde_json::Value::String(g.clone());
-            }
             Req::Post(format!("/api/v1/sites/{site}/analytics-alerts"), body)
         }
         AlertsCommand::Delete { site, alert } => {

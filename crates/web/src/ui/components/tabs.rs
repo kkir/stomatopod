@@ -35,37 +35,28 @@ pub fn RangeTabs(active: String) -> Element {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum SiteTab {
     Overview,
-    Realtime,
     Events,
-    Goals,
     Funnels,
+    Campaigns,
     Alerts,
     Keys,
     Settings,
 }
 
-/// The Overview/Real-time/Events/Goals/Funnels/Alerts/API Keys/Settings
-/// tab row shown on every per-site page.
+/// Tab row shown on every per-site page.
 #[component]
 pub fn SiteTabs(site_id: String, range: String, active: SiteTab) -> Element {
     let q = DashQuery {
         range: Some(range),
         ..Default::default()
     };
-    let tabs: [(SiteTab, &str, Route); 8] = [
+    let tabs: [(SiteTab, &str, Route); 7] = [
         (
             SiteTab::Overview,
             "Overview",
             Route::SiteOverview {
                 site_id: site_id.clone(),
                 q: q.clone(),
-            },
-        ),
-        (
-            SiteTab::Realtime,
-            "Real-time",
-            Route::Realtime {
-                site_id: site_id.clone(),
             },
         ),
         (
@@ -77,17 +68,17 @@ pub fn SiteTabs(site_id: String, range: String, active: SiteTab) -> Element {
             },
         ),
         (
-            SiteTab::Goals,
-            "Goals",
-            Route::Goals {
+            SiteTab::Funnels,
+            "Funnels",
+            Route::Funnels {
                 site_id: site_id.clone(),
                 q: q.clone(),
             },
         ),
         (
-            SiteTab::Funnels,
-            "Funnels",
-            Route::Funnels {
+            SiteTab::Campaigns,
+            "Campaigns",
+            Route::Campaigns {
                 site_id: site_id.clone(),
                 q: q.clone(),
             },

@@ -59,9 +59,6 @@ test("authenticated /ui renders the SPA shell", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Sites" })).toBeVisible();
   // Nav links from the sidebar (kept from the legacy tier2 coverage).
   const nav = page.locator(".side-nav");
-  await expect(nav.getByRole("link", { name: "Real-time" })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Goals" })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Alerts" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Docs" })).toBeVisible();
 });
 
@@ -119,10 +116,9 @@ test("all per-site tabs render without error", async ({ page }) => {
 
   const tabs: Array<[string, RegExp]> = [
     [`${UI}/sites/${siteId}`, /Tabs Co/],
-    [`${UI}/sites/${siteId}/realtime`, /Real-time/],
     [`${UI}/sites/${siteId}/events`, /Events/],
-    [`${UI}/sites/${siteId}/goals`, /Goals/],
     [`${UI}/sites/${siteId}/funnels`, /Funnels/],
+    [`${UI}/sites/${siteId}/campaigns`, /Tabs Co/],
     [`${UI}/sites/${siteId}/alerts`, /Alerts/],
     [`${UI}/sites/${siteId}/keys`, /API Keys/],
     [`${UI}/sites/${siteId}/settings`, /Site Settings/],
@@ -138,22 +134,14 @@ test("all per-site tabs render without error", async ({ page }) => {
   }
 });
 
-// ---- Global insight + management pages ----
+// ---- Global management pages ----
 
 test("global pages render without error", async ({ page }) => {
   await login(page);
-  // Ensure at least one site exists so the site-scoped globals have data.
-  await createSite(page, "Global Co", "global.example");
 
   const pages: Array<[string, RegExp]> = [
-    [`${UI}/realtime`, /Real-time/],
-    [`${UI}/goals`, /Goals/],
-    [`${UI}/campaigns`, /Campaigns/],
-    [`${UI}/retention`, /Retention/],
-    [`${UI}/paths`, /Paths/],
-    [`${UI}/compare`, /Compare/],
-    [`${UI}/alerts`, /Alerts/],
     [`${UI}/keys`, /API Keys/],
+    [`${UI}/docs`, /Docs/],
   ];
 
   for (const [url, heading] of pages) {
@@ -197,24 +185,6 @@ test("funnel builder creates a funnel", async ({ page }) => {
 
   // The new funnel appears in the list above the builder.
   await expect(page.getByText(funnelName)).toBeVisible({ timeout: 10_000 });
-});
-
-// ---- Goals (SPA interactivity, ported from legacy tier2) ----
-
-test("a goal can be created and is listed", async ({ page }) => {
-  await login(page);
-  const siteId = await createSite(page, "Goals Co", "goals.example");
-
-  await page.goto(`${UI}/sites/${siteId}/goals`);
-  await waitForSpa(page);
-
-  const goalName = `Signup ${Date.now().toString(36)}`;
-  await page.getByPlaceholder("Goal name").fill(goalName);
-  await page.getByPlaceholder(/Event name/).fill("user_signed_up");
-  await page.getByRole("button", { name: "Add goal" }).click();
-
-  await expect(page.getByText(goalName)).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText("Event: user_signed_up")).toBeVisible();
 });
 
 // ---- Alerts + channels (SPA interactivity, ported from legacy tier2) ----

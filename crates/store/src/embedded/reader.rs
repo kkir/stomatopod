@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use anyhow::Result;
 use datafusion::{
     datasource::listing::{ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl},
-    execution::context::SessionContext,
+    execution::context::{SessionConfig, SessionContext},
 };
 use parking_lot::RwLock;
 use std::collections::HashSet;
@@ -14,9 +14,8 @@ use stomatopod_core::{
     error::StoreError,
     query::{
         analytics::{
-            EntryPageRow, EntryPages, ExitPageRow, ExitPages, GoalBucket, GoalQuery, GoalStats,
-            PathReport, RawEventRow, RealtimeEvent, RealtimeSnapshot, RealtimeTopPage,
-            RetentionGrid, SessionRow, TopSparklines,
+            EntryPageRow, EntryPages, ExitPageRow, ExitPages, RawEventRow, SessionRow,
+            TopSparklines,
         },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
@@ -24,7 +23,6 @@ use stomatopod_core::{
             Filter, FilterOp, Granularity, PageviewsQuery, PageviewsResult, TimeBucket, TimeRange,
             TopList, TopListField, TopRow,
         },
-        tier4::EventPropRow,
     },
 };
 
@@ -36,7 +34,10 @@ pub struct EmbeddedReader {
 
 impl EmbeddedReader {
     pub async fn new(data_dir: PathBuf) -> Result<Self> {
-        let ctx = SessionContext::new();
+        // Cap parallel partitions: self-hosted boxes rarely benefit from
+        // DataFusion's default (num_cpus) and it multiplies memory use.
+        let config = SessionConfig::new().with_target_partitions(2);
+        let ctx = SessionContext::new_with_config(config);
 
         // Register all existing site directories on startup
         let reader = Self {
@@ -233,7 +234,7 @@ impl EmbeddedReader {
             WHERE site_id = '{site_id_str}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'pageview'
+              AND kind = 'pageview'
               {filter_sql}
             GROUP BY 1
             ORDER BY pageviews DESC
@@ -272,7 +273,7 @@ impl EmbeddedReader {
             WHERE site_id = '{site_id_str}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'custom'
+              AND kind = 'custom'
               {name_filter}
             GROUP BY 1
             ORDER BY pageviews DESC
@@ -376,7 +377,7 @@ impl EmbeddedReader {
                 WHERE site_id = '{site}'
                   AND "timestamp" >= to_timestamp_micros({start})
                   AND "timestamp" <= to_timestamp_micros({end})
-                  AND CAST(kind AS VARCHAR) = 'pageview'
+                  AND kind = 'pageview'
                   {filter_sql}
             )
             SELECT url AS value,
@@ -445,7 +446,7 @@ impl EmbeddedReader {
                 WHERE site_id = '{site}'
                   AND "timestamp" >= to_timestamp_micros({start})
                   AND "timestamp" <= to_timestamp_micros({end})
-                  AND CAST(kind AS VARCHAR) = 'pageview'
+                  AND kind = 'pageview'
                   {filter_sql}
             )
             SELECT url AS value,
@@ -491,239 +492,6 @@ impl EmbeddedReader {
         Ok(ExitPages { rows })
     }
 
-    pub async fn query_realtime(
-        &self,
-        site_id: Ulid,
-        window_minutes: u32,
-    ) -> Result<RealtimeSnapshot, StoreError> {
-        let site = site_id.to_string();
-        if !self.ensure_site_table_available(&site).await? {
-            return Ok(RealtimeSnapshot::default());
-        }
-        let table = table_name(&site);
-        let now = chrono::Utc::now();
-        let start =
-            (now - chrono::Duration::minutes(window_minutes.max(1) as i64)).timestamp_micros();
-        let end = now.timestamp_micros();
-
-        // Headline counts.
-        let head_sql = format!(
-            r#"
-            SELECT CAST(COUNT(DISTINCT session_id) AS BIGINT) AS active,
-                   CAST(COUNT(*) AS BIGINT) AS pvs
-            FROM {table}
-            WHERE site_id = '{site}'
-              AND "timestamp" >= to_timestamp_micros({start})
-              AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'pageview'
-            "#
-        );
-        let head = self.run(&head_sql).await?;
-        let mut active_sessions = 0u64;
-        let mut pageviews = 0u64;
-        if let Some(b) = head.first() {
-            if let Some(a) = i64_col(b, "active") {
-                if b.num_rows() > 0 {
-                    active_sessions = a.value(0).max(0) as u64;
-                }
-            }
-            if let Some(p) = i64_col(b, "pvs") {
-                if b.num_rows() > 0 {
-                    pageviews = p.value(0).max(0) as u64;
-                }
-            }
-        }
-        let pageviews_per_minute = pageviews as f64 / window_minutes.max(1) as f64;
-
-        // Active pages: last pageview per session.
-        let pages_sql = format!(
-            r#"
-            WITH ranked AS (
-                SELECT COALESCE(CAST(url AS VARCHAR), '') AS url, session_id,
-                    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY "timestamp" DESC, id DESC) AS rn
-                FROM {table}
-                WHERE site_id = '{site}'
-                  AND "timestamp" >= to_timestamp_micros({start})
-                  AND "timestamp" <= to_timestamp_micros({end})
-                  AND CAST(kind AS VARCHAR) = 'pageview'
-            )
-            SELECT url AS value, CAST(COUNT(DISTINCT session_id) AS BIGINT) AS active
-            FROM ranked WHERE rn = 1
-            GROUP BY url ORDER BY active DESC LIMIT 10
-            "#
-        );
-        let page_batches = self.run(&pages_sql).await?;
-        let mut top_pages = Vec::new();
-        for b in &page_batches {
-            if let (Some(urls), Some(act)) = (str_col(b, "value"), i64_col(b, "active")) {
-                for i in 0..b.num_rows() {
-                    let a = act.value(i) as u64;
-                    let pct = if active_sessions > 0 {
-                        a as f64 / active_sessions as f64 * 100.0
-                    } else {
-                        0.0
-                    };
-                    top_pages.push(RealtimeTopPage {
-                        url: urls.value(i).to_string(),
-                        active_sessions: a,
-                        pct,
-                    });
-                }
-            }
-        }
-
-        // Recent custom events, newest first.
-        let events_sql = format!(
-            r#"
-            SELECT CAST(name AS VARCHAR) AS name, COALESCE(CAST(url AS VARCHAR), '') AS url,
-                   "timestamp" AS ts, CAST(properties AS VARCHAR) AS props
-            FROM {table}
-            WHERE site_id = '{site}'
-              AND "timestamp" >= to_timestamp_micros({start})
-              AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'custom'
-            ORDER BY "timestamp" DESC LIMIT 50
-            "#
-        );
-        let ev_batches = self.run(&events_sql).await?;
-        let mut recent_events = Vec::new();
-        for b in &ev_batches {
-            let names = str_col(b, "name");
-            let urls = str_col(b, "url");
-            let props = str_col(b, "props");
-            let ts = ts_micros_col(b, "ts");
-            if let (Some(names), Some(urls), Some(ts)) = (names, urls, ts) {
-                for i in 0..b.num_rows() {
-                    let event_ts =
-                        chrono::DateTime::from_timestamp_micros(ts.value(i)).unwrap_or(now);
-                    let seconds_ago = (now - event_ts).num_seconds().max(0);
-                    let properties = props
-                        .filter(|p| p.is_valid(i))
-                        .and_then(|p| serde_json::from_str(p.value(i)).ok())
-                        .unwrap_or(serde_json::Value::Null);
-                    recent_events.push(RealtimeEvent {
-                        name: names.value(i).to_string(),
-                        url: urls.value(i).to_string(),
-                        seconds_ago,
-                        properties,
-                    });
-                }
-            }
-        }
-
-        Ok(RealtimeSnapshot {
-            active_sessions,
-            pageviews_per_minute,
-            top_pages,
-            recent_events,
-        })
-    }
-
-    pub async fn query_goal(&self, q: &GoalQuery) -> Result<GoalStats, StoreError> {
-        let site = q.site_id.to_string();
-        if !self.ensure_site_table_available(&site).await? {
-            return Ok(GoalStats::default());
-        }
-        let table = table_name(&site);
-        let start = q.range.start.timestamp_micros();
-        let end = q.range.end.timestamp_micros();
-        let name = q.event_name.replace('\'', "''");
-        let filter_sql = datafusion_filter_clause(&q.filters);
-        let g = granularity_trunc(&q.granularity);
-
-        // Headline completions.
-        let totals_sql = format!(
-            r#"
-            SELECT CAST(COUNT(*) AS BIGINT) AS completions,
-                   CAST(COUNT(DISTINCT session_id) AS BIGINT) AS uniq
-            FROM {table}
-            WHERE site_id = '{site}'
-              AND "timestamp" >= to_timestamp_micros({start})
-              AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'custom'
-              AND CAST(name AS VARCHAR) = '{name}'
-              {filter_sql}
-            "#
-        );
-        let tb = self.run(&totals_sql).await?;
-        let mut completions = 0u64;
-        let mut unique_completions = 0u64;
-        if let Some(b) = tb.first() {
-            if b.num_rows() > 0 {
-                if let Some(c) = i64_col(b, "completions") {
-                    completions = c.value(0).max(0) as u64;
-                }
-                if let Some(u) = i64_col(b, "uniq") {
-                    unique_completions = u.value(0).max(0) as u64;
-                }
-            }
-        }
-
-        // Total sessions over the range, for the conversion-rate denominator.
-        let total_sessions = self.distinct_sessions(&table, &site, start, end).await?;
-        let conversion_rate = if total_sessions > 0 {
-            unique_completions as f64 / total_sessions as f64 * 100.0
-        } else {
-            0.0
-        };
-
-        // Per-bucket completions and sessions, merged by bucket.
-        let comp_sql = format!(
-            r#"
-            SELECT date_trunc('{g}', "timestamp") AS bucket,
-                   CAST(COUNT(DISTINCT session_id) AS BIGINT) AS uniq
-            FROM {table}
-            WHERE site_id = '{site}'
-              AND "timestamp" >= to_timestamp_micros({start})
-              AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'custom'
-              AND CAST(name AS VARCHAR) = '{name}'
-              {filter_sql}
-            GROUP BY 1 ORDER BY 1
-            "#
-        );
-        let sess_sql = format!(
-            r#"
-            SELECT date_trunc('{g}', "timestamp") AS bucket,
-                   CAST(COUNT(DISTINCT session_id) AS BIGINT) AS sessions
-            FROM {table}
-            WHERE site_id = '{site}'
-              AND "timestamp" >= to_timestamp_micros({start})
-              AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'pageview'
-            GROUP BY 1 ORDER BY 1
-            "#
-        );
-        let comp_b = self.run(&comp_sql).await?;
-        let sess_b = self.run(&sess_sql).await?;
-        let comp_map = bucket_counts(&comp_b, "uniq");
-        let sess_map = bucket_counts(&sess_b, "sessions");
-        let mut timeseries: Vec<GoalBucket> = comp_map
-            .iter()
-            .map(|(date, &c)| {
-                let s = sess_map.get(date).copied().unwrap_or(0);
-                let cr = if s > 0 {
-                    c as f64 / s as f64 * 100.0
-                } else {
-                    0.0
-                };
-                GoalBucket {
-                    date: date.clone(),
-                    completions: c,
-                    conversion_rate: cr,
-                }
-            })
-            .collect();
-        timeseries.sort_by(|a, b| a.date.cmp(&b.date));
-
-        Ok(GoalStats {
-            completions,
-            unique_completions,
-            conversion_rate,
-            timeseries,
-        })
-    }
-
     pub async fn query_sessions(
         &self,
         site_id: Ulid,
@@ -757,7 +525,7 @@ impl EmbeddedReader {
                 WHERE site_id = '{site}'
                   AND "timestamp" >= to_timestamp_micros({start})
                   AND "timestamp" <= to_timestamp_micros({end})
-                  AND CAST(kind AS VARCHAR) = 'pageview'
+                  AND kind = 'pageview'
             )
             SELECT session_id,
                    MIN(ts) AS started,
@@ -897,85 +665,6 @@ impl EmbeddedReader {
         Ok(out)
     }
 
-    /// Raw custom-event rows for Tier-4 aggregation. Includes the property
-    /// JSON plus the dimensions revenue/breakdown reports group by. `names`
-    /// (when non-empty) restricts to those event names.
-    pub async fn query_event_props(
-        &self,
-        site_id: Ulid,
-        names: &[String],
-        range: &TimeRange,
-        limit: u32,
-    ) -> Result<Vec<EventPropRow>, StoreError> {
-        let site = site_id.to_string();
-        if !self.ensure_site_table_available(&site).await? {
-            return Ok(vec![]);
-        }
-        let table = table_name(&site);
-        let start = range.start.timestamp_micros();
-        let end = range.end.timestamp_micros();
-        let name_filter = if names.is_empty() {
-            String::new()
-        } else {
-            let list = names
-                .iter()
-                .map(|n| format!("'{}'", n.replace('\'', "''")))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("AND CAST(name AS VARCHAR) IN ({list})")
-        };
-        let sql = format!(
-            r#"
-            SELECT CAST(name AS VARCHAR) AS name,
-                   COALESCE(CAST(url AS VARCHAR), '') AS url,
-                   session_id,
-                   "timestamp" AS ts,
-                   CAST(referrer AS VARCHAR) AS referrer,
-                   CAST(country_code AS VARCHAR) AS country,
-                   CAST(utm_source AS VARCHAR) AS utm_source,
-                   CAST(properties AS VARCHAR) AS props
-            FROM {table}
-            WHERE site_id = '{site}'
-              AND "timestamp" >= to_timestamp_micros({start})
-              AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'custom'
-              {name_filter}
-            ORDER BY "timestamp" ASC
-            LIMIT {limit}
-            "#
-        );
-        let batches = self.run(&sql).await?;
-        let mut out = Vec::new();
-        for b in &batches {
-            let name = str_col(b, "name");
-            let url = str_col(b, "url");
-            let sid = fixedbin_col(b, "session_id");
-            let ts = ts_micros_col(b, "ts");
-            let referrer = str_col(b, "referrer");
-            let country = str_col(b, "country");
-            let utm_source = str_col(b, "utm_source");
-            let props = str_col(b, "props");
-            for i in 0..b.num_rows() {
-                let properties = props
-                    .filter(|p| p.is_valid(i))
-                    .and_then(|p| serde_json::from_str(p.value(i)).ok());
-                out.push(EventPropRow {
-                    name: opt_str(name, i).unwrap_or_default(),
-                    url: opt_str(url, i).unwrap_or_default(),
-                    session_id: sid.map(|c| hex_encode(c.value(i))).unwrap_or_default(),
-                    timestamp: ts
-                        .and_then(|c| chrono::DateTime::from_timestamp_micros(c.value(i)))
-                        .unwrap_or_default(),
-                    referrer: opt_str(referrer, i),
-                    country_code: opt_str(country, i),
-                    utm_source: opt_str(utm_source, i),
-                    properties,
-                });
-            }
-        }
-        Ok(out)
-    }
-
     // ---- Tier-3 analytics queries ----
 
     pub async fn query_top_sparklines(
@@ -1004,7 +693,7 @@ impl EmbeddedReader {
             WHERE site_id = '{site}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'pageview'
+              AND kind = 'pageview'
               {filter_sql}
             GROUP BY 1, 2
             "#
@@ -1039,123 +728,10 @@ impl EmbeddedReader {
         ))
     }
 
-    pub async fn query_retention(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-    ) -> Result<RetentionGrid, StoreError> {
-        let site = site_id.to_string();
-        if !self.ensure_site_table_available(&site).await? {
-            return Ok(RetentionGrid::default());
-        }
-        let table = table_name(&site);
-        let start = range.start.timestamp_micros();
-        let end = range.end.timestamp_micros();
-        let sql = format!(
-            r#"
-            SELECT DISTINCT session_id,
-                   date_trunc('week', "timestamp") AS week
-            FROM {table}
-            WHERE site_id = '{site}'
-              AND "timestamp" >= to_timestamp_micros({start})
-              AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'pageview'
-            "#
-        );
-        let batches = self.run(&sql).await?;
-        let mut pairs = Vec::new();
-        for b in &batches {
-            let sid = fixedbin_col(b, "session_id");
-            let week = b
-                .column_by_name("week")
-                .and_then(|c| c.as_any().downcast_ref::<TimestampNanosecondArray>());
-            if let (Some(sid), Some(week)) = (sid, week) {
-                for i in 0..b.num_rows() {
-                    let w = chrono::DateTime::from_timestamp_nanos(week.value(i))
-                        .format("%Y-%m-%d")
-                        .to_string();
-                    pairs.push((hex_encode(sid.value(i)), w));
-                }
-            }
-        }
-        Ok(RetentionGrid::from_session_weeks(pairs))
-    }
-
-    pub async fn query_paths(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        depth: u32,
-        limit: u32,
-    ) -> Result<PathReport, StoreError> {
-        let site = site_id.to_string();
-        if !self.ensure_site_table_available(&site).await? {
-            return Ok(PathReport::default());
-        }
-        let table = table_name(&site);
-        let start = range.start.timestamp_micros();
-        let end = range.end.timestamp_micros();
-        let depth = depth.clamp(2, 10);
-        let sql = format!(
-            r#"
-            WITH ranked AS (
-                SELECT session_id,
-                    COALESCE(CAST(url AS VARCHAR), '') AS url,
-                    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY "timestamp" ASC, id ASC) AS rn
-                FROM {table}
-                WHERE site_id = '{site}'
-                  AND "timestamp" >= to_timestamp_micros({start})
-                  AND "timestamp" <= to_timestamp_micros({end})
-                  AND CAST(kind AS VARCHAR) = 'pageview'
-            )
-            SELECT session_id, CAST(rn AS BIGINT) AS seq, url FROM ranked WHERE rn <= {depth}
-            "#
-        );
-        let batches = self.run(&sql).await?;
-        let mut steps = Vec::new();
-        for b in &batches {
-            let sid = fixedbin_col(b, "session_id");
-            let seq = i64_col(b, "seq");
-            let url = str_col(b, "url");
-            if let (Some(sid), Some(seq), Some(url)) = (sid, seq, url) {
-                for i in 0..b.num_rows() {
-                    steps.push((
-                        hex_encode(sid.value(i)),
-                        seq.value(i).max(0) as u32,
-                        url.value(i).to_string(),
-                    ));
-                }
-            }
-        }
-        Ok(PathReport::from_steps(steps, limit as usize))
-    }
-
     /// Run a SQL string and collect the result batches.
     async fn run(&self, sql: &str) -> Result<Vec<arrow::record_batch::RecordBatch>, StoreError> {
         let df = self.ctx.sql(sql).await.map_err(StoreError::query)?;
         df.collect().await.map_err(StoreError::query)
-    }
-
-    /// COUNT(DISTINCT session_id) over a window — the conversion denominator.
-    async fn distinct_sessions(
-        &self,
-        table: &str,
-        site: &str,
-        start: i64,
-        end: i64,
-    ) -> Result<u64, StoreError> {
-        let sql = format!(
-            r#"
-            SELECT CAST(COUNT(DISTINCT session_id) AS BIGINT) AS sessions
-            FROM {table}
-            WHERE site_id = '{site}'
-              AND "timestamp" >= to_timestamp_micros({start})
-              AND "timestamp" <= to_timestamp_micros({end})
-              AND CAST(kind AS VARCHAR) = 'pageview'
-            "#
-        );
-        let batches = self.run(&sql).await?;
-        Ok(extract_count(&batches).unwrap_or(0))
     }
 
     fn batches_to_top_list(
@@ -1213,7 +789,7 @@ use arrow::array::{
 };
 use arrow::record_batch::RecordBatch;
 
-/// Lowercase hex encoding without pulling in the (clickhouse-only) `hex` crate.
+/// Lowercase hex encoding without an extra hex dependency.
 fn hex_encode(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
@@ -1249,27 +825,6 @@ fn ts_micros_col<'a>(b: &'a RecordBatch, name: &str) -> Option<&'a TimestampMicr
 fn opt_str(col: Option<&StringArray>, i: usize) -> Option<String> {
     col.filter(|c| c.is_valid(i))
         .map(|c| c.value(i).to_string())
-}
-
-/// Collapse a `date_trunc(...) AS bucket, <count> AS <field>` result into a
-/// `YYYY-MM-DD → count` map. `date_trunc` returns nanosecond timestamps.
-fn bucket_counts(batches: &[RecordBatch], field: &str) -> std::collections::HashMap<String, u64> {
-    let mut map = std::collections::HashMap::new();
-    for b in batches {
-        let buckets = b
-            .column_by_name("bucket")
-            .and_then(|c| c.as_any().downcast_ref::<TimestampNanosecondArray>());
-        let counts = i64_col(b, field);
-        if let (Some(buckets), Some(counts)) = (buckets, counts) {
-            for i in 0..b.num_rows() {
-                let ts = chrono::DateTime::from_timestamp_nanos(buckets.value(i))
-                    .with_timezone(&chrono::Utc);
-                let date = ts.format("%Y-%m-%d").to_string();
-                map.insert(date, counts.value(i).max(0) as u64);
-            }
-        }
-    }
-    map
 }
 
 /// Build the `AND <col> <op> '<value>'` fragment for a set of analytics

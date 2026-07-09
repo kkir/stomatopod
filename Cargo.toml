@@ -6,7 +6,6 @@ members = [
     "crates/query",
     "crates/web",
     "bin/spq",
-    "bin/sentinel",
 ]
 resolver = "2"
 
@@ -35,7 +34,7 @@ zstd = "0.13"
 crc32fast = "1"
 # Storage — postgres
 sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio-rustls", "chrono"] }
-# Storage — clickhouse
+# HTTP client (alerts, digests)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 # Serialization
 serde = { version = "1", features = ["derive"] }

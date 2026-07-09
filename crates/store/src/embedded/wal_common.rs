@@ -1,5 +1,5 @@
 //! Shared write-ahead-log mechanics. The events WAL and the spans WAL had
-//! 90% identical implementations — segment rotation, bincode+zstd record
+//! 90% identical implementations - segment rotation, bincode+zstd record
 //! framing, CRC verification, and replay. Extracting the common skeleton
 //! keeps the two type-specific wrappers (`Wal`, `SpanWal`) thin while
 //! preserving the per-stream magic byte that identifies on-disk format.
@@ -52,13 +52,14 @@ pub(crate) fn open_segment(
 
 /// Append a batch of records as a length-prefixed, zstd-compressed,
 /// CRC-trailered block. Rotates the segment when it exceeds `MAX_WAL_SIZE`.
+/// Returns the sealed (rotated-away) segment path when a rotation occurs.
 pub(crate) fn append_batch<T: Serialize>(
     inner: &Mutex<WalInner>,
     dir: &Path,
     prefix: &str,
     magic: &[u8; 4],
     records: &[T],
-) -> Result<()> {
+) -> Result<Option<PathBuf>> {
     let payload = bincode::serialize(records)?;
     let compressed = zstd::encode_all(payload.as_slice(), 1)?;
     let checksum = crc32fast::hash(&compressed);
@@ -71,14 +72,24 @@ pub(crate) fn append_batch<T: Serialize>(
     guard.writer.flush()?;
     guard.bytes_written += 4 + compressed.len() as u64 + 4;
 
-    if guard.bytes_written >= MAX_WAL_SIZE {
-        rotate_locked(&mut guard, dir, prefix, magic)?;
-    }
-    Ok(())
+    let sealed = if guard.bytes_written >= MAX_WAL_SIZE {
+        Some(rotate_locked(&mut guard, dir, prefix, magic)?)
+    } else {
+        None
+    };
+    Ok(sealed)
 }
 
-fn rotate_locked(inner: &mut WalInner, dir: &Path, prefix: &str, magic: &[u8; 4]) -> Result<()> {
+/// Rotate the active segment to a fresh empty file. Returns the previous
+/// (now sealed) segment path so the caller can track or delete it.
+pub(crate) fn rotate_locked(
+    inner: &mut WalInner,
+    dir: &Path,
+    prefix: &str,
+    magic: &[u8; 4],
+) -> Result<PathBuf> {
     inner.writer.flush()?;
+    let sealed = inner.path.clone();
     let new_path = dir.join(format!("{prefix}-{}.bin", ulid::Ulid::new()));
     let new_file = OpenOptions::new()
         .create(true)
@@ -90,7 +101,7 @@ fn rotate_locked(inner: &mut WalInner, dir: &Path, prefix: &str, magic: &[u8; 4]
     inner.writer = new_writer;
     inner.path = new_path;
     inner.bytes_written = 4;
-    Ok(())
+    Ok(sealed)
 }
 
 /// Replay every segment in `dir` into `buffer`, deleting each segment after
@@ -170,6 +181,7 @@ where
         let payload = zstd::decode_all(compressed.as_slice())?;
         let records: Vec<T> = bincode::deserialize(&payload)?;
         total += records.len();
+        // Replay may exceed the live capacity hard cap; force-push is intentional.
         buffer.push_batch(records);
     }
     Ok(total)

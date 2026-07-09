@@ -35,7 +35,7 @@ impl AlertSink for WebhookSink {
             .header("content-type", "application/json");
         if let Some(secret) = &channel.secret {
             let sig = sign_blake3(secret.as_bytes(), &bytes);
-            req = req.header("x-sentinel-signature", sig);
+            req = req.header("x-stomatopod-signature", sig);
         }
         let resp = req.body(bytes).send().await?;
         if !resp.status().is_success() {
@@ -65,7 +65,7 @@ impl AlertSink for SlackSink {
             "blocks": [
                 {
                     "type": "header",
-                    "text": {"type": "plain_text", "text": "Sentinel Incident"}
+                    "text": {"type": "plain_text", "text": "Stomatopod Alert"}
                 },
                 {
                     "type": "section",
@@ -155,19 +155,11 @@ pub fn incident_payload(incident: &Incident) -> serde_json::Value {
 
 fn format_trigger(t: &IncidentTrigger) -> String {
     match t {
-        IncidentTrigger::Repetition { count, args_hash } => {
-            format!("repetition ({count}× args={args_hash})")
-        }
-        IncidentTrigger::TokenVelocity { tokens_per_sec } => {
-            format!("token velocity {tokens_per_sec:.0}/s")
-        }
-        IncidentTrigger::CostThreshold { usd } => format!("cost threshold ${usd:.2}"),
         IncidentTrigger::AnalyticsAlert {
             alert_type,
             value,
             threshold,
         } => format!("{alert_type} (value {value:.1}, threshold {threshold:.1})"),
-        IncidentTrigger::Manual => "manual operator action".into(),
     }
 }
 
@@ -189,8 +181,12 @@ mod tests {
         Incident {
             id: Ulid::new(),
             site_id: Ulid::new(),
-            agent_id: "agent-x".into(),
-            trigger: IncidentTrigger::CostThreshold { usd: 12.34 },
+            agent_id: "analytics".into(),
+            trigger: IncidentTrigger::AnalyticsAlert {
+                alert_type: "traffic_spike".into(),
+                value: 200.0,
+                threshold: 100.0,
+            },
             status: IncidentStatus::Open,
             opened_at: Utc::now(),
             closed_at: None,
@@ -201,9 +197,9 @@ mod tests {
     fn payload_contains_essentials() {
         let inc = mock_incident();
         let p = incident_payload(&inc);
-        assert_eq!(p["agent_id"], "agent-x");
-        assert_eq!(p["trigger_kind"], "cost_threshold");
-        assert!(p["trigger"].as_str().unwrap().contains("cost"));
+        assert_eq!(p["agent_id"], "analytics");
+        assert_eq!(p["trigger_kind"], "analytics_alert");
+        assert!(p["trigger"].as_str().unwrap().contains("traffic_spike"));
     }
 
     #[test]
