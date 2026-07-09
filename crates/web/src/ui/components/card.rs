@@ -67,8 +67,7 @@ pub fn SectionHeader(title: String, csv_href: Option<String>) -> Element {
 pub fn EmptyState(
     message: String,
     title: Option<String>,
-    #[props(default = false)]
-    compact: bool,
+    #[props(default = false)] compact: bool,
     children: Element,
 ) -> Element {
     let pad = if compact { "py-8 px-4" } else { "py-14 px-6" };

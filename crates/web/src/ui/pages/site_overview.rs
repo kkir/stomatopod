@@ -57,8 +57,7 @@ fn BreakdownPanel(
     /// Card title when `framed` is true; defaults to `empty_title`.
     title: Option<String>,
     csv_href: Option<String>,
-    #[props(default = false)]
-    framed: bool,
+    #[props(default = false)] framed: bool,
 ) -> Element {
     let route = use_route::<Route>();
     let q = route.query().cloned().unwrap_or_default();
@@ -135,38 +134,44 @@ fn EntryExitPanel(site_id: String, is_entry: bool) -> Element {
     } else {
         "top-exit-pages"
     };
-    let title = if is_entry { "Entry pages" } else { "Exit pages" };
+    let title = if is_entry {
+        "Entry pages"
+    } else {
+        "Exit pages"
+    };
     let rate_header = if is_entry { "Bounce" } else { "Exit rate" };
 
     let endpoint = endpoint.to_string();
-    let res = use_resource(use_reactive!(|site_id, endpoint, qs, is_entry| async move {
-        let path = site_api_url(&site_id, &endpoint, &qs);
-        if is_entry {
-            get_json::<EntryPages>(&path).await.map(|p| {
-                p.rows
-                    .into_iter()
-                    .map(|r| EntryExitRow {
-                        value: r.url,
-                        count: r.sessions,
-                        pct: r.pct,
-                        rate: r.bounce_rate,
-                    })
-                    .collect::<Vec<_>>()
-            })
-        } else {
-            get_json::<ExitPages>(&path).await.map(|p| {
-                p.rows
-                    .into_iter()
-                    .map(|r| EntryExitRow {
-                        value: r.url,
-                        count: r.exits,
-                        pct: r.pct,
-                        rate: r.exit_rate,
-                    })
-                    .collect::<Vec<_>>()
-            })
+    let res = use_resource(use_reactive!(
+        |site_id, endpoint, qs, is_entry| async move {
+            let path = site_api_url(&site_id, &endpoint, &qs);
+            if is_entry {
+                get_json::<EntryPages>(&path).await.map(|p| {
+                    p.rows
+                        .into_iter()
+                        .map(|r| EntryExitRow {
+                            value: r.url,
+                            count: r.sessions,
+                            pct: r.pct,
+                            rate: r.bounce_rate,
+                        })
+                        .collect::<Vec<_>>()
+                })
+            } else {
+                get_json::<ExitPages>(&path).await.map(|p| {
+                    p.rows
+                        .into_iter()
+                        .map(|r| EntryExitRow {
+                            value: r.url,
+                            count: r.exits,
+                            pct: r.pct,
+                            rate: r.exit_rate,
+                        })
+                        .collect::<Vec<_>>()
+                })
+            }
         }
-    }));
+    ));
 
     rsx! {
         {match &*res.read() {

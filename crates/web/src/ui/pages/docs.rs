@@ -72,18 +72,16 @@ impl Drop for ScrollSpyGuard {
         let _ = self
             .scroll_target
             .remove_event_listener_with_callback("scroll", cb);
-        let _ = self.window.remove_event_listener_with_callback("resize", cb);
+        let _ = self
+            .window
+            .remove_event_listener_with_callback("resize", cb);
     }
 }
 
 /// Sticky "On this page" nav with scrollspy highlighting of the section in view.
 #[component]
 fn DocsToc(toc: Vec<DocsTocItem>) -> Element {
-    let mut active = use_signal(|| {
-        toc.first()
-            .map(|t| t.slug.clone())
-            .unwrap_or_default()
-    });
+    let mut active = use_signal(|| toc.first().map(|t| t.slug.clone()).unwrap_or_default());
 
     // Install scrollspy once the TOC (and sibling prose) is mounted. The guard
     // is dropped with the component via use_drop, detaching listeners.
@@ -116,8 +114,8 @@ fn DocsToc(toc: Vec<DocsTocItem>) -> Element {
 
             let _ = scroll_target
                 .add_event_listener_with_callback("scroll", closure.as_ref().unchecked_ref());
-            let _ = window
-                .add_event_listener_with_callback("resize", closure.as_ref().unchecked_ref());
+            let _ =
+                window.add_event_listener_with_callback("resize", closure.as_ref().unchecked_ref());
 
             // Initial pass after layout so dangerous_inner_html headings exist.
             let id = current_heading_id(&document);

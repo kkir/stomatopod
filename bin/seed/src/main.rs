@@ -158,7 +158,11 @@ struct Args {
     server: String,
 
     /// Admin email for dashboard login (skipped when --public-key is set).
-    #[arg(long, default_value = "admin@localhost", env = "STOMATOPOD_ADMIN_EMAIL")]
+    #[arg(
+        long,
+        default_value = "admin@localhost",
+        env = "STOMATOPOD_ADMIN_EMAIL"
+    )]
     email: String,
 
     /// Admin password (required unless --public-key is set).
@@ -271,7 +275,9 @@ fn plan_events(days: u32, target_pageviews: u32, rng: &mut impl Rng) -> Vec<Plan
 
     let mut events = Vec::new();
     for (day_idx, (day, weight)) in day_weights.iter().enumerate() {
-        let n = ((target_pageviews as f64) * (weight / total_w)).round().max(1.0) as usize;
+        let n = ((target_pageviews as f64) * (weight / total_w))
+            .round()
+            .max(1.0) as usize;
         let visitors_today = ((n as f64) * rng.gen_range(0.35..0.55)).round().max(5.0) as usize;
         let visitors_today = visitors_today.min(visitor_pool);
         let mut visitor_ids: Vec<usize> = (0..visitor_pool).collect();
@@ -583,7 +589,10 @@ async fn post_all(
     let cu_ok = Arc::new(AtomicUsize::new(0));
     let cu_fail = Arc::new(AtomicUsize::new(0));
 
-    let total_pv = events.iter().filter(|e| e.kind == EventKind::Pageview).count();
+    let total_pv = events
+        .iter()
+        .filter(|e| e.kind == EventKind::Pageview)
+        .count();
     let mut set = JoinSet::new();
     let mut submitted_pv = 0usize;
 
@@ -670,7 +679,10 @@ async fn main() -> Result<()> {
         login(&client, &base, &args.email, &args.password).await?;
         resolve_site(&client, &base, None, &args.domain, &args.name).await?
     } else {
-        println!("  using public key {}…", &public_key_arg[..public_key_arg.len().min(12)]);
+        println!(
+            "  using public key {}…",
+            &public_key_arg[..public_key_arg.len().min(12)]
+        );
         resolve_site(
             &client,
             &base,
@@ -697,8 +709,14 @@ async fn main() -> Result<()> {
     );
     let mut rng = rand::thread_rng();
     let planned = plan_events(args.days, args.events, &mut rng);
-    let pv_n = planned.iter().filter(|e| e.kind == EventKind::Pageview).count();
-    let cu_n = planned.iter().filter(|e| e.kind == EventKind::Custom).count();
+    let pv_n = planned
+        .iter()
+        .filter(|e| e.kind == EventKind::Pageview)
+        .count();
+    let cu_n = planned
+        .iter()
+        .filter(|e| e.kind == EventKind::Custom)
+        .count();
     println!("  {pv_n} pageviews, {cu_n} custom events");
 
     let t0 = Instant::now();

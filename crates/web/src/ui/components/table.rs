@@ -166,8 +166,7 @@ pub fn EntryExitTable(
     rate_header: String,
     rows: Vec<EntryExitRow>,
     csv_href: Option<String>,
-    #[props(default = true)]
-    framed: bool,
+    #[props(default = true)] framed: bool,
     empty_title: Option<String>,
     empty_message: Option<String>,
 ) -> Element {
