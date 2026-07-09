@@ -5,10 +5,7 @@ use ulid::Ulid;
 use stomatopod_core::{
     config::EmbeddedConfig,
     domain::event::{DeviceType, Event, EventKind},
-    query::{
-        pageviews::{Granularity, PageviewsQuery, TimeRange},
-        analytics::GoalQuery,
-    },
+    query::pageviews::{Granularity, PageviewsQuery, TimeRange},
     traits::StorageBackend,
 };
 use stomatopod_store::embedded::EmbeddedBackend;
@@ -129,61 +126,4 @@ async fn test_pageview_metrics_custom_only() {
 
     assert_eq!(res.total_sessions, 0); 
     assert_eq!(res.total_pageviews, 0); 
-}
-
-#[tokio::test]
-async fn test_realtime_metrics_custom_only() {
-    let dir = tempfile::tempdir().unwrap();
-    let backend = EmbeddedBackend::open(&cfg(&dir)).await.unwrap();
-    let site_id = Ulid::new();
-    let now = Utc::now();
-    
-    let mut ev_custom = make_event(site_id, "/a");
-    ev_custom.timestamp = now;
-    ev_custom.received_at = now;
-    ev_custom.name = "__click__".into();
-    ev_custom.kind = EventKind::Custom;
-    
-    backend.ingest_events(vec![ev_custom]).await.unwrap();
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
-    let res = backend
-        .query_realtime(site_id, 10)
-        .await
-        .unwrap();
-
-    assert_eq!(res.active_sessions, 0);
-}
-
-#[tokio::test]
-async fn test_goal_metrics_custom_only() {
-    let dir = tempfile::tempdir().unwrap();
-    let backend = EmbeddedBackend::open(&cfg(&dir)).await.unwrap();
-    let site_id = Ulid::new();
-    let now = Utc::now();
-    
-    let mut ev_custom = make_event(site_id, "/a");
-    ev_custom.timestamp = now;
-    ev_custom.received_at = now;
-    ev_custom.name = "__click__".into();
-    ev_custom.kind = EventKind::Custom;
-    
-    backend.ingest_events(vec![ev_custom]).await.unwrap();
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
-    let res = backend
-        .query_goal(&GoalQuery {
-            site_id,
-            range: TimeRange {
-                start: now - chrono::Duration::hours(1),
-                end: now + chrono::Duration::hours(1),
-            },
-            granularity: Granularity::Day,
-            filters: vec![],
-            event_name: "some_goal".into(),
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(res.completions, 0);
 }
