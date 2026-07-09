@@ -258,8 +258,6 @@ fn parse_utc_opt(s: Option<String>) -> Option<chrono::DateTime<Utc>> {
     s.as_deref().map(parse_utc)
 }
 
-
-
 fn row_to_api_key(row: &rusqlite::Row<'_>) -> rusqlite::Result<ApiKey> {
     let id_str: String = row.get(0)?;
     let org_id_str: String = row.get(1)?;
@@ -298,9 +296,6 @@ fn row_to_alert_channel(row: &rusqlite::Row<'_>) -> rusqlite::Result<AlertChanne
         last_error_at: parse_utc_opt(last_error_at_str),
     })
 }
-
-
-
 
 fn row_to_funnel(row: &rusqlite::Row<'_>) -> rusqlite::Result<Funnel> {
     let id_str: String = row.get(0)?;

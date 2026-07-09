@@ -1763,8 +1763,6 @@ fn parse_alert_kind(s: &str) -> AlertChannelKind {
     AlertChannelKind::from_str(s)
 }
 
-
-
 mod ddl {
     pub fn all_statements() -> [&'static str; 12] {
         [
@@ -1831,9 +1829,6 @@ mod ddl {
         )
     "#;
 
-
-
-
     const API_KEYS_DDL: &str = r#"
         CREATE TABLE IF NOT EXISTS api_keys (
             id             TEXT PRIMARY KEY,
@@ -1859,7 +1854,6 @@ mod ddl {
             last_error_at   TIMESTAMPTZ
         )
     "#;
-
 
     const GOALS_DDL: &str = r#"
         CREATE TABLE IF NOT EXISTS goals (
@@ -1962,8 +1956,6 @@ mod ddl {
 
     const EVENTS_INDEX_TIMESTAMP: &str =
         "CREATE INDEX IF NOT EXISTS idx_events_site_timestamp ON events(site_id, timestamp DESC)";
-
-
 }
 
 #[cfg(test)]

@@ -8,10 +8,7 @@ use axum::{
 use tower_http::{compression::CompressionLayer, trace::TraceLayer};
 
 use crate::{
-    middleware::{
-        auth::require_api_auth,
-        cors::ingest_cors,
-    },
+    middleware::{auth::require_api_auth, cors::ingest_cors},
     routes::{analytics, api, api_keys, auth, digest, insights, share_links, sites},
     state::AppState,
 };

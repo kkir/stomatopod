@@ -18,11 +18,7 @@ use stomatopod_core::config::{Config, Mode, StorageConfig};
 use stomatopod_ingest::{batch::run_batcher, geo::GeoLookup};
 use stomatopod_store::{embedded::EmbeddedBackend, postgres::PostgresBackend};
 
-use crate::{
-    middleware::auth::require_auth,
-    router::build_router,
-    state::AppState,
-};
+use crate::{middleware::auth::require_auth, router::build_router, state::AppState};
 
 /// The Stomatopod server binary. Analytics querying lives in the separate
 /// `spq` CLI; this binary only runs the server.

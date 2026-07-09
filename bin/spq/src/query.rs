@@ -712,8 +712,6 @@ mod tests {
         assert!(aliased.contains("depth=4"));
     }
 
-    
-
     #[test]
     fn realtime_has_no_query() {
         assert_eq!(
@@ -721,12 +719,6 @@ mod tests {
             "/api/v1/sites/s/realtime"
         );
     }
-
-    
-
-    
-
-    
 
     #[test]
     fn events_filters() {
