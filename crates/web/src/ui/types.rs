@@ -217,32 +217,6 @@ pub struct Campaigns {
     pub utm_content: TopList,
 }
 
-// ---- Retention: GET /api/v1/sites/:site/retention (analytics::retention,
-// serializes RetentionGrid) ----
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct RetentionCell {
-    pub returning: u64,
-    pub pct: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct RetentionCohort {
-    /// Cohort start week, ISO `YYYY-MM-DD`.
-    pub week: String,
-    pub size: u64,
-    #[serde(default)]
-    pub cells: Vec<RetentionCell>,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
-pub struct RetentionGrid {
-    #[serde(default)]
-    pub cohorts: Vec<RetentionCohort>,
-    #[serde(default)]
-    pub max_offset: usize,
-}
-
 // ---- Paths: GET /api/v1/sites/:site/paths (analytics::paths) ----
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

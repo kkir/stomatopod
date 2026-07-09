@@ -1,19 +1,14 @@
 mod alerts;
 mod campaigns;
-mod compare;
 mod docs;
 mod events;
 mod funnel_detail;
 mod funnels;
-mod global_alerts;
-mod global_goals;
-mod global_realtime;
 mod goals;
 mod keys;
 mod not_found;
 mod paths;
 mod realtime;
-mod retention;
 mod site_keys;
 mod site_overview;
 mod site_settings;
@@ -21,20 +16,15 @@ mod sites_index;
 
 pub use alerts::Alerts;
 pub use campaigns::Campaigns;
-pub use compare::Compare;
 pub use docs::Docs;
 pub use events::Events;
 pub use funnel_detail::FunnelDetail;
 pub use funnels::Funnels;
-pub use global_alerts::GlobalAlerts;
-pub use global_goals::GlobalGoals;
-pub use global_realtime::GlobalRealtime;
 pub use goals::Goals;
 pub use keys::Keys;
 pub use not_found::NotFound;
 pub use paths::Paths;
 pub use realtime::Realtime;
-pub use retention::Retention;
 pub use site_keys::SiteKeys;
 pub use site_overview::SiteOverview;
 pub use site_settings::SiteSettings;
@@ -51,11 +41,10 @@ pub(crate) const BTN_GHOST: &str = "inline-flex items-center gap-1.5 px-[13px] p
 pub(crate) const CTRL_INPUT: &str = "bg-black/32 border border-border-2 text-text-1 rounded-[10px] px-3 py-2 text-[13px] shadow-inner-hi focus:outline-none focus:border-teal/55";
 
 use crate::ui::api::get_json;
-use crate::ui::components::form::SelectField;
 use crate::ui::components::pill::FilterPill;
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
-use crate::ui::types::{SiteSummary, SitesList};
+use crate::ui::types::SitesList;
 
 /// Resolves a site's display name from the org site list, for per-site page
 /// headers (there is no single-site GET endpoint). Falls back to the raw id
@@ -72,34 +61,6 @@ pub(crate) fn use_site_name(site_id: String) -> String {
             .map(|s| s.name.clone())
             .unwrap_or(site_id),
         _ => site_id,
-    }
-}
-
-/// A site picker for the global insight pages (campaigns/retention/paths/
-/// alerts), which the legacy server scoped to one site via `resolve_scope`.
-/// Renders nothing extra when there is only one site.
-#[component]
-pub(crate) fn SiteScopeSelect(
-    sites: Vec<SiteSummary>,
-    selected: String,
-    on_select: EventHandler<String>,
-) -> Element {
-    if sites.len() < 2 {
-        return rsx! {};
-    }
-    let options = sites
-        .iter()
-        .map(|s| (s.id.clone(), s.name.clone()))
-        .collect::<Vec<_>>();
-    rsx! {
-        div { class: "max-w-xs mb-5",
-            SelectField {
-                label: "Site",
-                value: selected,
-                options,
-                onchange: move |v| on_select.call(v),
-            }
-        }
     }
 }
 

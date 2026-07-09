@@ -123,6 +123,8 @@ test("all per-site tabs render without error", async ({ page }) => {
     [`${UI}/sites/${siteId}/events`, /Events/],
     [`${UI}/sites/${siteId}/goals`, /Goals/],
     [`${UI}/sites/${siteId}/funnels`, /Funnels/],
+    [`${UI}/sites/${siteId}/campaigns`, /Tabs Co/],
+    [`${UI}/sites/${siteId}/paths`, /Tabs Co/],
     [`${UI}/sites/${siteId}/alerts`, /Alerts/],
     [`${UI}/sites/${siteId}/keys`, /API Keys/],
     [`${UI}/sites/${siteId}/settings`, /Site Settings/],
@@ -138,22 +140,14 @@ test("all per-site tabs render without error", async ({ page }) => {
   }
 });
 
-// ---- Global insight + management pages ----
+// ---- Global management pages ----
 
 test("global pages render without error", async ({ page }) => {
   await login(page);
-  // Ensure at least one site exists so the site-scoped globals have data.
-  await createSite(page, "Global Co", "global.example");
 
   const pages: Array<[string, RegExp]> = [
-    [`${UI}/realtime`, /Real-time/],
-    [`${UI}/goals`, /Goals/],
-    [`${UI}/campaigns`, /Campaigns/],
-    [`${UI}/retention`, /Retention/],
-    [`${UI}/paths`, /Paths/],
-    [`${UI}/compare`, /Compare/],
-    [`${UI}/alerts`, /Alerts/],
     [`${UI}/keys`, /API Keys/],
+    [`${UI}/docs`, /Docs/],
   ];
 
   for (const [url, heading] of pages) {

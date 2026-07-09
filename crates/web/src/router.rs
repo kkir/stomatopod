@@ -9,20 +9,17 @@ use tower_http::{compression::CompressionLayer, trace::TraceLayer};
 
 use crate::{
     middleware::{
-        auth::{require_api_auth, require_auth},
+        auth::require_api_auth,
         cors::ingest_cors,
     },
-    routes::{
-        agents_dashboard, analytics, api, api_keys, auth, digest, insights, sentinel, share_links,
-        sites, spans,
-    },
+    routes::{analytics, api, api_keys, auth, digest, insights, share_links, sites},
     state::AppState,
 };
 
-/// Builds the non-SPA router: the REST API, ingest, auth, public share pages,
-/// the sentinel stream, and the legacy agents/incidents dashboards. The Dioxus
-/// application itself (SSR + hydration + static assets) is merged on top of
-/// this by [`crate::server::serve`], which owns the catch-all fallback.
+/// Builds the non-SPA router: the REST API, ingest, auth, and public share
+/// pages. The Dioxus application itself (SSR + hydration + static assets) is
+/// merged on top of this by [`crate::server::serve`], which owns the catch-all
+/// fallback.
 pub fn build_router(state: Arc<AppState>) -> Router {
     // Public ingest routes (CORS-enabled)
     let ingest_routes = Router::new()
@@ -37,14 +34,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/app.css", get(api::dashboard_css))
         .route("/llms.txt", get(api::llms_txt));
 
-    // Sentinel span ingest. Bearer-auth'd via sentinel_tokens (handler
-    // checks the header itself; no middleware needed). No CORS since
-    // calls come from sidecars, not browsers.
-    let span_ingest_routes =
-        Router::new().route("/api/v1/spans", post(spans::handle_span_ingest_route));
-
     // Server-side custom event ingest. Bearer-auth'd inline via an ingest
-    // API key (handler resolves the site from the key). No CORS — calls
+    // API key (handler resolves the site from the key). No CORS - calls
     // come from backends, not browsers.
     let key_ingest_routes = Router::new().route("/api/v1/ingest", post(api::handle_key_ingest));
 
@@ -123,7 +114,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 .delete(analytics::delete_analytics_alert),
         )
         .route("/api/v1/sites/{site}/campaigns", get(analytics::campaigns))
-        .route("/api/v1/sites/{site}/retention", get(analytics::retention))
         .route("/api/v1/sites/{site}/paths", get(analytics::paths))
         .route(
             "/api/v1/sites/{site}/annotations",
@@ -140,55 +130,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/v1/sites/{site}/funnels/{funnel_id}",
             get(analytics::funnel_result),
-        )
-        // ---- Tier-4 analytics ----
-        .route("/api/v1/sites/{site}/vitals", get(analytics::vitals))
-        .route(
-            "/api/v1/sites/{site}/vitals/pages",
-            get(analytics::vitals_pages),
-        )
-        .route("/api/v1/sites/{site}/scroll", get(analytics::scroll))
-        .route(
-            "/api/v1/sites/{site}/scroll/pages",
-            get(analytics::scroll_pages),
-        )
-        .route("/api/v1/sites/{site}/search", get(analytics::search))
-        .route(
-            "/api/v1/sites/{site}/search/zero-results",
-            get(analytics::search_zero_results),
-        )
-        .route(
-            "/api/v1/sites/{site}/search/timeseries",
-            get(analytics::search_timeseries),
-        )
-        .route("/api/v1/sites/{site}/revenue", get(analytics::revenue))
-        .route(
-            "/api/v1/sites/{site}/revenue/timeseries",
-            get(analytics::revenue_timeseries),
-        )
-        .route(
-            "/api/v1/sites/{site}/revenue/pages",
-            get(analytics::revenue_pages),
-        )
-        .route(
-            "/api/v1/sites/{site}/revenue/breakdown",
-            get(analytics::revenue_breakdown),
-        )
-        .route(
-            "/api/v1/sites/{site}/experiments",
-            get(analytics::experiments),
-        )
-        .route(
-            "/api/v1/sites/{site}/experiments/{experiment}",
-            get(analytics::experiment_result),
-        )
-        .route(
-            "/api/v1/sites/{site}/heatmaps/clicks",
-            get(analytics::heatmap_clicks),
-        )
-        .route(
-            "/api/v1/sites/{site}/heatmaps/scroll",
-            get(analytics::heatmap_scroll),
         )
         // ---- Share links (CRUD) ----
         .route(
@@ -267,49 +208,17 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout));
 
-    // Legacy AI-firewall dashboards. Not part of the Dioxus SPA (their nav is
-    // commented out), so they remain concrete server-rendered routes. They live
-    // at the root now that the SPA owns `/` instead of `/app`, and stay behind
-    // the dashboard session guard.
-    let agents_routes = Router::new()
-        .route("/agents", get(agents_dashboard::agents_index))
-        .route("/agents/{agent_id}", get(agents_dashboard::agent_detail))
-        .route(
-            "/agents/{agent_id}/spans",
-            get(agents_dashboard::agent_spans_partial),
-        )
-        .route("/incidents", get(agents_dashboard::incidents_page))
-        .layer(middleware::from_fn_with_state(state.clone(), require_auth));
-
-    // Sentinel SSE control stream — bearer-auth'd inline. MUST be
-    // attached OUTSIDE the CompressionLayer; gzip would buffer SSE
-    // chunks indefinitely and break keep-alive.
-    let sentinel_stream =
-        Router::new().route("/api/v1/sentinel/stream", get(sentinel::stream_handler));
-
-    // Operator control endpoint — session/bearer auth via require_api_auth.
-    let sentinel_control = Router::new()
-        .route("/api/v1/sentinel/control", post(sentinel::control_handler))
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            require_api_auth,
-        ));
-
     let compressed = Router::new()
         .merge(ingest_routes)
-        .merge(span_ingest_routes)
         .merge(key_ingest_routes)
         .merge(analytics_routes)
         .merge(public_share_routes)
-        .merge(sentinel_control)
         .merge(auth_routes)
         .merge(public_assets)
-        .merge(agents_routes)
         .layer(CompressionLayer::new());
 
     Router::new()
         .merge(compressed)
-        .merge(sentinel_stream)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

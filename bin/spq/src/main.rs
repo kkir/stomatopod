@@ -249,18 +249,7 @@ fn describe() -> serde_json::Value {
                     { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
                 ]
             },
-            {
-                "name": "query retention",
-                "description": "Retention cohort grid.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--range", "default": "90d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false },
-                    { "name": "--granularity", "default": "week", "note": "week|month." }
-                ]
-            },
-            {
+                        {
                 "name": "query paths",
                 "description": "Top user paths (page-navigation sequences).",
                 "args": [
@@ -278,88 +267,7 @@ fn describe() -> serde_json::Value {
                 "description": "Live visitors in the last few minutes.",
                 "args": [ { "name": "--site", "required": true } ]
             },
-            {
-                "name": "query vitals",
-                "description": "Core Web Vitals (LCP/CLS/INP) percentiles.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false },
-                    { "name": "--url", "required": false, "note": "Restrict to a single page path." },
-                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
-                ]
-            },
-            {
-                "name": "query scroll",
-                "description": "Scroll-depth distribution.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false },
-                    { "name": "--url", "required": false, "note": "Restrict to a single page path." },
-                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
-                ]
-            },
-            {
-                "name": "query search",
-                "description": "Top site-search terms.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false },
-                    { "name": "--limit", "default": "20" },
-                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
-                ]
-            },
-            {
-                "name": "query revenue",
-                "description": "Revenue totals.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false },
-                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
-                ]
-            },
-            {
-                "name": "query revenue-breakdown",
-                "description": "Revenue split by a dimension.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--dimension", "required": true, "note": "referrer|country|utm_source." },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false },
-                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
-                ]
-            },
-            {
-                "name": "query experiments",
-                "description": "List A/B experiments and their results.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false }
-                ]
-            },
-            {
-                "name": "query experiment",
-                "description": "Detailed results for a single experiment.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--experiment", "required": true },
-                    { "name": "--goal", "required": false, "note": "Goal id to score variants against." },
-                    { "name": "--range", "default": "30d" },
-                    { "name": "--from", "required": false },
-                    { "name": "--to", "required": false }
-                ]
-            },
-            {
+                                                                                                {
                 "name": "annotations list",
                 "description": "List chart annotations for a site.",
                 "args": [

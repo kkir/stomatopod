@@ -9,7 +9,7 @@
 //!
 //! It only enforces when running inside a container; bare-metal installs and
 //! local development (where the operator owns the filesystem) are untouched.
-//! The postgres/clickhouse backends never call this — their durability lives in
+//! The postgres backend never calls this - its durability lives in
 //! the external database.
 
 use std::path::Path;

@@ -12,14 +12,13 @@ pub struct Organization {
     pub created_at: DateTime<Utc>,
 }
 
+/// Deployment plan. Self-hosted is the only supported plan; the field is
+/// retained for schema compatibility with existing metadata databases.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Plan {
     #[default]
     SelfHosted,
-    Free,
-    Pro,
-    Enterprise,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

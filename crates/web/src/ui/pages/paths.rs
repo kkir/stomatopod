@@ -4,35 +4,36 @@ use crate::ui::api::get_json;
 use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
-use crate::ui::components::tabs::RangeTabs;
-use crate::ui::pages::{active_filters, SiteScopeSelect};
+use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs};
+use crate::ui::pages::{active_filters, use_site_name};
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
-use crate::ui::types::{PathReport, SiteSummary, SitesList};
+use crate::ui::types::PathReport;
 
-/// The top navigation sequences for one selected site + range. Split from
-/// [`Paths`] so `selected` initializes after the site list loads.
+/// Per-site navigation-paths page.
 #[component]
-fn PathsInner(sites: Vec<SiteSummary>, range: String) -> Element {
-    let first = sites.first().map(|s| s.id.clone()).unwrap_or_default();
-    let mut selected = use_signal(|| first.clone());
+pub fn Paths(site_id: String, q: DashQuery) -> Element {
+    let route = use_route::<Route>();
+    let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
+    let name = use_site_name(site_id.clone());
 
     let data = use_resource({
+        let site_id = site_id.clone();
         let range = range.clone();
         move || {
-            let site = selected();
-            let range = range.clone();
-            let path = format!("/api/v1/sites/{site}/paths?range={range}");
+            let path = format!("/api/v1/sites/{site_id}/paths?range={range}");
             async move { get_json::<PathReport>(&path).await }
         }
     });
 
     rsx! {
-        SiteScopeSelect {
-            sites: sites.clone(),
-            selected: selected(),
-            on_select: move |v| selected.set(v),
+        PageHead {
+            title: name,
+            subtitle: "Common navigation sequences.".to_string(),
+            RangeTabs { active: range.clone() }
         }
+        SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Paths }
+        {active_filters(&route, &q)}
         Card { title: "Top paths",
             {match &*data.read() {
                 None => rsx! {
@@ -90,39 +91,5 @@ fn PathsInner(sites: Vec<SiteSummary>, range: String) -> Element {
                 }
             }}
         }
-    }
-}
-
-/// Global navigation-paths page.
-#[component]
-pub fn Paths(q: DashQuery) -> Element {
-    let route = use_route::<Route>();
-    let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
-    let sites = use_resource(move || async move { get_json::<SitesList>("/api/v1/sites").await });
-
-    rsx! {
-        PageHead { title: "Paths", subtitle: "Common navigation sequences.",
-            RangeTabs { active: range.clone() }
-        }
-        {active_filters(&route, &q)}
-        {match &*sites.read() {
-            None => rsx! {
-                Skeleton { lines: 3 }
-            },
-            Some(Err(e)) => rsx! {
-                Card { EmptyState { message: format!("Failed to load sites ({e})") } }
-            },
-            Some(Ok(list)) => {
-                if list.sites.is_empty() {
-                    rsx! {
-                        Card { EmptyState { message: "No sites yet" } }
-                    }
-                } else {
-                    rsx! {
-                        PathsInner { sites: list.sites.clone(), range: range.clone() }
-                    }
-                }
-            }
-        }}
     }
 }

@@ -5,7 +5,7 @@ pageviews and custom events, and exposes analytics over a JSON API and a CLI.
 
 This document is the canonical usage guide. It is published in two forms:
 
-- **Humans:** rendered at `/app/docs` in the dashboard.
+- **Humans:** rendered at `/docs` in the dashboard.
 - **Machines / LLM agents:** served as Markdown at `/llms.txt`.
 
 Both are generated from the same source, so they never drift.
@@ -19,8 +19,8 @@ Both are generated from the same source, so they never drift.
   - **Ingest** (`sk_live_…`) — write custom events from a backend.
   - **Read** (`rk_…`) — read-only analytics queries (CLI / LLM agents).
 
-Create and revoke keys in the dashboard under **API Keys** (`/app/keys`, or a
-site's **API Keys** tab). The full key is shown **once** at creation — store it
+Create and revoke keys in the dashboard under **API Keys** (`/keys`, or a
+site's **API Keys** tab). The full key is shown **once** at creation - store it
 securely. Keys are held only as hashes; a revoked key stops working immediately.
 
 ## Authentication
@@ -104,36 +104,12 @@ curl -H "Authorization: Bearer rk_xxxxxxxx" \
   "https://your-host/api/v1/sites/example.com/top-pages?range=7d&limit=10"
 ```
 
-## Tier-4 analytics
-
-These read endpoints surface the data captured by the bundled tracker's
-auto-emitted events (see [Auto-captured browser events](#auto-captured-browser-events)).
-All accept the common query parameters above and authenticate with a read key.
-
-| Method & path                                       | Returns                                                        |
-|-----------------------------------------------------|----------------------------------------------------------------|
-| `GET /api/v1/sites/:site/vitals`                    | Core Web Vitals (LCP/CLS/INP) p50/p75/p95. `url=` narrows.     |
-| `GET /api/v1/sites/:site/vitals/pages`              | Per-page vitals (`metric=lcp\|cls\|inp`).                      |
-| `GET /api/v1/sites/:site/scroll`                    | Scroll-depth reach (25/50/75/100%). `url=` narrows.           |
-| `GET /api/v1/sites/:site/scroll/pages`              | Per-page scroll engagement.                                    |
-| `GET /api/v1/sites/:site/search`                    | Top internal site-search terms.                                |
-| `GET /api/v1/sites/:site/search/zero-results`       | Searches that returned no results.                             |
-| `GET /api/v1/sites/:site/search/timeseries`         | Search volume over time.                                       |
-| `GET /api/v1/sites/:site/revenue`                   | Revenue totals, orders, AOV, revenue-per-session.              |
-| `GET /api/v1/sites/:site/revenue/timeseries`        | Revenue over time.                                             |
-| `GET /api/v1/sites/:site/revenue/pages`             | Revenue attributed by page.                                    |
-| `GET /api/v1/sites/:site/revenue/breakdown`         | Revenue by `dimension=` (page/referrer/country/...).           |
-| `GET /api/v1/sites/:site/experiments`               | A/B experiments seen (variant `properties`).                   |
-| `GET /api/v1/sites/:site/experiments/:experiment`   | Per-variant conversion comparison (`goal=`).                   |
-| `GET /api/v1/sites/:site/heatmaps/clicks`           | Click heatmap points for a page (`url=` required).             |
-| `GET /api/v1/sites/:site/heatmaps/scroll`           | Scroll heatmap buckets for a page (`url=` required).           |
-
 ## Installing the browser tracker
 
 The bundled tracker is a tiny, dependency-free script served at `/tracker.js`.
 Add a single tag to every page you want to measure; it records a pageview on
-load and on client-side route changes, and — unless opted out — the Tier-4
-auto-events below. No cookies are set and no cross-site identifier is used.
+load and on client-side route changes. No cookies are set and no cross-site
+identifier is used.
 
 ```html
 <script defer src="https://your-host/tracker.js" data-site="YOUR_PUBLIC_KEY"></script>
@@ -156,19 +132,11 @@ from your host rather than copying its contents.
 | `data-site`      | **Required.** Site public key. The tracker no-ops if it is missing.                         |
 | `data-api`       | Override the event endpoint (default `/api/v1/event`) — e.g. when the tracker and API are on different hosts. |
 | `data-exclude`   | Disable the tracker for this page load entirely (handy for staging/admin pages).            |
-| `data-no-vitals` | Don't collect Core Web Vitals (`__vital__`).                                                |
-| `data-no-scroll` | Don't collect scroll-depth milestones (`__scroll__`).                                       |
-| `data-no-clicks` | Don't collect click-heatmap points (`__click__`).                                           |
-| `data-no-search` | Don't detect site-search queries (`__search__`).                                            |
-
-Each `data-no-*` switch disables only its own collector; pageview analytics keep
-working regardless.
 
 ### Behavior
 
 - A `pageview` is sent on initial load and on every SPA navigation the tracker
-  intercepts (`history.pushState` / `replaceState` and `popstate`). Scroll
-  milestones reset for each new route.
+  intercepts (`history.pushState` / `replaceState` and `popstate`).
 - Every beacon carries the current URL, referrer, screen size, and browser
   language; UTM parameters are parsed from the URL server-side.
 - Beacons use `navigator.sendBeacon` when available (falling back to
@@ -186,31 +154,9 @@ stomatopod("event", "signup", { plan: "pro" });
 ```
 
 The first argument is always `"event"`, followed by the event name and an
-optional properties object. As with server-side events, tag a property
-`revenue` (a number) to feed the revenue reports, or `variant` plus an
-`experiment` name to feed A/B comparisons. The `__…__` names are reserved for
-the tracker's own auto-events — don't send them yourself.
-
-## Auto-captured browser events
-
-The bundled tracker (`/tracker.js`) automatically emits reserved custom events
-in addition to pageviews. Each can be disabled per-site with a `data-no-*`
-attribute on the script tag (`data-no-vitals`, `data-no-scroll`,
-`data-no-clicks`, `data-no-search`) without affecting pageview analytics.
-
-| Event        | Trigger                          | Key properties                                   |
-|--------------|----------------------------------|--------------------------------------------------|
-| `__vital__`  | Core Web Vital measured          | `metric` (LCP/CLS/INP), `value`, `rating`        |
-| `__scroll__` | A scroll-depth milestone reached | `depth` (25/50/75/100), `url`                    |
-| `__click__`  | A non-form-field click           | `x`/`y` (% of viewport/page), `url`, `element`   |
-| `__search__` | A search query param detected    | `query`                                          |
-
-Revenue and A/B testing reuse ordinary custom events: tag any event with a
-`revenue` property (a number) to feed the revenue reports, and with a
-`variant` (plus an `experiment` name) property to feed A/B comparisons.
-
-These names are reserved — sending them yourself via the ingest API is
-rejected so the tracker remains the single source.
+optional properties object. Properties are stored as JSON and shown in custom
+event breakdowns; use them for anything your app needs (plan name, feature
+flag, etc.).
 
 ## Public share links
 

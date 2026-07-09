@@ -1,13 +1,11 @@
 use crossbeam::queue::SegQueue;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use stomatopod_core::domain::{agent_span::AgentSpan, event::Event};
+use stomatopod_core::domain::event::Event;
 
 /// Lock-free concurrent ingest buffer backed by a `crossbeam::SegQueue`.
 ///
 /// Used by the Parquet writer (drains via `drain`) and the ingest path
-/// (pushes via `push` / `push_batch`). One instance per record type —
-/// `EventBuffer` for analytics, `SpanBuffer` for agent spans — so the span
-/// ingest path can't backpressure the analytics path.
+/// (pushes via `push` / `push_batch`).
 pub struct Buffer<T> {
     inner: SegQueue<T>,
     len: AtomicUsize,
@@ -66,4 +64,3 @@ impl<T> Buffer<T> {
 }
 
 pub type EventBuffer = Buffer<Event>;
-pub type SpanBuffer = Buffer<AgentSpan>;

@@ -32,7 +32,7 @@ fn alert_kind_label(kind: &str) -> &'static str {
 }
 
 /// The alert-channels + analytics-alerts manager for one site, shared by
-/// the per-site [`Alerts`] page and the [`GlobalAlerts`](super::GlobalAlerts)
+/// the per-site [`Alerts`] page
 /// page. Ports the forms from the legacy alerts.jinja.
 #[component]
 pub fn AlertsManager(site_id: String) -> Element {

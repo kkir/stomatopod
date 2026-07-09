@@ -1,6 +1,5 @@
 use dioxus::prelude::*;
 
-use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
 
 /// App grid: fixed sidebar + scrolling main. Used as `#[layout(Shell)]`.
@@ -28,43 +27,15 @@ pub fn Shell() -> Element {
     }
 }
 
-/// Sidebar nav, ported from crates/web/templates/base.jinja lines 20-44.
-/// Active-link highlighting is longest-prefix match on the current
-/// route's path, replacing the inline JS in base.jinja.
+/// Sidebar nav. Active-link highlighting is longest-prefix match on the
+/// current route's path.
 #[component]
 pub fn Sidebar() -> Element {
     let current_route = use_route::<Route>();
     let current_path = current_route.to_string();
 
-    let nav_items: [(Route, &str); 10] = [
+    let nav_items: [(Route, &str); 3] = [
         (Route::SitesIndex {}, "Sites"),
-        (Route::GlobalRealtime { site: None }, "Real-time"),
-        (Route::GlobalGoals { site: None }, "Goals"),
-        (
-            Route::Campaigns {
-                q: DashQuery::default(),
-            },
-            "Campaigns",
-        ),
-        (
-            Route::Retention {
-                q: DashQuery::default(),
-            },
-            "Retention",
-        ),
-        (
-            Route::Paths {
-                q: DashQuery::default(),
-            },
-            "Paths",
-        ),
-        (
-            Route::Compare {
-                q: DashQuery::default(),
-            },
-            "Compare",
-        ),
-        (Route::GlobalAlerts {}, "Alerts"),
         (Route::Keys {}, "API Keys"),
         (Route::Docs {}, "Docs"),
     ];

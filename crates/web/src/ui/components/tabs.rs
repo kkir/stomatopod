@@ -39,20 +39,21 @@ pub enum SiteTab {
     Events,
     Goals,
     Funnels,
+    Campaigns,
+    Paths,
     Alerts,
     Keys,
     Settings,
 }
 
-/// The Overview/Real-time/Events/Goals/Funnels/Alerts/API Keys/Settings
-/// tab row shown on every per-site page.
+/// Tab row shown on every per-site page.
 #[component]
 pub fn SiteTabs(site_id: String, range: String, active: SiteTab) -> Element {
     let q = DashQuery {
         range: Some(range),
         ..Default::default()
     };
-    let tabs: [(SiteTab, &str, Route); 8] = [
+    let tabs: [(SiteTab, &str, Route); 10] = [
         (
             SiteTab::Overview,
             "Overview",
@@ -88,6 +89,22 @@ pub fn SiteTabs(site_id: String, range: String, active: SiteTab) -> Element {
             SiteTab::Funnels,
             "Funnels",
             Route::Funnels {
+                site_id: site_id.clone(),
+                q: q.clone(),
+            },
+        ),
+        (
+            SiteTab::Campaigns,
+            "Campaigns",
+            Route::Campaigns {
+                site_id: site_id.clone(),
+                q: q.clone(),
+            },
+        ),
+        (
+            SiteTab::Paths,
+            "Paths",
+            Route::Paths {
                 site_id: site_id.clone(),
                 q: q.clone(),
             },

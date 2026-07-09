@@ -167,20 +167,6 @@ pub enum QueryCommand {
         #[arg(long = "filter")]
         filters: Vec<String>,
     },
-    /// Retention cohort grid
-    Retention {
-        #[arg(long)]
-        site: String,
-        #[arg(long, default_value = "90d")]
-        range: String,
-        #[arg(long)]
-        from: Option<String>,
-        #[arg(long)]
-        to: Option<String>,
-        /// Cohort granularity: week or month.
-        #[arg(long, default_value = "week")]
-        granularity: String,
-    },
     /// Top user paths (page-navigation sequences)
     Paths {
         #[arg(long)]
@@ -204,110 +190,6 @@ pub enum QueryCommand {
     Realtime {
         #[arg(long)]
         site: String,
-    },
-    /// Core Web Vitals (LCP/CLS/INP) percentiles
-    Vitals {
-        #[arg(long)]
-        site: String,
-        #[arg(long, default_value = "30d")]
-        range: String,
-        #[arg(long)]
-        from: Option<String>,
-        #[arg(long)]
-        to: Option<String>,
-        /// Restrict to a single page path.
-        #[arg(long)]
-        url: Option<String>,
-        #[arg(long = "filter")]
-        filters: Vec<String>,
-    },
-    /// Scroll-depth distribution
-    Scroll {
-        #[arg(long)]
-        site: String,
-        #[arg(long, default_value = "30d")]
-        range: String,
-        #[arg(long)]
-        from: Option<String>,
-        #[arg(long)]
-        to: Option<String>,
-        /// Restrict to a single page path.
-        #[arg(long)]
-        url: Option<String>,
-        #[arg(long = "filter")]
-        filters: Vec<String>,
-    },
-    /// Top site-search terms
-    Search {
-        #[arg(long)]
-        site: String,
-        #[arg(long, default_value = "30d")]
-        range: String,
-        #[arg(long)]
-        from: Option<String>,
-        #[arg(long)]
-        to: Option<String>,
-        #[arg(long, default_value = "20")]
-        limit: u32,
-        #[arg(long = "filter")]
-        filters: Vec<String>,
-    },
-    /// Revenue totals
-    Revenue {
-        #[arg(long)]
-        site: String,
-        #[arg(long, default_value = "30d")]
-        range: String,
-        #[arg(long)]
-        from: Option<String>,
-        #[arg(long)]
-        to: Option<String>,
-        #[arg(long = "filter")]
-        filters: Vec<String>,
-    },
-    /// Revenue broken down by a dimension (referrer/country/utm_source)
-    RevenueBreakdown {
-        #[arg(long)]
-        site: String,
-        /// One of: referrer, country, utm_source.
-        #[arg(long)]
-        dimension: String,
-        #[arg(long, default_value = "30d")]
-        range: String,
-        #[arg(long)]
-        from: Option<String>,
-        #[arg(long)]
-        to: Option<String>,
-        #[arg(long = "filter")]
-        filters: Vec<String>,
-    },
-    /// List A/B experiments and their results
-    Experiments {
-        #[arg(long)]
-        site: String,
-        #[arg(long, default_value = "30d")]
-        range: String,
-        #[arg(long)]
-        from: Option<String>,
-        #[arg(long)]
-        to: Option<String>,
-    },
-    /// Detailed results for a single experiment
-    Experiment {
-        #[arg(long)]
-        site: String,
-        /// Experiment name.
-        #[arg(long)]
-        experiment: String,
-        /// Optional goal id to score variants against.
-        #[arg(long)]
-        goal: Option<String>,
-        #[arg(long, default_value = "30d")]
-        range: String,
-        #[arg(long)]
-        from: Option<String>,
-        #[arg(long)]
-        to: Option<String>,
     },
     /// Custom events breakdown
     Events {
@@ -578,19 +460,6 @@ pub fn build(cmd: &QueryCommand) -> anyhow::Result<Req> {
                 enc(dimension)
             ))
         }
-        QueryCommand::Retention {
-            site,
-            range,
-            from,
-            to,
-            granularity,
-        } => {
-            let rq = range_qs(range, from, to);
-            Req::Get(format!(
-                "/api/v1/sites/{site}/retention?{rq}&granularity={}",
-                enc(granularity)
-            ))
-        }
         QueryCommand::Paths {
             site,
             range,
@@ -607,96 +476,6 @@ pub fn build(cmd: &QueryCommand) -> anyhow::Result<Req> {
             ))
         }
         QueryCommand::Realtime { site } => Req::Get(format!("/api/v1/sites/{site}/realtime")),
-        QueryCommand::Vitals {
-            site,
-            range,
-            from,
-            to,
-            url,
-            filters,
-        } => {
-            let rq = range_qs(range, from, to);
-            let fq = filters_qs(filters);
-            let u = opt_qs("url", url);
-            Req::Get(format!("/api/v1/sites/{site}/vitals?{rq}{u}{fq}"))
-        }
-        QueryCommand::Scroll {
-            site,
-            range,
-            from,
-            to,
-            url,
-            filters,
-        } => {
-            let rq = range_qs(range, from, to);
-            let fq = filters_qs(filters);
-            let u = opt_qs("url", url);
-            Req::Get(format!("/api/v1/sites/{site}/scroll?{rq}{u}{fq}"))
-        }
-        QueryCommand::Search {
-            site,
-            range,
-            from,
-            to,
-            limit,
-            filters,
-        } => {
-            let rq = range_qs(range, from, to);
-            let fq = filters_qs(filters);
-            Req::Get(format!(
-                "/api/v1/sites/{site}/search?{rq}&limit={limit}{fq}"
-            ))
-        }
-        QueryCommand::Revenue {
-            site,
-            range,
-            from,
-            to,
-            filters,
-        } => {
-            let rq = range_qs(range, from, to);
-            let fq = filters_qs(filters);
-            Req::Get(format!("/api/v1/sites/{site}/revenue?{rq}{fq}"))
-        }
-        QueryCommand::RevenueBreakdown {
-            site,
-            dimension,
-            range,
-            from,
-            to,
-            filters,
-        } => {
-            let rq = range_qs(range, from, to);
-            let fq = filters_qs(filters);
-            Req::Get(format!(
-                "/api/v1/sites/{site}/revenue-breakdown?{rq}&dimension={}{fq}",
-                enc(dimension)
-            ))
-        }
-        QueryCommand::Experiments {
-            site,
-            range,
-            from,
-            to,
-        } => {
-            let rq = range_qs(range, from, to);
-            Req::Get(format!("/api/v1/sites/{site}/experiments?{rq}"))
-        }
-        QueryCommand::Experiment {
-            site,
-            experiment,
-            goal,
-            range,
-            from,
-            to,
-        } => {
-            let rq = range_qs(range, from, to);
-            let g = opt_qs("goal", goal);
-            Req::Get(format!(
-                "/api/v1/sites/{site}/experiments/{}?{rq}{g}",
-                enc(experiment)
-            ))
-        }
         QueryCommand::Events {
             site,
             name,
@@ -933,11 +712,7 @@ mod tests {
         assert!(aliased.contains("depth=4"));
     }
 
-    #[test]
-    fn retention_granularity() {
-        let p = get_path(&["retention", "--site", "s", "--granularity", "month"]);
-        assert_eq!(p, "/api/v1/sites/s/retention?range=90d&granularity=month");
-    }
+    
 
     #[test]
     fn realtime_has_no_query() {
@@ -947,56 +722,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn vitals_scroll_url_param() {
-        assert_eq!(
-            get_path(&["vitals", "--site", "s", "--url", "/home"]),
-            "/api/v1/sites/s/vitals?range=30d&url=%2Fhome"
-        );
-        assert_eq!(
-            get_path(&["scroll", "--site", "s"]),
-            "/api/v1/sites/s/scroll?range=30d"
-        );
-    }
+    
+
+    
+
+    
 
     #[test]
-    fn revenue_breakdown_dimension() {
-        assert_eq!(
-            get_path(&["revenue", "--site", "s"]),
-            "/api/v1/sites/s/revenue?range=30d"
-        );
-        assert_eq!(
-            get_path(&["revenue-breakdown", "--site", "s", "--dimension", "country"]),
-            "/api/v1/sites/s/revenue-breakdown?range=30d&dimension=country"
-        );
-    }
-
-    #[test]
-    fn experiments_and_experiment() {
-        assert_eq!(
-            get_path(&["experiments", "--site", "s"]),
-            "/api/v1/sites/s/experiments?range=30d"
-        );
-        assert_eq!(
-            get_path(&[
-                "experiment",
-                "--site",
-                "s",
-                "--experiment",
-                "hero-copy",
-                "--goal",
-                "g1"
-            ]),
-            "/api/v1/sites/s/experiments/hero-copy?range=30d&goal=g1"
-        );
-    }
-
-    #[test]
-    fn search_and_events_filters() {
-        assert_eq!(
-            get_path(&["search", "--site", "s", "--limit", "10"]),
-            "/api/v1/sites/s/search?range=30d&limit=10"
-        );
+    fn events_filters() {
         let p = get_path(&[
             "events",
             "--site",
