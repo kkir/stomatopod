@@ -32,10 +32,31 @@ many sites). Multi-tenant SaaS is not supported yet.
 
 ```bash
 mise run dev          # build the wasm client + run the server (SSR dashboard at /, JSON at /api/v1)
+mise run seed         # post demo traffic into a running dev server (bin/seed)
 mise run check        # fmt + clippy + tests
 mise run test         # Rust tests only
 mise run e2e          # Playwright end-to-end tests
 ```
+
+### Seeding demo data
+
+With `mise run dev` already running, seed ~30 days of pageviews (and a few custom events):
+
+```bash
+export STOMATOPOD_ADMIN_PASSWORD='your-admin-password'   # same password used on first boot
+mise run seed
+```
+
+Or point at an existing site without logging in:
+
+```bash
+STOMATOPOD_PUBLIC_KEY='pk_…' mise run seed
+```
+
+Useful knobs: `SEED_DAYS` / `--days` (default 30), `SEED_EVENTS` / `--events`
+(default 2500), `STOMATOPOD_SERVER` / `--server` (default `http://localhost:8080`).
+See `cargo run -p stomatopod-seed -- --help` for the full list.
+
 
 ## Dashboard UI (Dioxus fullstack)
 

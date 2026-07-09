@@ -47,7 +47,6 @@ pub struct CreatedSite {
 pub struct TimeBucket {
     pub ts: DateTime<Utc>,
     pub pageviews: u64,
-    #[allow(dead_code)]
     pub sessions: u64,
 }
 

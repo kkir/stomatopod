@@ -6,6 +6,7 @@ members = [
     "crates/query",
     "crates/web",
     "bin/spq",
+    "bin/seed",
 ]
 resolver = "2"
 

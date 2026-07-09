@@ -51,6 +51,44 @@ impl DashQuery {
     }
 }
 
+/// Turn a raw filter token (`field:op:value`) into a short human label
+/// for pills, e.g. `country:eq:US` → `Country is US`.
+pub fn humanize_filter(token: &str) -> String {
+    let mut parts = token.splitn(3, ':');
+    let field = parts.next().unwrap_or(token);
+    let op = parts.next().unwrap_or("eq");
+    let value = parts.next().unwrap_or("");
+
+    let field_label = match field {
+        "url" => "Page",
+        "referrer" => "Referrer",
+        "country" => "Country",
+        "region" => "Region",
+        "browser" => "Browser",
+        "os" => "OS",
+        "device_type" => "Device",
+        "utm_source" => "UTM source",
+        "utm_medium" => "UTM medium",
+        "utm_campaign" => "UTM campaign",
+        "utm_term" => "UTM term",
+        "utm_content" => "UTM content",
+        "event_name" => "Event",
+        other => other,
+    };
+    let op_label = match op {
+        "eq" => "is",
+        "not_eq" => "is not",
+        "contains" => "contains",
+        "starts_with" => "starts with",
+        other => other,
+    };
+    if value.is_empty() {
+        format!("{field_label} {op_label}")
+    } else {
+        format!("{field_label} {op_label} {value}")
+    }
+}
+
 impl From<&str> for DashQuery {
     fn from(query: &str) -> Self {
         let mut q = DashQuery::default();
@@ -162,5 +200,15 @@ mod tests {
     #[test]
     fn parses_empty_query() {
         assert_eq!(DashQuery::from(""), DashQuery::default());
+    }
+
+    #[test]
+    fn humanizes_filter_tokens() {
+        assert_eq!(humanize_filter("country:eq:US"), "Country is US");
+        assert_eq!(
+            humanize_filter("url:starts_with:/blog"),
+            "Page starts with /blog"
+        );
+        assert_eq!(humanize_filter("browser:not_eq:IE"), "Browser is not IE");
     }
 }

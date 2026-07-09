@@ -60,10 +60,20 @@ pub fn SectionHeader(title: String, csv_href: Option<String>) -> Element {
 /// with a headline and roomier copy; anything passed as children (typically a
 /// call-to-action button or link) renders below the message, so list pages can
 /// teach and prompt instead of just saying "No data".
+///
+/// Use `compact` inside dense breakdown cards so empty dimensions do not
+/// balloon the layout.
 #[component]
-pub fn EmptyState(message: String, title: Option<String>, children: Element) -> Element {
+pub fn EmptyState(
+    message: String,
+    title: Option<String>,
+    #[props(default = false)]
+    compact: bool,
+    children: Element,
+) -> Element {
+    let pad = if compact { "py-8 px-4" } else { "py-14 px-6" };
     rsx! {
-        div { class: "flex flex-col items-center justify-center text-center py-14 px-6",
+        div { class: "flex flex-col items-center justify-center text-center {pad}",
             if let Some(title) = title {
                 h3 { class: "text-text-1 text-[15px] font-semibold tracking-tight", "{title}" }
                 p { class: "text-muted-1 text-[13px] leading-relaxed max-w-sm mt-1.5", "{message}" }

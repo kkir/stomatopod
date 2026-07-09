@@ -1,0 +1,20 @@
+[package]
+name = "stomatopod-seed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "stomatopod-seed"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+rand = "0.8"
+reqwest = { workspace = true, features = ["cookies"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
