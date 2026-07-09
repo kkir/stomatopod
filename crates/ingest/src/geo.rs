@@ -78,28 +78,38 @@ pub fn anonymize_ip(ip: &str) -> String {
 }
 
 /// Extract the real client IP from request headers.
-/// Precedence: CF-Connecting-IP → X-Real-IP → X-Forwarded-For (first non-private) → TCP source
-pub fn extract_ip(headers: &axum::http::HeaderMap, peer_addr: std::net::SocketAddr) -> String {
-    // Cloudflare
-    if let Some(cf_ip) = headers
-        .get("CF-Connecting-IP")
-        .and_then(|v| v.to_str().ok())
-    {
-        return cf_ip.trim().to_string();
-    }
+///
+/// When `trust_forwarded_headers` is true (typical behind a reverse proxy),
+/// precedence is: CF-Connecting-IP → X-Real-IP → X-Forwarded-For (first
+/// non-private) → TCP source. When false, only the TCP peer address is used
+/// so direct clients cannot spoof geo/session derivation via forged headers.
+pub fn extract_ip(
+    headers: &axum::http::HeaderMap,
+    peer_addr: std::net::SocketAddr,
+    trust_forwarded_headers: bool,
+) -> String {
+    if trust_forwarded_headers {
+        // Cloudflare
+        if let Some(cf_ip) = headers
+            .get("CF-Connecting-IP")
+            .and_then(|v| v.to_str().ok())
+        {
+            return cf_ip.trim().to_string();
+        }
 
-    // Nginx / common reverse proxies
-    if let Some(real_ip) = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()) {
-        return real_ip.trim().to_string();
-    }
+        // Nginx / common reverse proxies
+        if let Some(real_ip) = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()) {
+            return real_ip.trim().to_string();
+        }
 
-    // X-Forwarded-For — take the leftmost non-private IP
-    if let Some(xff) = headers.get("X-Forwarded-For").and_then(|v| v.to_str().ok()) {
-        for part in xff.split(',') {
-            let ip = part.trim();
-            if let Ok(addr) = IpAddr::from_str(ip) {
-                if !is_private(&addr) {
-                    return ip.to_string();
+        // X-Forwarded-For — take the leftmost non-private IP
+        if let Some(xff) = headers.get("X-Forwarded-For").and_then(|v| v.to_str().ok()) {
+            for part in xff.split(',') {
+                let ip = part.trim();
+                if let Ok(addr) = IpAddr::from_str(ip) {
+                    if !is_private(&addr) {
+                        return ip.to_string();
+                    }
                 }
             }
         }
@@ -159,7 +169,7 @@ mod tests {
         headers.insert("CF-Connecting-IP", "1.2.3.4".parse().unwrap());
         headers.insert("X-Real-IP", "5.6.7.8".parse().unwrap());
         let peer = SocketAddr::from(([127, 0, 0, 1], 1234));
-        assert_eq!(extract_ip(&headers, peer), "1.2.3.4");
+        assert_eq!(extract_ip(&headers, peer, true), "1.2.3.4");
     }
 
     #[test]
@@ -167,7 +177,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("X-Real-IP", "5.6.7.8".parse().unwrap());
         let peer = SocketAddr::from(([127, 0, 0, 1], 1234));
-        assert_eq!(extract_ip(&headers, peer), "5.6.7.8");
+        assert_eq!(extract_ip(&headers, peer, true), "5.6.7.8");
     }
 
     #[test]
@@ -179,14 +189,23 @@ mod tests {
         );
         let peer = SocketAddr::from(([127, 0, 0, 1], 1234));
         // 10.0.0.1 and 172.16.0.1 are private, 203.0.113.42 is public
-        assert_eq!(extract_ip(&headers, peer), "203.0.113.42");
+        assert_eq!(extract_ip(&headers, peer, true), "203.0.113.42");
     }
 
     #[test]
     fn extract_ip_falls_back_to_peer_addr() {
         let headers = HeaderMap::new();
         let peer = SocketAddr::from(([203, 0, 113, 1], 1234));
-        assert_eq!(extract_ip(&headers, peer), "203.0.113.1");
+        assert_eq!(extract_ip(&headers, peer, true), "203.0.113.1");
+    }
+
+    #[test]
+    fn extract_ip_ignores_headers_when_untrusted() {
+        let mut headers = HeaderMap::new();
+        headers.insert("CF-Connecting-IP", "1.2.3.4".parse().unwrap());
+        headers.insert("X-Real-IP", "5.6.7.8".parse().unwrap());
+        let peer = SocketAddr::from(([203, 0, 113, 1], 1234));
+        assert_eq!(extract_ip(&headers, peer, false), "203.0.113.1");
     }
 
     #[test]

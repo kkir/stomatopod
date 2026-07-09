@@ -161,14 +161,15 @@ flag, etc.).
 ## Public share links
 
 Mint a token-scoped, read-only public dashboard for a single site — no login
-required. Manage links with a read key:
+required. **Managing** share links requires a dashboard session (not a read
+API key); read keys are query-only.
 
 | Method & path                                      | Action                          |
 |----------------------------------------------------|---------------------------------|
-| `POST /api/v1/sites/:site/share-links`             | Create (body: `label?`, `expires_at?` RFC3339). |
-| `GET /api/v1/sites/:site/share-links`              | List links (with public `url`). |
-| `PATCH /api/v1/sites/:site/share-links/:id`        | Update `label`/`expires_at`.    |
-| `DELETE /api/v1/sites/:site/share-links/:id`       | Revoke.                         |
+| `POST /api/v1/sites/:site/share-links`             | Create (body: `label?`, `expires_at?` RFC3339). Dashboard only. |
+| `GET /api/v1/sites/:site/share-links`              | List links (with public `url`). Dashboard only. |
+| `PATCH /api/v1/sites/:site/share-links/:id`        | Update `label`/`expires_at`. Dashboard only. |
+| `DELETE /api/v1/sites/:site/share-links/:id`       | Revoke. Dashboard only. |
 
 The public surface needs no auth:
 
@@ -267,11 +268,13 @@ spq query events        --site <id|domain> [--name signup] [--range 30d]
 spq query funnels       --site <id|domain>
 spq query funnel        --site <id|domain> --funnel <funnel_id> [--range 30d]
 spq query funnel-create --site <id|domain> --name <name> --steps '<json-array>'
+spq share list|create|revoke   # share-link management needs a session token
 ```
 
-`funnel-create` is the one write command: it posts a new funnel and prints the
-created record (with its `id`) as JSON. `--steps` is a JSON array of step
-objects with at least two entries:
+`funnel-create` is the one write command available to **read API keys**: it
+posts a new funnel and prints the created record (with its `id`) as JSON.
+`--steps` is a JSON array of step objects with at least two entries. Share-link
+management (`spq share …`) requires a dashboard session bearer, not a read key.
 
 ```bash
 spq query funnel-create --site example.com --name "Signup flow" \

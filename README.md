@@ -21,7 +21,12 @@ Then set `auth.secret_key` in `stomatopod.toml`, or export:
 
 ```bash
 export STOMATOPOD_AUTH__SECRET_KEY="replace-with-a-long-random-secret"
+# First boot (empty data dir) also needs a strong owner password (min 12 chars):
+export STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)"
 ```
+
+Self-hosted Stomatopod is a **single-owner** appliance (one org, one admin user,
+many sites). Multi-tenant SaaS is not supported yet.
 
 ## Daily commands
 

@@ -205,8 +205,10 @@ test("an alert channel can be added and an alert created", async ({ page }) => {
     .allInnerTexts();
   expect(kinds.join(" ").toLowerCase()).toContain("telegram");
 
-  // Add a webhook channel.
-  const hookUrl = `https://hooks.e2e.test/${Date.now().toString(36)}`;
+  // Add a webhook channel. Host must resolve to a public address so the
+  // server's SSRF checks accept it (fake TLDs like .e2e.test fail DNS and
+  // are rejected as invalid destinations).
+  const hookUrl = `https://example.com/hooks/${Date.now().toString(36)}`;
   await page.getByPlaceholder("Webhook URL / chat id").fill(hookUrl);
   await page.getByRole("button", { name: "Add channel" }).click();
   // The URL shows both in the channel list and later in the alert form's

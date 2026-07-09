@@ -1,4 +1,7 @@
 //! `spq share` — manage read-only dashboard share links.
+//!
+//! Share-link CRUD is dashboard-only on the server: use a signed session
+//! bearer (not a read API key).
 
 use clap::Subcommand;
 
@@ -12,7 +15,7 @@ pub enum ShareCommand {
         #[arg(long)]
         site: String,
     },
-    /// Create a share link (requires a write-capable key).
+    /// Create a share link (requires a dashboard session token, not a read key).
     Create {
         #[arg(long)]
         site: String,

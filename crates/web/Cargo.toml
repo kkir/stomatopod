@@ -111,3 +111,5 @@ argon2 = { workspace = true }
 serde_json = { workspace = true }
 bytes = { workspace = true }
 dashmap = "6"
+blake3 = { workspace = true }
+hex = "0.4"

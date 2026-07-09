@@ -17,9 +17,13 @@ port = 8080
 # base_url = "https://analytics.example.com"
 
 # Authentication.  secret_key is required and has no default.
+# Self-hosted mode is single-owner: one org + one admin user (many sites OK).
+# First boot also requires STOMATOPOD_ADMIN_PASSWORD (min 12 chars).
 [auth]
 secret_key = ""          # REQUIRED — set a long random string
-session_ttl_s = 2592000 # 30 days
+session_ttl_s = 2592000 # 30 days (embedded in the signed session token)
+# cookie_secure = true   # force Secure cookie; default: true when base_url is https
+# trust_forwarded_headers = true  # set false if exposed without a reverse proxy
 
 # Email digest delivery.  With provider = "none" (default) digests are
 # rendered and logged but never sent, so the scheduler is side-effect free

@@ -718,12 +718,24 @@ pub async fn list_analytics_alerts(
 }
 
 /// POST /api/v1/sites/:site/analytics-alerts
+///
+/// Dashboard-only: read API keys must not wire alert rules (they can still
+/// list alerts and query analytics).
 pub async fn create_analytics_alert(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
     Path(site): Path<String>,
     Json(body): Json<CreateAlertBody>,
 ) -> impl IntoResponse {
+    if !principal.is_dashboard() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "requires a dashboard session, not an API key"
+            })),
+        )
+            .into_response();
+    }
     let site_id = match resolve_authorized_site(&state, &principal, &site).await {
         Ok(id) => id,
         Err(resp) => return resp,
@@ -794,6 +806,15 @@ pub async fn patch_analytics_alert(
     Path((site, alert_id)): Path<(String, String)>,
     Json(body): Json<PatchAlertBody>,
 ) -> impl IntoResponse {
+    if !principal.is_dashboard() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "requires a dashboard session, not an API key"
+            })),
+        )
+            .into_response();
+    }
     let site_id = match resolve_authorized_site(&state, &principal, &site).await {
         Ok(id) => id,
         Err(resp) => return resp,
@@ -829,6 +850,15 @@ pub async fn delete_analytics_alert(
     Extension(principal): Extension<Principal>,
     Path((site, alert_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    if !principal.is_dashboard() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "requires a dashboard session, not an API key"
+            })),
+        )
+            .into_response();
+    }
     let site_id = match resolve_authorized_site(&state, &principal, &site).await {
         Ok(id) => id,
         Err(resp) => return resp,

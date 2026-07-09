@@ -8,6 +8,10 @@ services:
     environment:
       # REQUIRED — a long random string. Export it in your shell or a .env file.
       STOMATOPOD_AUTH__SECRET_KEY: "${STOMATOPOD_AUTH__SECRET_KEY:?set a long random secret}"
+      # REQUIRED on first boot (empty data volume) — owner password, min 12 chars.
+      STOMATOPOD_ADMIN_PASSWORD: "${STOMATOPOD_ADMIN_PASSWORD:?set a strong admin password}"
+      # Optional first-boot email (default admin@localhost).
+      # STOMATOPOD_ADMIN_EMAIL: "you@example.com"
       # Public URL used to build share-link / email-digest URLs (no trailing slash).
       # STOMATOPOD_BASE_URL: "https://analytics.example.com"
     volumes:
