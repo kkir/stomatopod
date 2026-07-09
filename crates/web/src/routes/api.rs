@@ -32,6 +32,7 @@ pub async fn handle_ingest(
         tx: state.ingest_tx.clone(),
         geo: state.geo.clone(),
         site_cache: state.site_cache.clone(),
+        trust_forwarded_headers: state.config.auth.trust_forwarded_headers,
     };
     handle_ingest_inner(&ctx, peer_addr, &headers, payload).await
 }

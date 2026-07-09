@@ -51,43 +51,30 @@ fn not_found() -> Response {
         .into_response()
 }
 
-fn forbidden() -> Response {
+fn requires_dashboard() -> Response {
     (
         StatusCode::FORBIDDEN,
-        Json(serde_json::json!({"error": "not authorized for this site"})),
+        Json(serde_json::json!({
+            "error": "requires a dashboard session, not an API key"
+        })),
     )
         .into_response()
 }
 
-/// Resolve `{site}` and enforce that `principal` may manage it. Mirrors the
-/// authorization used by the analytics CRUD endpoints.
+/// Resolve `{site}` and enforce that `principal` may manage it. Share-link
+/// management is dashboard-only (read API keys must not mint public links).
 async fn resolve_authorized_site(
     state: &AppState,
     principal: &Principal,
     site: &str,
 ) -> Result<Ulid, Response> {
-    let site_id = resolve_site_id(state, site).await.ok_or_else(not_found)?;
-    if let Principal::ApiKey {
-        org_id,
-        site_id: key_site,
-    } = principal
-    {
-        if let Some(ks) = key_site {
-            if *ks != site_id {
-                return Err(forbidden());
-            }
-        }
-        let site_org = state
-            .meta
-            .get_site(site_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|s| s.org_id);
-        if site_org != Some(*org_id) {
-            return Err(forbidden());
-        }
+    if !principal.is_dashboard() {
+        return Err(requires_dashboard());
     }
+    let site_id = resolve_site_id(state, site).await.ok_or_else(not_found)?;
+    // Self-hosted is single-tenant: any dashboard session may manage any site.
+    // API keys never reach here (gated above).
+    let _ = principal;
     Ok(site_id)
 }
 

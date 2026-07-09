@@ -5,10 +5,22 @@ use stomatopod_core::domain::{
     incident::{Incident, IncidentTrigger},
 };
 
+use super::ssrf::validate_outbound_url;
+
 /// Outbound destination for an incident notification.
 #[async_trait]
 pub trait AlertSink: Send + Sync {
     async fn dispatch(&self, channel: &AlertChannel, incident: &Incident) -> anyhow::Result<()>;
+}
+
+/// Build an HTTP client for alert delivery: short timeout, no redirects
+/// (redirects to private IPs would bypass pre-flight SSRF checks).
+pub fn alert_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap_or_default()
 }
 
 /// Generic webhook: POST application/json with an HMAC-blake3 signature
@@ -27,6 +39,7 @@ impl WebhookSink {
 #[async_trait]
 impl AlertSink for WebhookSink {
     async fn dispatch(&self, channel: &AlertChannel, incident: &Incident) -> anyhow::Result<()> {
+        validate_outbound_url(&channel.url).map_err(anyhow::Error::msg)?;
         let body = incident_payload(incident);
         let bytes = serde_json::to_vec(&body)?;
         let mut req = self
@@ -60,6 +73,7 @@ impl SlackSink {
 #[async_trait]
 impl AlertSink for SlackSink {
     async fn dispatch(&self, channel: &AlertChannel, incident: &Incident) -> anyhow::Result<()> {
+        validate_outbound_url(&channel.url).map_err(anyhow::Error::msg)?;
         let trigger_line = format_trigger(&incident.trigger);
         let body = json!({
             "blocks": [

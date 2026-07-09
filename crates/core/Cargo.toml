@@ -14,3 +14,11 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 blake3 = { workspace = true }
 hex = "0.4"
+# Native: OS CSPRNG for API-key generation. On wasm32 the client never mints
+# keys, but stomatopod-core is still compiled into the Dioxus wasm bundle, so
+# we enable getrandom's `js` backend there (same class of fix as getrandom 0.3
+# + wasm_js in crates/web).
+getrandom = "0.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }

@@ -66,18 +66,10 @@ impl ApiKey {
     /// Generate a fresh secret for the given scope. Returns
     /// `(plaintext, display_prefix, key_hash)`. The plaintext is never stored.
     pub fn generate(scope: ApiKeyScope) -> (String, String, String) {
-        let mut h = blake3::Hasher::new();
-        h.update(&Ulid::new().to_bytes());
-        h.update(&Ulid::new().to_bytes());
-        h.update(
-            &std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-                .to_le_bytes(),
-        );
-        // 128 bits of body entropy, hex-encoded → 32 chars.
-        let body = hex::encode(&h.finalize().as_bytes()[..16]);
+        // 128 bits from the OS CSPRNG, hex-encoded → 32 chars.
+        let mut raw = [0u8; 16];
+        getrandom::getrandom(&mut raw).expect("OS RNG");
+        let body = hex::encode(raw);
         let prefix = scope.prefix();
         let plaintext = format!("{prefix}_{body}");
         let display_prefix = format!("{prefix}_{}", &body[..4]);

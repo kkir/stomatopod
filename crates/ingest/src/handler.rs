@@ -50,6 +50,8 @@ pub struct IngestContext {
     pub tx: mpsc::Sender<Event>,
     pub geo: Arc<GeoLookup>,
     pub site_cache: Arc<DashMap<String, Ulid>>,
+    /// When true, honor CF/X-Real-IP/X-Forwarded-For (see auth config).
+    pub trust_forwarded_headers: bool,
 }
 
 pub async fn handle_ingest_inner(
@@ -76,7 +78,7 @@ pub async fn handle_ingest_inner(
     };
 
     // 2. Extract and anonymize IP
-    let raw_ip = extract_ip(headers, peer_addr);
+    let raw_ip = extract_ip(headers, peer_addr, ctx.trust_forwarded_headers);
     let ip_anon = anonymize_ip(&raw_ip);
 
     // 3. Parse User-Agent

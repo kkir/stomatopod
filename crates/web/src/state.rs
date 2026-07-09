@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use dashmap::DashMap;
 use stomatopod_core::{
@@ -22,6 +22,13 @@ pub struct ApiKeyCacheEntry {
     pub scope: ApiKeyScope,
 }
 
+/// Sliding-window counter for failed logins keyed by client IP.
+#[derive(Debug, Clone)]
+pub struct LoginFailureWindow {
+    pub count: u32,
+    pub window_start: Instant,
+}
+
 pub struct AppState {
     pub backend: Arc<dyn StorageBackend>,
     pub meta: Arc<dyn MetaStore>,
@@ -38,4 +45,6 @@ pub struct AppState {
     pub geo: Arc<GeoLookup>,
     /// Email transport for digest delivery (test-send + scheduler).
     pub digest_sender: Arc<dyn crate::digest::DigestSender>,
+    /// Failed login attempts by client IP (in-memory; resets on restart).
+    pub login_failures: Arc<DashMap<String, LoginFailureWindow>>,
 }

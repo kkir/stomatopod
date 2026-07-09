@@ -58,10 +58,12 @@ impl Config {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
-    /// Single org, auto-created on first boot.
+    /// Single org + single owner user, auto-created on first boot.
+    /// This is the only supported deployment mode today.
     #[default]
     SelfHosted,
-    /// Multi-org. Requires explicit org creation.
+    /// Multi-org SaaS. Not supported yet; the server refuses to start in
+    /// this mode so nobody runs multi-tenant traffic on single-tenant authz.
     Saas,
 }
 
@@ -174,6 +176,14 @@ pub struct GeoConfig {
 pub struct AuthConfig {
     pub secret_key: String,
     pub session_ttl_s: u64,
+    /// When set, forces the session cookie `Secure` flag. When `None`
+    /// (default), `Secure` is enabled iff `base_url` starts with `https://`.
+    pub cookie_secure: Option<bool>,
+    /// When true (default), ingest trusts `CF-Connecting-IP` / `X-Real-IP` /
+    /// `X-Forwarded-For` for client IP. Set false when the process is exposed
+    /// directly to the internet without a reverse proxy that strips those
+    /// headers, so clients cannot spoof geo/session derivation.
+    pub trust_forwarded_headers: bool,
 }
 
 impl Default for AuthConfig {
@@ -181,7 +191,17 @@ impl Default for AuthConfig {
         Self {
             secret_key: String::new(),
             session_ttl_s: 86400 * 30,
+            cookie_secure: None,
+            trust_forwarded_headers: true,
         }
+    }
+}
+
+impl AuthConfig {
+    /// Effective session-cookie Secure flag given the public base URL.
+    pub fn effective_cookie_secure(&self, base_url: &str) -> bool {
+        self.cookie_secure
+            .unwrap_or_else(|| base_url.starts_with("https://"))
     }
 }
 
