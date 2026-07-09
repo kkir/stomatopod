@@ -75,7 +75,8 @@ async fn test_pageview_metrics() {
     ev_custom.received_at = now;
     ev_custom.name = "__click__".into();
     ev_custom.kind = EventKind::Custom;
-    // ensure different session ID
+    // `make_event` generates a unique session ID for each call, so this session
+    // is distinct from the pageview session above.
     
     let events = vec![ev_pv, ev_custom];
     backend.ingest_events(events).await.unwrap();
