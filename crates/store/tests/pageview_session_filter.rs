@@ -1,5 +1,5 @@
 use std::time::Duration;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use ulid::Ulid;
 
 use stomatopod_core::{
