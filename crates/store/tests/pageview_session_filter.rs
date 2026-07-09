@@ -7,8 +7,7 @@ use stomatopod_core::{
     domain::event::{DeviceType, Event, EventKind},
     query::{
         pageviews::{Granularity, PageviewsQuery, TimeRange},
-        realtime::RealtimeQuery,
-        goals::GoalQuery,
+        analytics::GoalQuery,
     },
     traits::StorageBackend,
 };
@@ -149,15 +148,11 @@ async fn test_realtime_metrics_custom_only() {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     let res = backend
-        .query_realtime(&RealtimeQuery {
-            site_id,
-            start: now - chrono::Duration::minutes(5),
-            end: now + chrono::Duration::minutes(5),
-        })
+        .query_realtime(site_id, 10)
         .await
         .unwrap();
 
-    assert_eq!(res.active, 0);
+    assert_eq!(res.active_sessions, 0);
 }
 
 #[tokio::test]
@@ -177,7 +172,7 @@ async fn test_goal_metrics_custom_only() {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     let res = backend
-        .query_goal_conversion(&GoalQuery {
+        .query_goal(&GoalQuery {
             site_id,
             range: TimeRange {
                 start: now - chrono::Duration::hours(1),
@@ -190,6 +185,5 @@ async fn test_goal_metrics_custom_only() {
         .await
         .unwrap();
 
-    assert_eq!(res.total_sessions, 0);
-    assert_eq!(res.total_conversions, 0);
+    assert_eq!(res.completions, 0);
 }
