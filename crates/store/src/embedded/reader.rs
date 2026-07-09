@@ -14,7 +14,8 @@ use stomatopod_core::{
     error::StoreError,
     query::{
         analytics::{
-            EntryPageRow, EntryPages, ExitPageRow, ExitPages, RawEventRow, SessionRow, TopSparklines,
+            EntryPageRow, EntryPages, ExitPageRow, ExitPages, RawEventRow, SessionRow,
+            TopSparklines,
         },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},

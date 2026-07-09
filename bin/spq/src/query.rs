@@ -666,5 +666,4 @@ mod tests {
             other => panic!("expected POST, got {other:?}"),
         }
     }
-
 }
