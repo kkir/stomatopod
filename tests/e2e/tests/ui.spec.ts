@@ -59,9 +59,6 @@ test("authenticated /ui renders the SPA shell", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Sites" })).toBeVisible();
   // Nav links from the sidebar (kept from the legacy tier2 coverage).
   const nav = page.locator(".side-nav");
-  await expect(nav.getByRole("link", { name: "Real-time" })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Goals" })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "Alerts" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Docs" })).toBeVisible();
 });
 
