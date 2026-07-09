@@ -1,7 +1,7 @@
 //! Postgres-backed storage for SaaS deployments.
 //!
-//! Holds everything in one database — analytics events, agent spans,
-//! and metadata (sites, orgs, users, funnels, AI-firewall config). Uses
+//! Holds everything in one database - analytics events and metadata
+//! (sites, orgs, users, funnels). Uses
 //! `sqlx` with a connection pool and `INSERT ... ON CONFLICT` for
 //! upserts.
 //!
@@ -18,26 +18,20 @@ use ulid::Ulid;
 use stomatopod_core::{
     config::PostgresConfig,
     domain::{
-        agent::{Agent, AlertChannel, AlertChannelKind, SentinelToken},
-        agent_span::AgentSpan,
+        agent::{AlertChannel, AlertChannelKind},
         analytics_alert::{AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind},
-        annotation::Annotation,
         api_key::{ApiKey, ApiKeyScope},
         digest::{DigestFrequency, DigestSubscription},
         event::Event,
-        goal::Goal,
-        incident::{Incident, IncidentStatus, IncidentTrigger},
         org::{Funnel, Organization, Plan, User, UserRole},
-        policy::Policy,
         share_link::ShareLink,
         site::Site,
     },
     error::StoreError,
     query::{
         analytics::{
-            EntryPageRow, EntryPages, ExitPageRow, ExitPages, GoalBucket, GoalQuery, GoalStats,
-            PathReport, RawEventRow, RealtimeEvent, RealtimeSnapshot, RealtimeTopPage,
-            RetentionGrid, SessionRow, TopSparklines,
+            EntryPageRow, EntryPages, ExitPageRow, ExitPages, RawEventRow, SessionRow,
+            TopSparklines,
         },
         events::EventQuery,
         funnel::{FunnelQuery, FunnelResult, FunnelStepResult},
@@ -45,9 +39,8 @@ use stomatopod_core::{
             Filter, FilterOp, Granularity, PageviewsQuery, PageviewsResult, TimeBucket, TimeRange,
             TopList, TopListField, TopRow,
         },
-        spans::{AgentSummary, SpanQuery, SpanRow},
     },
-    traits::{AgentStore, MetaStore, StorageBackend},
+    traits::{MetaStore, StorageBackend},
 };
 
 pub struct PostgresBackend {
@@ -394,177 +387,6 @@ impl StorageBackend for PostgresBackend {
         Ok(ExitPages { rows: out })
     }
 
-    async fn query_realtime(
-        &self,
-        site_id: Ulid,
-        window_minutes: u32,
-    ) -> Result<RealtimeSnapshot, StoreError> {
-        let window = window_minutes.max(1);
-        let since = format!("NOW() - INTERVAL '{window} minutes'");
-
-        let head = sqlx::query(&format!(
-            "SELECT COUNT(DISTINCT session_id)::BIGINT AS active, \
-                    COUNT(*) FILTER (WHERE kind = 'pageview')::BIGINT AS pvs \
-             FROM events WHERE site_id = $1 AND timestamp >= {since}"
-        ))
-        .bind(site_id.to_string())
-        .fetch_one(&self.pool)
-        .await
-        .map_err(StoreError::query)?;
-        let active: i64 = head.try_get("active").map_err(StoreError::query)?;
-        let pvs: i64 = head.try_get("pvs").map_err(StoreError::query)?;
-        let active_sessions = active as u64;
-        let pageviews_per_minute = pvs as f64 / window as f64;
-
-        let page_rows = sqlx::query(&format!(
-            "WITH ranked AS (\
-                SELECT url, session_id, \
-                    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY timestamp DESC, id DESC) AS rn \
-                FROM events WHERE site_id = $1 AND timestamp >= {since} AND kind = 'pageview') \
-             SELECT COALESCE(url, '') AS value, COUNT(DISTINCT session_id)::BIGINT AS active \
-             FROM ranked WHERE rn = 1 GROUP BY url ORDER BY active DESC LIMIT 10"
-        ))
-        .bind(site_id.to_string())
-        .fetch_all(&self.pool)
-        .await
-        .map_err(StoreError::query)?;
-        let mut top_pages = Vec::new();
-        for row in page_rows {
-            let url: String = row.try_get("value").map_err(StoreError::query)?;
-            let a: i64 = row.try_get("active").map_err(StoreError::query)?;
-            let a = a as u64;
-            let pct = if active_sessions > 0 {
-                a as f64 / active_sessions as f64 * 100.0
-            } else {
-                0.0
-            };
-            top_pages.push(RealtimeTopPage {
-                url,
-                active_sessions: a,
-                pct,
-            });
-        }
-
-        let ev_rows = sqlx::query(&format!(
-            "SELECT name, COALESCE(url, '') AS url, timestamp, properties \
-             FROM events WHERE site_id = $1 AND timestamp >= {since} AND kind = 'custom' \
-             ORDER BY timestamp DESC LIMIT 50"
-        ))
-        .bind(site_id.to_string())
-        .fetch_all(&self.pool)
-        .await
-        .map_err(StoreError::query)?;
-        let now = Utc::now();
-        let mut recent_events = Vec::new();
-        for row in ev_rows {
-            let name: String = row.try_get("name").map_err(StoreError::query)?;
-            let url: String = row.try_get("url").map_err(StoreError::query)?;
-            let ts: DateTime<Utc> = row.try_get("timestamp").map_err(StoreError::query)?;
-            let props: Option<String> = row.try_get("properties").map_err(StoreError::query)?;
-            recent_events.push(RealtimeEvent {
-                name,
-                url,
-                seconds_ago: (now - ts).num_seconds().max(0),
-                properties: props
-                    .and_then(|p| serde_json::from_str(&p).ok())
-                    .unwrap_or(serde_json::Value::Null),
-            });
-        }
-
-        Ok(RealtimeSnapshot {
-            active_sessions,
-            pageviews_per_minute,
-            top_pages,
-            recent_events,
-        })
-    }
-
-    async fn query_goal(&self, q: &GoalQuery) -> Result<GoalStats, StoreError> {
-        let (filter_sql, filter_vals) = pg_filter_clause(&q.filters, 5);
-        let bucket = pg_date_trunc(&q.granularity);
-
-        // Headline completions.
-        let totals_sql = format!(
-            "SELECT COUNT(*)::BIGINT AS completions, COUNT(DISTINCT session_id)::BIGINT AS uniq \
-             FROM events WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
-               AND kind = 'custom' AND name = $4 {filter_sql}"
-        );
-        let mut tq = sqlx::query(&totals_sql)
-            .bind(q.site_id.to_string())
-            .bind(q.range.start)
-            .bind(q.range.end)
-            .bind(&q.event_name);
-        for v in &filter_vals {
-            tq = tq.bind(v.clone());
-        }
-        let trow = tq.fetch_one(&self.pool).await.map_err(StoreError::query)?;
-        let completions: i64 = trow.try_get("completions").map_err(StoreError::query)?;
-        let uniq: i64 = trow.try_get("uniq").map_err(StoreError::query)?;
-        let unique_completions = uniq as u64;
-
-        let srow = sqlx::query(
-            "SELECT COUNT(DISTINCT session_id)::BIGINT AS sessions FROM events \
-             WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3",
-        )
-        .bind(q.site_id.to_string())
-        .bind(q.range.start)
-        .bind(q.range.end)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(StoreError::query)?;
-        let total_sessions: i64 = srow.try_get("sessions").map_err(StoreError::query)?;
-        let conversion_rate = if total_sessions > 0 {
-            unique_completions as f64 / total_sessions as f64 * 100.0
-        } else {
-            0.0
-        };
-
-        let ts_sql = format!(
-            "WITH comp AS (\
-                SELECT date_trunc('{bucket}', timestamp) AS b, COUNT(DISTINCT session_id) AS uniq \
-                FROM events WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
-                  AND kind = 'custom' AND name = $4 {filter_sql} GROUP BY 1), \
-             sess AS (\
-                SELECT date_trunc('{bucket}', timestamp) AS b, COUNT(DISTINCT session_id) AS sessions \
-                FROM events WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 GROUP BY 1) \
-             SELECT comp.b AS bucket, comp.uniq::BIGINT AS uniq, \
-                    COALESCE(sess.sessions, 0)::BIGINT AS sessions \
-             FROM comp LEFT JOIN sess ON comp.b = sess.b ORDER BY comp.b"
-        );
-        let mut tsq = sqlx::query(&ts_sql)
-            .bind(q.site_id.to_string())
-            .bind(q.range.start)
-            .bind(q.range.end)
-            .bind(&q.event_name);
-        for v in &filter_vals {
-            tsq = tsq.bind(v.clone());
-        }
-        let ts_rows = tsq.fetch_all(&self.pool).await.map_err(StoreError::query)?;
-        let mut timeseries = Vec::new();
-        for row in ts_rows {
-            let b: DateTime<Utc> = row.try_get("bucket").map_err(StoreError::query)?;
-            let c: i64 = row.try_get("uniq").map_err(StoreError::query)?;
-            let s: i64 = row.try_get("sessions").map_err(StoreError::query)?;
-            let cr = if s > 0 {
-                c as f64 / s as f64 * 100.0
-            } else {
-                0.0
-            };
-            timeseries.push(GoalBucket {
-                date: b.format("%Y-%m-%d").to_string(),
-                completions: c as u64,
-                conversion_rate: cr,
-            });
-        }
-
-        Ok(GoalStats {
-            completions: completions as u64,
-            unique_completions,
-            conversion_rate,
-            timeseries,
-        })
-    }
-
     async fn query_sessions(
         &self,
         site_id: Ulid,
@@ -731,65 +553,6 @@ impl StorageBackend for PostgresBackend {
             days.into_iter().collect(),
             limit as usize,
         ))
-    }
-
-    async fn query_retention(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-    ) -> Result<RetentionGrid, StoreError> {
-        let rows = sqlx::query(
-            "SELECT DISTINCT encode(session_id, 'hex') AS sid, \
-                    to_char(date_trunc('week', timestamp), 'YYYY-MM-DD') AS week \
-             FROM events \
-             WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 AND kind = 'pageview'",
-        )
-        .bind(site_id.to_string())
-        .bind(range.start)
-        .bind(range.end)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(StoreError::query)?;
-        let mut pairs = Vec::with_capacity(rows.len());
-        for row in rows {
-            let sid: String = row.try_get("sid").map_err(StoreError::query)?;
-            let week: String = row.try_get("week").map_err(StoreError::query)?;
-            pairs.push((sid, week));
-        }
-        Ok(RetentionGrid::from_session_weeks(pairs))
-    }
-
-    async fn query_paths(
-        &self,
-        site_id: Ulid,
-        range: &TimeRange,
-        depth: u32,
-        limit: u32,
-    ) -> Result<PathReport, StoreError> {
-        let depth = depth.clamp(2, 10);
-        let sql = format!(
-            "WITH ranked AS (\
-                SELECT encode(session_id, 'hex') AS sid, COALESCE(url, '') AS url, \
-                    ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY timestamp ASC, id ASC) AS rn \
-                FROM events \
-                WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 AND kind = 'pageview') \
-             SELECT sid, rn::BIGINT AS seq, url FROM ranked WHERE rn <= {depth}"
-        );
-        let rows = sqlx::query(&sql)
-            .bind(site_id.to_string())
-            .bind(range.start)
-            .bind(range.end)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(StoreError::query)?;
-        let mut steps = Vec::with_capacity(rows.len());
-        for row in rows {
-            let sid: String = row.try_get("sid").map_err(StoreError::query)?;
-            let seq: i64 = row.try_get("seq").map_err(StoreError::query)?;
-            let url: String = row.try_get("url").map_err(StoreError::query)?;
-            steps.push((sid, seq.max(0) as u32, url));
-        }
-        Ok(PathReport::from_steps(steps, limit as usize))
     }
 }
 
@@ -1103,112 +866,6 @@ impl MetaStore for PostgresBackend {
         Ok(())
     }
 
-    // ---- Goals ----
-    async fn create_goal(&self, goal: &Goal) -> Result<(), StoreError> {
-        sqlx::query(
-            "INSERT INTO goals (id, site_id, name, event_name, filters, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6)",
-        )
-        .bind(goal.id.to_string())
-        .bind(goal.site_id.to_string())
-        .bind(&goal.name)
-        .bind(&goal.event_name)
-        .bind(&goal.filters)
-        .bind(goal.created_at)
-        .execute(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        Ok(())
-    }
-
-    async fn get_goal(&self, id: Ulid) -> Result<Option<Goal>, StoreError> {
-        let row = sqlx::query(
-            "SELECT id, site_id, name, event_name, filters, created_at FROM goals WHERE id = $1",
-        )
-        .bind(id.to_string())
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        row.map(row_to_goal).transpose()
-    }
-
-    async fn list_goals(&self, site_id: Ulid) -> Result<Vec<Goal>, StoreError> {
-        let rows = sqlx::query(
-            "SELECT id, site_id, name, event_name, filters, created_at FROM goals \
-             WHERE site_id = $1 ORDER BY created_at ASC",
-        )
-        .bind(site_id.to_string())
-        .fetch_all(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        rows.into_iter().map(row_to_goal).collect()
-    }
-
-    async fn delete_goal(&self, id: Ulid) -> Result<(), StoreError> {
-        sqlx::query("DELETE FROM goals WHERE id = $1")
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await
-            .map_err(StoreError::db)?;
-        Ok(())
-    }
-
-    // ---- Annotations ----
-    async fn create_annotation(&self, annotation: &Annotation) -> Result<(), StoreError> {
-        sqlx::query(
-            "INSERT INTO annotations (id, site_id, date, text, created_at) \
-             VALUES ($1, $2, $3, $4, $5)",
-        )
-        .bind(annotation.id.to_string())
-        .bind(annotation.site_id.to_string())
-        .bind(annotation.date.format("%Y-%m-%d").to_string())
-        .bind(&annotation.text)
-        .bind(annotation.created_at)
-        .execute(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        Ok(())
-    }
-
-    async fn get_annotation(&self, id: Ulid) -> Result<Option<Annotation>, StoreError> {
-        let row = sqlx::query(
-            "SELECT id, site_id, date, text, created_at FROM annotations WHERE id = $1",
-        )
-        .bind(id.to_string())
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        row.map(row_to_annotation).transpose()
-    }
-
-    async fn list_annotations(
-        &self,
-        site_id: Ulid,
-        start: chrono::NaiveDate,
-        end: chrono::NaiveDate,
-    ) -> Result<Vec<Annotation>, StoreError> {
-        let rows = sqlx::query(
-            "SELECT id, site_id, date, text, created_at FROM annotations \
-             WHERE site_id = $1 AND date >= $2 AND date <= $3 ORDER BY date DESC",
-        )
-        .bind(site_id.to_string())
-        .bind(start.format("%Y-%m-%d").to_string())
-        .bind(end.format("%Y-%m-%d").to_string())
-        .fetch_all(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        rows.into_iter().map(row_to_annotation).collect()
-    }
-
-    async fn delete_annotation(&self, id: Ulid) -> Result<(), StoreError> {
-        sqlx::query("DELETE FROM annotations WHERE id = $1")
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await
-            .map_err(StoreError::db)?;
-        Ok(())
-    }
-
     // ---- Analytics alerts ----
     async fn create_analytics_alert(&self, alert: &AnalyticsAlert) -> Result<(), StoreError> {
         let config = serde_json::to_string(&alert.config)
@@ -1485,116 +1142,6 @@ impl MetaStore for PostgresBackend {
         Ok(())
     }
 
-    async fn upsert_agent(&self, agent: &Agent) -> Result<(), StoreError> {
-        sqlx::query(
-            "INSERT INTO agents (id, site_id, agent_id, name, policy_id, created_at, last_seen_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7) \
-             ON CONFLICT (site_id, agent_id) DO UPDATE SET \
-                name = EXCLUDED.name, \
-                policy_id = EXCLUDED.policy_id, \
-                last_seen_at = EXCLUDED.last_seen_at",
-        )
-        .bind(agent.id.to_string())
-        .bind(agent.site_id.to_string())
-        .bind(&agent.agent_id)
-        .bind(&agent.name)
-        .bind(agent.policy_id.map(|p| p.to_string()))
-        .bind(agent.created_at)
-        .bind(agent.last_seen_at)
-        .execute(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        Ok(())
-    }
-
-    async fn list_agents(&self, site_id: Ulid) -> Result<Vec<Agent>, StoreError> {
-        let rows = sqlx::query(
-            "SELECT id, site_id, agent_id, name, policy_id, created_at, last_seen_at \
-             FROM agents WHERE site_id = $1 ORDER BY last_seen_at DESC",
-        )
-        .bind(site_id.to_string())
-        .fetch_all(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        rows.into_iter().map(row_to_agent).collect()
-    }
-
-    async fn get_agent(&self, site_id: Ulid, agent_id: &str) -> Result<Option<Agent>, StoreError> {
-        let row = sqlx::query(
-            "SELECT id, site_id, agent_id, name, policy_id, created_at, last_seen_at \
-             FROM agents WHERE site_id = $1 AND agent_id = $2",
-        )
-        .bind(site_id.to_string())
-        .bind(agent_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        row.map(row_to_agent).transpose()
-    }
-
-    async fn create_sentinel_token(&self, token: &SentinelToken) -> Result<(), StoreError> {
-        sqlx::query(
-            "INSERT INTO sentinel_tokens (id, site_id, name, token_hash, created_at, last_used_at) \
-             VALUES ($1, $2, $3, $4, $5, $6)",
-        )
-        .bind(token.id.to_string())
-        .bind(token.site_id.to_string())
-        .bind(&token.name)
-        .bind(&token.token_hash)
-        .bind(token.created_at)
-        .bind(token.last_used_at)
-        .execute(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        Ok(())
-    }
-
-    async fn list_sentinel_tokens(&self, site_id: Ulid) -> Result<Vec<SentinelToken>, StoreError> {
-        let rows = sqlx::query(
-            "SELECT id, site_id, name, token_hash, created_at, last_used_at \
-             FROM sentinel_tokens WHERE site_id = $1 ORDER BY created_at DESC",
-        )
-        .bind(site_id.to_string())
-        .fetch_all(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        rows.into_iter().map(row_to_sentinel_token).collect()
-    }
-
-    async fn get_sentinel_token_by_hash(
-        &self,
-        token_hash: &str,
-    ) -> Result<Option<SentinelToken>, StoreError> {
-        let row = sqlx::query(
-            "SELECT id, site_id, name, token_hash, created_at, last_used_at \
-             FROM sentinel_tokens WHERE token_hash = $1",
-        )
-        .bind(token_hash)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        row.map(row_to_sentinel_token).transpose()
-    }
-
-    async fn touch_sentinel_token(&self, id: Ulid) -> Result<(), StoreError> {
-        sqlx::query("UPDATE sentinel_tokens SET last_used_at = NOW() WHERE id = $1")
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await
-            .map_err(StoreError::db)?;
-        Ok(())
-    }
-
-    async fn delete_sentinel_token(&self, id: Ulid) -> Result<(), StoreError> {
-        sqlx::query("DELETE FROM sentinel_tokens WHERE id = $1")
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await
-            .map_err(StoreError::db)?;
-        Ok(())
-    }
-
-    // ---- API keys ----
     async fn create_api_key(&self, key: &ApiKey) -> Result<(), StoreError> {
         sqlx::query(
             "INSERT INTO api_keys \
@@ -1696,246 +1243,6 @@ impl MetaStore for PostgresBackend {
             .map_err(StoreError::db)?;
         Ok(())
     }
-
-    async fn upsert_policy(&self, policy: &Policy) -> Result<(), StoreError> {
-        sqlx::query(
-            "INSERT INTO policies (id, site_id, repetition_max, velocity_max_tps, cost_cap_usd, hint_template, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7) \
-             ON CONFLICT (site_id) DO UPDATE SET \
-                repetition_max = EXCLUDED.repetition_max, \
-                velocity_max_tps = EXCLUDED.velocity_max_tps, \
-                cost_cap_usd = EXCLUDED.cost_cap_usd, \
-                hint_template = EXCLUDED.hint_template",
-        )
-        .bind(policy.id.to_string())
-        .bind(policy.site_id.to_string())
-        .bind(policy.repetition_max.map(|n| n as i64))
-        .bind(policy.velocity_max_tps)
-        .bind(policy.cost_cap_usd)
-        .bind(&policy.hint_template)
-        .bind(policy.created_at)
-        .execute(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        Ok(())
-    }
-
-    async fn get_policy(&self, site_id: Ulid) -> Result<Option<Policy>, StoreError> {
-        let row = sqlx::query(
-            "SELECT id, site_id, repetition_max, velocity_max_tps, cost_cap_usd, hint_template, created_at \
-             FROM policies WHERE site_id = $1",
-        )
-        .bind(site_id.to_string())
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        row.map(row_to_policy).transpose()
-    }
-
-    async fn record_incident(&self, incident: &Incident) -> Result<(), StoreError> {
-        let trigger_json = serde_json::to_string(&incident.trigger)
-            .map_err(|e| StoreError::Serialization(e.to_string()))?;
-        sqlx::query(
-            "INSERT INTO incidents (id, site_id, agent_id, trigger_json, status, opened_at, closed_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
-        )
-        .bind(incident.id.to_string())
-        .bind(incident.site_id.to_string())
-        .bind(&incident.agent_id)
-        .bind(trigger_json)
-        .bind(incident.status.as_str())
-        .bind(incident.opened_at)
-        .bind(incident.closed_at)
-        .execute(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        Ok(())
-    }
-
-    async fn list_incidents(&self, site_id: Ulid, limit: u32) -> Result<Vec<Incident>, StoreError> {
-        let rows = sqlx::query(
-            "SELECT id, site_id, agent_id, trigger_json, status, opened_at, closed_at \
-             FROM incidents WHERE site_id = $1 ORDER BY opened_at DESC LIMIT $2",
-        )
-        .bind(site_id.to_string())
-        .bind(limit as i64)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        rows.into_iter().map(row_to_incident).collect()
-    }
-
-    async fn update_incident_status(
-        &self,
-        id: Ulid,
-        status: IncidentStatus,
-    ) -> Result<(), StoreError> {
-        let closed_at = matches!(status, IncidentStatus::Resolved).then(Utc::now);
-        sqlx::query(
-            "UPDATE incidents SET status = $1, closed_at = COALESCE($2, closed_at) WHERE id = $3",
-        )
-        .bind(status.as_str())
-        .bind(closed_at)
-        .bind(id.to_string())
-        .execute(&self.pool)
-        .await
-        .map_err(StoreError::db)?;
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl AgentStore for PostgresBackend {
-    async fn ingest_spans(&self, spans: Vec<AgentSpan>) -> Result<(), StoreError> {
-        if spans.is_empty() {
-            return Ok(());
-        }
-        // Same chunking + atomicity rationale as `ingest_events`: all
-        // chunks run inside one transaction so a partial failure rolls
-        // the whole batch back rather than half-committing.
-        const COLUMNS: usize = 18;
-        const MAX_PARAMS: usize = 32_767;
-        let chunk_size = MAX_PARAMS / COLUMNS;
-
-        let mut tx = self.pool.begin().await.map_err(StoreError::db)?;
-        for chunk in spans.chunks(chunk_size) {
-            let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
-                "INSERT INTO agent_spans (\
-                    id, site_id, agent_id, agent_session_id, parent_span_id, \
-                    kind, model, started_at, ended_at, \
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, \
-                    cost_usd, tool_name, tool_input_hash, stop_reason, properties) ",
-            );
-            qb.push_values(chunk, |mut b, s| {
-                b.push_bind(s.id.to_string())
-                    .push_bind(s.site_id.to_string())
-                    .push_bind(&s.agent_id)
-                    .push_bind(&s.agent_session_id)
-                    .push_bind(s.parent_span_id.map(|p| p.to_string()))
-                    .push_bind(s.kind.as_str())
-                    .push_bind(&s.model)
-                    .push_bind(s.started_at)
-                    .push_bind(s.ended_at)
-                    .push_bind(s.input_tokens as i64)
-                    .push_bind(s.output_tokens as i64)
-                    .push_bind(s.cache_read_tokens as i64)
-                    .push_bind(s.cache_creation_tokens as i64)
-                    .push_bind(s.cost_usd)
-                    .push_bind(&s.tool_name)
-                    .push_bind(&s.tool_input_hash)
-                    .push_bind(&s.stop_reason)
-                    .push_bind(s.properties.as_ref().map(|p| p.to_string()));
-            });
-            qb.build().execute(&mut *tx).await.map_err(StoreError::db)?;
-        }
-        tx.commit().await.map_err(StoreError::db)?;
-        Ok(())
-    }
-
-    async fn query_spans(&self, q: &SpanQuery) -> Result<Vec<SpanRow>, StoreError> {
-        // Build with a fixed parameter shape so the prepared-statement
-        // cache hits across calls regardless of which optional filters
-        // are present. NULL acts as a wildcard.
-        let rows = sqlx::query(
-            "SELECT id, agent_id, agent_session_id, kind, model, started_at, ended_at, \
-                    input_tokens, output_tokens, cost_usd, tool_name, stop_reason \
-             FROM agent_spans \
-             WHERE site_id = $1 \
-               AND started_at >= $2 AND started_at <= $3 \
-               AND ($4::TEXT IS NULL OR agent_id = $4) \
-               AND ($5::TEXT IS NULL OR agent_session_id = $5) \
-             ORDER BY started_at DESC \
-             LIMIT $6",
-        )
-        .bind(q.site_id.to_string())
-        .bind(q.since)
-        .bind(q.until)
-        .bind(&q.agent_id)
-        .bind(&q.session_id)
-        .bind(q.limit as i64)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(StoreError::query)?;
-
-        rows.into_iter()
-            .map(|row| {
-                let in_tok: i64 = row.try_get("input_tokens").map_err(StoreError::query)?;
-                let out_tok: i64 = row.try_get("output_tokens").map_err(StoreError::query)?;
-                Ok(SpanRow {
-                    id: row.try_get("id").map_err(StoreError::query)?,
-                    agent_id: row.try_get("agent_id").map_err(StoreError::query)?,
-                    agent_session_id: row.try_get("agent_session_id").map_err(StoreError::query)?,
-                    kind: row.try_get("kind").map_err(StoreError::query)?,
-                    model: row.try_get("model").map_err(StoreError::query)?,
-                    started_at: row.try_get("started_at").map_err(StoreError::query)?,
-                    ended_at: row.try_get("ended_at").map_err(StoreError::query)?,
-                    input_tokens: in_tok as u32,
-                    output_tokens: out_tok as u32,
-                    cost_usd: row.try_get("cost_usd").map_err(StoreError::query)?,
-                    tool_name: row.try_get("tool_name").map_err(StoreError::query)?,
-                    stop_reason: row.try_get("stop_reason").map_err(StoreError::query)?,
-                })
-            })
-            .collect()
-    }
-
-    async fn summarize_agents(
-        &self,
-        site_id: Ulid,
-        since: DateTime<Utc>,
-    ) -> Result<Vec<AgentSummary>, StoreError> {
-        let rows = sqlx::query(
-            "SELECT agent_id, \
-                    MAX(started_at) AS last_seen, \
-                    COUNT(*)::BIGINT AS total_spans, \
-                    SUM(input_tokens)::BIGINT AS in_tok, \
-                    SUM(output_tokens)::BIGINT AS out_tok, \
-                    SUM(cost_usd)::DOUBLE PRECISION AS cost \
-             FROM agent_spans \
-             WHERE site_id = $1 AND started_at >= $2 \
-             GROUP BY agent_id \
-             ORDER BY last_seen DESC",
-        )
-        .bind(site_id.to_string())
-        .bind(since)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(StoreError::query)?;
-
-        rows.into_iter()
-            .map(|row| {
-                let total_spans: i64 = row.try_get("total_spans").map_err(StoreError::query)?;
-                let in_tok: i64 = row.try_get("in_tok").map_err(StoreError::query)?;
-                let out_tok: i64 = row.try_get("out_tok").map_err(StoreError::query)?;
-                Ok(AgentSummary {
-                    agent_id: row.try_get("agent_id").map_err(StoreError::query)?,
-                    last_seen_at: row.try_get("last_seen").map_err(StoreError::query)?,
-                    total_spans: total_spans as u64,
-                    total_input_tokens: in_tok as u64,
-                    total_output_tokens: out_tok as u64,
-                    total_cost_usd: row.try_get("cost").map_err(StoreError::query)?,
-                })
-            })
-            .collect()
-    }
-
-    async fn session_cost_usd(
-        &self,
-        site_id: Ulid,
-        agent_session_id: &str,
-    ) -> Result<f64, StoreError> {
-        let row = sqlx::query(
-            "SELECT COALESCE(SUM(cost_usd), 0.0)::DOUBLE PRECISION AS cost \
-             FROM agent_spans \
-             WHERE site_id = $1 AND agent_session_id = $2",
-        )
-        .bind(site_id.to_string())
-        .bind(agent_session_id)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(StoreError::query)?;
-        row.try_get("cost").map_err(StoreError::query)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1991,32 +1298,6 @@ fn row_to_funnel(row: sqlx::postgres::PgRow) -> Result<Funnel, StoreError> {
         site_id: parse_ulid(&site_id),
         name: row.try_get("name").map_err(StoreError::db)?,
         definition: row.try_get("definition").map_err(StoreError::db)?,
-        created_at: row.try_get("created_at").map_err(StoreError::db)?,
-    })
-}
-
-fn row_to_goal(row: sqlx::postgres::PgRow) -> Result<Goal, StoreError> {
-    let id: String = row.try_get("id").map_err(StoreError::db)?;
-    let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
-    Ok(Goal {
-        id: parse_ulid(&id),
-        site_id: parse_ulid(&site_id),
-        name: row.try_get("name").map_err(StoreError::db)?,
-        event_name: row.try_get("event_name").map_err(StoreError::db)?,
-        filters: row.try_get("filters").map_err(StoreError::db)?,
-        created_at: row.try_get("created_at").map_err(StoreError::db)?,
-    })
-}
-
-fn row_to_annotation(row: sqlx::postgres::PgRow) -> Result<Annotation, StoreError> {
-    let id: String = row.try_get("id").map_err(StoreError::db)?;
-    let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
-    let date: String = row.try_get("date").map_err(StoreError::db)?;
-    Ok(Annotation {
-        id: parse_ulid(&id),
-        site_id: parse_ulid(&site_id),
-        date: chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d").unwrap_or_default(),
-        text: row.try_get("text").map_err(StoreError::db)?,
         created_at: row.try_get("created_at").map_err(StoreError::db)?,
     })
 }
@@ -2081,34 +1362,6 @@ fn row_to_digest_sub(row: sqlx::postgres::PgRow) -> Result<DigestSubscription, S
     })
 }
 
-fn row_to_agent(row: sqlx::postgres::PgRow) -> Result<Agent, StoreError> {
-    let id: String = row.try_get("id").map_err(StoreError::db)?;
-    let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
-    let policy_id: Option<String> = row.try_get("policy_id").map_err(StoreError::db)?;
-    Ok(Agent {
-        id: parse_ulid(&id),
-        site_id: parse_ulid(&site_id),
-        agent_id: row.try_get("agent_id").map_err(StoreError::db)?,
-        name: row.try_get("name").map_err(StoreError::db)?,
-        policy_id: policy_id.as_deref().and_then(|s| Ulid::from_string(s).ok()),
-        created_at: row.try_get("created_at").map_err(StoreError::db)?,
-        last_seen_at: row.try_get("last_seen_at").map_err(StoreError::db)?,
-    })
-}
-
-fn row_to_sentinel_token(row: sqlx::postgres::PgRow) -> Result<SentinelToken, StoreError> {
-    let id: String = row.try_get("id").map_err(StoreError::db)?;
-    let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
-    Ok(SentinelToken {
-        id: parse_ulid(&id),
-        site_id: parse_ulid(&site_id),
-        name: row.try_get("name").map_err(StoreError::db)?,
-        token_hash: row.try_get("token_hash").map_err(StoreError::db)?,
-        created_at: row.try_get("created_at").map_err(StoreError::db)?,
-        last_used_at: row.try_get("last_used_at").map_err(StoreError::db)?,
-    })
-}
-
 fn row_to_api_key(row: sqlx::postgres::PgRow) -> Result<ApiKey, StoreError> {
     let id: String = row.try_get("id").map_err(StoreError::db)?;
     let org_id: String = row.try_get("org_id").map_err(StoreError::db)?;
@@ -2142,55 +1395,13 @@ fn row_to_alert_channel(row: sqlx::postgres::PgRow) -> Result<AlertChannel, Stor
     })
 }
 
-fn row_to_policy(row: sqlx::postgres::PgRow) -> Result<Policy, StoreError> {
-    let id: String = row.try_get("id").map_err(StoreError::db)?;
-    let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
-    let repetition_max: Option<i64> = row.try_get("repetition_max").map_err(StoreError::db)?;
-    Ok(Policy {
-        id: parse_ulid(&id),
-        site_id: parse_ulid(&site_id),
-        repetition_max: repetition_max.map(|n| n as u32),
-        velocity_max_tps: row.try_get("velocity_max_tps").map_err(StoreError::db)?,
-        cost_cap_usd: row.try_get("cost_cap_usd").map_err(StoreError::db)?,
-        hint_template: row.try_get("hint_template").map_err(StoreError::db)?,
-        created_at: row.try_get("created_at").map_err(StoreError::db)?,
-    })
+fn plan_str(_p: Plan) -> &'static str {
+    "self_hosted"
 }
 
-fn row_to_incident(row: sqlx::postgres::PgRow) -> Result<Incident, StoreError> {
-    let id: String = row.try_get("id").map_err(StoreError::db)?;
-    let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
-    let trigger_json: String = row.try_get("trigger_json").map_err(StoreError::db)?;
-    let status: String = row.try_get("status").map_err(StoreError::db)?;
-    let trigger: IncidentTrigger =
-        serde_json::from_str(&trigger_json).unwrap_or(IncidentTrigger::Manual);
-    Ok(Incident {
-        id: parse_ulid(&id),
-        site_id: parse_ulid(&site_id),
-        agent_id: row.try_get("agent_id").map_err(StoreError::db)?,
-        trigger,
-        status: parse_incident_status(&status),
-        opened_at: row.try_get("opened_at").map_err(StoreError::db)?,
-        closed_at: row.try_get("closed_at").map_err(StoreError::db)?,
-    })
-}
-
-fn plan_str(p: Plan) -> &'static str {
-    match p {
-        Plan::SelfHosted => "self_hosted",
-        Plan::Free => "free",
-        Plan::Pro => "pro",
-        Plan::Enterprise => "enterprise",
-    }
-}
-
-fn parse_plan(s: &str) -> Plan {
-    match s {
-        "free" => Plan::Free,
-        "pro" => Plan::Pro,
-        "enterprise" => Plan::Enterprise,
-        _ => Plan::SelfHosted,
-    }
+fn parse_plan(_s: &str) -> Plan {
+    // Map legacy free/pro/enterprise rows to SelfHosted.
+    Plan::SelfHosted
 }
 
 fn role_str(r: UserRole) -> &'static str {
@@ -2213,29 +1424,15 @@ fn parse_alert_kind(s: &str) -> AlertChannelKind {
     AlertChannelKind::from_str(s)
 }
 
-fn parse_incident_status(s: &str) -> IncidentStatus {
-    match s {
-        "acknowledged" => IncidentStatus::Acknowledged,
-        "resolved" => IncidentStatus::Resolved,
-        _ => IncidentStatus::Open,
-    }
-}
-
 mod ddl {
-    pub fn all_statements() -> [&'static str; 16] {
+    pub fn all_statements() -> [&'static str; 10] {
         [
             ORGS_DDL,
             SITES_DDL,
             USERS_DDL,
             FUNNELS_DDL,
-            POLICIES_DDL,
-            AGENTS_DDL,
-            SENTINEL_TOKENS_DDL,
             API_KEYS_DDL,
             ALERT_CHANNELS_DDL,
-            INCIDENTS_DDL,
-            GOALS_DDL,
-            ANNOTATIONS_DDL,
             ANALYTICS_ALERTS_DDL,
             ANALYTICS_ALERT_FIRES_DDL,
             SHARE_LINKS_DDL,
@@ -2243,8 +1440,8 @@ mod ddl {
         ]
     }
 
-    pub fn analytics_statements() -> [&'static str; 4] {
-        [EVENTS_DDL, EVENTS_INDEX_TIMESTAMP, SPANS_DDL, SPANS_INDEX]
+    pub fn analytics_statements() -> [&'static str; 2] {
+        [EVENTS_DDL, EVENTS_INDEX_TIMESTAMP]
     }
 
     const ORGS_DDL: &str = r#"
@@ -2291,42 +1488,6 @@ mod ddl {
         )
     "#;
 
-    const POLICIES_DDL: &str = r#"
-        CREATE TABLE IF NOT EXISTS policies (
-            id                TEXT PRIMARY KEY,
-            site_id           TEXT NOT NULL REFERENCES sites(id) UNIQUE,
-            repetition_max    BIGINT,
-            velocity_max_tps  DOUBLE PRECISION,
-            cost_cap_usd      DOUBLE PRECISION,
-            hint_template     TEXT,
-            created_at        TIMESTAMPTZ NOT NULL
-        )
-    "#;
-
-    const AGENTS_DDL: &str = r#"
-        CREATE TABLE IF NOT EXISTS agents (
-            id            TEXT PRIMARY KEY,
-            site_id       TEXT NOT NULL REFERENCES sites(id),
-            agent_id      TEXT NOT NULL,
-            name          TEXT NOT NULL,
-            policy_id     TEXT REFERENCES policies(id),
-            created_at    TIMESTAMPTZ NOT NULL,
-            last_seen_at  TIMESTAMPTZ NOT NULL,
-            UNIQUE (site_id, agent_id)
-        )
-    "#;
-
-    const SENTINEL_TOKENS_DDL: &str = r#"
-        CREATE TABLE IF NOT EXISTS sentinel_tokens (
-            id            TEXT PRIMARY KEY,
-            site_id       TEXT NOT NULL REFERENCES sites(id),
-            name          TEXT NOT NULL,
-            token_hash    TEXT UNIQUE NOT NULL,
-            created_at    TIMESTAMPTZ NOT NULL,
-            last_used_at  TIMESTAMPTZ
-        )
-    "#;
-
     const API_KEYS_DDL: &str = r#"
         CREATE TABLE IF NOT EXISTS api_keys (
             id             TEXT PRIMARY KEY,
@@ -2350,39 +1511,6 @@ mod ddl {
             secret          TEXT,
             created_at      TIMESTAMPTZ NOT NULL,
             last_error_at   TIMESTAMPTZ
-        )
-    "#;
-
-    const INCIDENTS_DDL: &str = r#"
-        CREATE TABLE IF NOT EXISTS incidents (
-            id            TEXT PRIMARY KEY,
-            site_id       TEXT NOT NULL REFERENCES sites(id),
-            agent_id      TEXT NOT NULL,
-            trigger_json  TEXT NOT NULL,
-            status        TEXT NOT NULL DEFAULT 'open',
-            opened_at     TIMESTAMPTZ NOT NULL,
-            closed_at     TIMESTAMPTZ
-        )
-    "#;
-
-    const GOALS_DDL: &str = r#"
-        CREATE TABLE IF NOT EXISTS goals (
-            id          TEXT PRIMARY KEY,
-            site_id     TEXT NOT NULL REFERENCES sites(id),
-            name        TEXT NOT NULL,
-            event_name  TEXT NOT NULL,
-            filters     TEXT,
-            created_at  TIMESTAMPTZ NOT NULL
-        )
-    "#;
-
-    const ANNOTATIONS_DDL: &str = r#"
-        CREATE TABLE IF NOT EXISTS annotations (
-            id          TEXT PRIMARY KEY,
-            site_id     TEXT NOT NULL REFERENCES sites(id),
-            date        TEXT NOT NULL,
-            text        TEXT NOT NULL,
-            created_at  TIMESTAMPTZ NOT NULL
         )
     "#;
 
@@ -2466,32 +1594,6 @@ mod ddl {
 
     const EVENTS_INDEX_TIMESTAMP: &str =
         "CREATE INDEX IF NOT EXISTS idx_events_site_timestamp ON events(site_id, timestamp DESC)";
-
-    const SPANS_DDL: &str = r#"
-        CREATE TABLE IF NOT EXISTS agent_spans (
-            id                    TEXT PRIMARY KEY,
-            site_id               TEXT NOT NULL,
-            agent_id              TEXT NOT NULL,
-            agent_session_id      TEXT NOT NULL,
-            parent_span_id        TEXT,
-            kind                  TEXT NOT NULL,
-            model                 TEXT NOT NULL,
-            started_at            TIMESTAMPTZ NOT NULL,
-            ended_at              TIMESTAMPTZ NOT NULL,
-            input_tokens          BIGINT NOT NULL,
-            output_tokens         BIGINT NOT NULL,
-            cache_read_tokens     BIGINT NOT NULL,
-            cache_creation_tokens BIGINT NOT NULL,
-            cost_usd              DOUBLE PRECISION NOT NULL,
-            tool_name             TEXT,
-            tool_input_hash       TEXT,
-            stop_reason           TEXT,
-            properties            TEXT
-        )
-    "#;
-
-    const SPANS_INDEX: &str =
-        "CREATE INDEX IF NOT EXISTS idx_spans_site_started ON agent_spans(site_id, started_at DESC)";
 }
 
 #[cfg(test)]
@@ -2506,12 +1608,11 @@ mod tests {
             "sites",
             "users",
             "funnels",
-            "policies",
-            "agents",
-            "sentinel_tokens",
             "api_keys",
             "alert_channels",
-            "incidents",
+            "analytics_alerts",
+            "share_links",
+            "digest_subscriptions",
         ] {
             assert!(
                 stmts.contains(&format!("CREATE TABLE IF NOT EXISTS {table}")),
@@ -2524,15 +1625,15 @@ mod tests {
     fn ddl_analytics_tables_present_with_indexes() {
         let stmts = ddl::analytics_statements().join("\n");
         assert!(stmts.contains("CREATE TABLE IF NOT EXISTS events"));
-        assert!(stmts.contains("CREATE TABLE IF NOT EXISTS agent_spans"));
         assert!(stmts.contains("idx_events_site_timestamp"));
-        assert!(stmts.contains("idx_spans_site_started"));
     }
 
     #[test]
     fn plan_round_trip() {
-        for p in [Plan::SelfHosted, Plan::Free, Plan::Pro, Plan::Enterprise] {
-            assert_eq!(parse_plan(plan_str(p)), p);
+        assert_eq!(parse_plan(plan_str(Plan::SelfHosted)), Plan::SelfHosted);
+        // Legacy plan strings all map to SelfHosted.
+        for s in ["free", "pro", "enterprise", "self_hosted", "unknown"] {
+            assert_eq!(parse_plan(s), Plan::SelfHosted);
         }
     }
 
@@ -2554,22 +1655,6 @@ mod tests {
         assert!(matches!(
             parse_alert_kind("teams"),
             AlertChannelKind::Webhook
-        ));
-    }
-
-    #[test]
-    fn incident_status_parses_known_values() {
-        assert!(matches!(
-            parse_incident_status("open"),
-            IncidentStatus::Open
-        ));
-        assert!(matches!(
-            parse_incident_status("acknowledged"),
-            IncidentStatus::Acknowledged
-        ));
-        assert!(matches!(
-            parse_incident_status("resolved"),
-            IncidentStatus::Resolved
         ));
     }
 

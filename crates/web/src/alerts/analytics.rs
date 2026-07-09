@@ -14,10 +14,7 @@ use stomatopod_core::{
         analytics_alert::{AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind},
         incident::{Incident, IncidentStatus, IncidentTrigger},
     },
-    query::{
-        analytics::GoalQuery,
-        pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},
-    },
+    query::pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},
     traits::{MetaStore, StorageBackend},
 };
 use tracing::{info, warn};
@@ -66,10 +63,6 @@ pub fn decide(
                 threshold,
             })
         }
-        AnalyticsAlertKind::GoalThreshold => (current >= threshold).then_some(AlertSignal {
-            value: current,
-            threshold,
-        }),
         AnalyticsAlertKind::NewReferrerSpike => (current > threshold).then_some(AlertSignal {
             value: current,
             threshold,
@@ -103,20 +96,6 @@ pub async fn evaluate_alert(
                 .ok()?
                 .total_pageviews as f64;
             (cur, base)
-        }
-        AnalyticsAlertKind::GoalThreshold => {
-            let event_name = alert.config.goal_event_name.clone()?;
-            // Cumulative count since midnight UTC today.
-            let start = now.date_naive().and_hms_opt(0, 0, 0)?.and_utc();
-            let q = GoalQuery {
-                site_id: alert.site_id,
-                event_name,
-                filters: vec![],
-                granularity: Granularity::Day,
-                range: TimeRange { start, end: now },
-            };
-            let completions = backend.query_goal(&q).await.ok()?.completions as f64;
-            (completions, 0.0)
         }
         AnalyticsAlertKind::NewReferrerSpike => {
             let range = TimeRange {

@@ -46,9 +46,6 @@ struct TestCtx {
     digest_sink: CapturingSender,
     secret: String,
     _ingest_rx: tokio::sync::mpsc::Receiver<stomatopod_core::domain::event::Event>,
-    _span_ingest_rx:
-        tokio::sync::mpsc::Receiver<Vec<stomatopod_core::domain::agent_span::AgentSpan>>,
-    alerts_rx: tokio::sync::mpsc::Receiver<stomatopod_core::domain::incident::Incident>,
     _dir: tempfile::TempDir,
 }
 
@@ -79,27 +76,18 @@ async fn setup_with_flush(flush_rows: usize, flush_interval_s: u64) -> TestCtx {
     });
 
     let (ingest_tx, ingest_rx) = tokio::sync::mpsc::channel(256);
-    let (span_ingest_tx, span_ingest_rx) = tokio::sync::mpsc::channel(256);
-    let (alerts, alerts_rx) = stomatopod_web::alerts::AlertDispatcher::channel();
 
     let digest_sink = CapturingSender::default();
 
     let state = Arc::new(AppState {
         backend: backend.clone(),
-        agent_store: backend.clone(),
         meta: backend.clone(),
         config,
         tracker_hash: "testhash".into(),
         ingest_tx,
-        span_ingest_tx,
         site_cache: Arc::new(DashMap::new()),
-        sentinel_token_cache: Arc::new(DashMap::new()),
         api_key_cache: Arc::new(DashMap::new()),
-        redact_keys: Arc::new(vec!["api_key".into(), "authorization".into()]),
         geo: Arc::new(GeoLookup::new(None)),
-        control_channels: DashMap::new(),
-        control_seq: std::sync::atomic::AtomicU64::new(0),
-        alerts,
         digest_sender: Arc::new(digest_sink.clone()),
     });
 
@@ -109,8 +97,6 @@ async fn setup_with_flush(flush_rows: usize, flush_interval_s: u64) -> TestCtx {
         digest_sink,
         secret,
         _ingest_rx: ingest_rx,
-        _span_ingest_rx: span_ingest_rx,
-        alerts_rx,
         _dir: dir,
     }
 }
@@ -298,71 +284,7 @@ async fn ingest_bot_user_agent_returns_no_content() {
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 }
 
-// ---- Agents dashboard ----
-
-#[tokio::test]
-async fn agents_index_renders_when_no_data() {
-    let ctx = setup().await;
-    let org = make_org();
-    ctx.backend.meta.create_org(&org).await.unwrap();
-    let site = make_site(org.id);
-    ctx.backend.meta.create_site(&site).await.unwrap();
-
-    let user_id = Ulid::new().to_string();
-    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
-    let req = Request::builder()
-        .uri("/agents")
-        .header("cookie", &cookie)
-        .body(Body::empty())
-        .unwrap();
-    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let bytes = body_bytes(resp).await;
-    let html = std::str::from_utf8(&bytes).unwrap();
-    assert!(html.contains("Sentinel Agents"), "page heading missing");
-}
-
-#[tokio::test]
-async fn incidents_page_lists_manual_kill() {
-    use stomatopod_core::domain::incident::{Incident, IncidentStatus, IncidentTrigger};
-
-    let ctx = setup().await;
-    let org = make_org();
-    ctx.backend.meta.create_org(&org).await.unwrap();
-    let site = make_site(org.id);
-    ctx.backend.meta.create_site(&site).await.unwrap();
-
-    let inc = Incident {
-        id: Ulid::new(),
-        site_id: site.id,
-        agent_id: "agent-with-incident".into(),
-        trigger: IncidentTrigger::CostThreshold { usd: 5.0 },
-        status: IncidentStatus::Open,
-        opened_at: Utc::now(),
-        closed_at: None,
-    };
-    ctx.backend.meta.record_incident(&inc).await.unwrap();
-
-    let user_id = Ulid::new().to_string();
-    let cookie = format!("sp_session={}", sign_session(&ctx.secret, &user_id));
-    let req = Request::builder()
-        .uri("/incidents")
-        .header("cookie", &cookie)
-        .body(Body::empty())
-        .unwrap();
-    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let html = std::str::from_utf8(&body_bytes(resp).await)
-        .unwrap()
-        .to_string();
-    assert!(
-        html.contains("agent-with-incident"),
-        "incidents page should list the agent"
-    );
-    assert!(html.contains("cost"));
-}
-
-// ---- Alert dispatcher (webhook) ----
+// ---- Alert webhook sink ----
 
 #[tokio::test]
 async fn webhook_alert_delivered_to_mock_sink() {
@@ -371,7 +293,7 @@ async fn webhook_alert_delivered_to_mock_sink() {
         agent::{AlertChannel, AlertChannelKind},
         incident::{Incident, IncidentStatus, IncidentTrigger},
     };
-    use stomatopod_web::alerts::run_alert_dispatcher;
+    use stomatopod_web::alerts::sinks::{AlertSink, WebhookSink};
 
     let ctx = setup().await;
     let org = make_org();
@@ -398,7 +320,6 @@ async fn webhook_alert_delivered_to_mock_sink() {
         axum::serve(listener, app).await.unwrap();
     });
 
-    // Register the webhook channel.
     let channel = AlertChannel {
         id: Ulid::new(),
         site_id: site.id,
@@ -408,259 +329,31 @@ async fn webhook_alert_delivered_to_mock_sink() {
         created_at: Utc::now(),
         last_error_at: None,
     };
-    ctx.backend
-        .meta
-        .create_alert_channel(&channel)
-        .await
-        .unwrap();
-
-    // Drive the dispatcher directly.
-    let (tx, rx) = tokio::sync::mpsc::channel(8);
-    let meta_clone = ctx.backend.clone();
-    let handle = tokio::spawn(async move {
-        run_alert_dispatcher(rx, meta_clone as _).await;
-    });
 
     let incident = Incident {
         id: Ulid::new(),
         site_id: site.id,
-        agent_id: "demo".into(),
-        trigger: IncidentTrigger::Repetition {
-            count: 7,
-            args_hash: "abc".into(),
+        agent_id: "analytics".into(),
+        trigger: IncidentTrigger::AnalyticsAlert {
+            alert_type: "traffic_spike".into(),
+            value: 200.0,
+            threshold: 100.0,
         },
         status: IncidentStatus::Open,
         opened_at: Utc::now(),
         closed_at: None,
     };
-    tx.send(incident).await.unwrap();
 
-    // Poll until the receiver got something or timeout.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    loop {
-        if received.lock().unwrap().is_some() {
-            break;
-        }
-        if std::time::Instant::now() > deadline {
-            panic!("webhook never received the alert");
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    let body = received.lock().unwrap().clone().unwrap();
-    assert_eq!(body["agent_id"], "demo");
-    assert_eq!(body["trigger_kind"], "repetition");
+    let sink = WebhookSink::new(reqwest::Client::new());
+    sink.dispatch(&channel, &incident).await.unwrap();
 
-    handle.abort();
-}
-
-// ---- Sentinel control / SSE ----
-
-#[tokio::test]
-async fn sentinel_stream_unauthenticated_returns_401() {
-    let ctx = setup().await;
-    let req = Request::builder()
-        .uri("/api/v1/sentinel/stream")
-        .body(Body::empty())
-        .unwrap();
-    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn sentinel_control_emits_alert() {
-    let mut ctx = setup().await;
-    let org = make_org();
-    ctx.backend.meta.create_org(&org).await.unwrap();
-    let site = make_site(org.id);
-    ctx.backend.meta.create_site(&site).await.unwrap();
-
-    let user_id = Ulid::new().to_string();
-    let token = sign_session(&ctx.secret, &user_id);
-    let body = serde_json::json!({
-        "site_id": site.id,
-        "agent_id": "agent-alert-x",
-        "command": "kill",
-        "reason": "burned through budget"
-    });
-    let req = Request::builder()
-        .method("POST")
-        .uri("/api/v1/sentinel/control")
-        .header("authorization", format!("Bearer {token}"))
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap();
-    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let incident =
-        tokio::time::timeout(std::time::Duration::from_millis(500), ctx.alerts_rx.recv())
-            .await
-            .expect("timed out waiting for alert")
-            .expect("channel closed");
-    assert_eq!(incident.agent_id, "agent-alert-x");
-}
-
-#[tokio::test]
-async fn sentinel_control_publishes_to_broadcast_channel() {
-    let ctx = setup().await;
-    let org = make_org();
-    ctx.backend.meta.create_org(&org).await.unwrap();
-    let site = make_site(org.id);
-    ctx.backend.meta.create_site(&site).await.unwrap();
-
-    // Pre-subscribe so the control POST has a receiver.
-    let mut rx = ctx.state.control_channel(site.id).subscribe();
-
-    let user_id = Ulid::new().to_string();
-    let token = sign_session(&ctx.secret, &user_id);
-
-    let body = serde_json::json!({
-        "site_id": site.id,
-        "agent_id": "agent-1",
-        "command": "kill",
-        "reason": "manual stop"
-    });
-
-    let req = Request::builder()
-        .method("POST")
-        .uri("/api/v1/sentinel/control")
-        .header("authorization", format!("Bearer {token}"))
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap();
-    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let env = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv())
-        .await
-        .expect("timed out")
-        .expect("recv");
-    assert_eq!(env.agent_id, "agent-1");
-    match env.command {
-        stomatopod_core::domain::control::ControlCommand::Kill { reason } => {
-            assert_eq!(reason, "manual stop");
-        }
-        _ => panic!("expected Kill command"),
-    }
-
-    // The control endpoint must have written an Incident row too.
-    let incidents = ctx.backend.meta.list_incidents(site.id, 10).await.unwrap();
-    assert_eq!(incidents.len(), 1);
-    assert_eq!(incidents[0].agent_id, "agent-1");
-}
-
-// ---- Span ingest endpoint ----
-
-#[tokio::test]
-async fn span_ingest_without_bearer_returns_401() {
-    let ctx = setup().await;
-    let payload = serde_json::json!({"spans": []});
-
-    let req = Request::builder()
-        .method("POST")
-        .uri("/api/v1/spans")
-        .header("content-type", "application/json")
-        .body(Body::from(payload.to_string()))
-        .unwrap();
-    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn span_ingest_unknown_token_returns_401() {
-    let ctx = setup().await;
-    let payload = serde_json::json!({"spans": []});
-
-    let req = Request::builder()
-        .method("POST")
-        .uri("/api/v1/spans")
-        .header("authorization", "Bearer not-a-real-token")
-        .header("content-type", "application/json")
-        .body(Body::from(payload.to_string()))
-        .unwrap();
-    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn span_ingest_valid_token_redacts_and_enqueues() {
-    use stomatopod_core::domain::agent::SentinelToken;
-    use stomatopod_ingest::span_handler::token_hash;
-
-    let ctx = setup().await;
-    let org = make_org();
-    ctx.backend.meta.create_org(&org).await.unwrap();
-    let site = make_site(org.id);
-    ctx.backend.meta.create_site(&site).await.unwrap();
-
-    let raw_token = "sentinel-test-token-xyz";
-    let tok = SentinelToken {
-        id: Ulid::new(),
-        site_id: site.id,
-        name: "test-sidecar".into(),
-        token_hash: token_hash(raw_token),
-        created_at: Utc::now(),
-        last_used_at: None,
-    };
-    ctx.backend.meta.create_sentinel_token(&tok).await.unwrap();
-
-    let now = Utc::now();
-    let payload = serde_json::json!({
-        "spans": [{
-            "agent_id": "agent-a",
-            "agent_session_id": "sess-1",
-            "kind": "tool_call",
-            "model": "claude-opus-4-7",
-            "started_at": now,
-            "ended_at": now,
-            "input_tokens": 10,
-            "output_tokens": 20,
-            "cost_usd": 0.001,
-            "tool_name": "shell",
-            "tool_input_hash": "deadbeef",
-            "properties": {
-                "headers": {"api_key": "sk-leaky"},
-                "ok": "fine"
-            }
-        }]
-    });
-
-    let req = Request::builder()
-        .method("POST")
-        .uri("/api/v1/spans")
-        .header("authorization", format!("Bearer {raw_token}"))
-        .header("content-type", "application/json")
-        .body(Body::from(payload.to_string()))
-        .unwrap();
-    let mut state_ctx = ctx;
-    let resp = make_app(state_ctx.state.clone())
-        .oneshot(req)
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-
-    // The handler enqueues onto span_ingest_tx; we should receive one
-    // batch containing a single span.
-    let batch = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        state_ctx._span_ingest_rx.recv(),
-    )
-    .await
-    .expect("timed out waiting for span")
-    .expect("channel closed");
-    assert_eq!(batch.len(), 1);
-    let received = &batch[0];
-    assert_eq!(received.agent_id, "agent-a");
-    assert_eq!(received.input_tokens, 10);
-    assert_eq!(received.site_id, site.id);
-    // Redaction applied
-    let props = received.properties.clone().unwrap();
-    assert_eq!(
-        props["headers"]["api_key"],
-        serde_json::Value::String("[redacted]".into())
-    );
-    assert!(props["headers"].get("ok").is_none());
-    assert_eq!(props["ok"], serde_json::json!("fine"));
+    let body = received
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("webhook never received the alert");
+    assert_eq!(body["agent_id"], "analytics");
+    assert_eq!(body["trigger_kind"], "analytics_alert");
 }
 
 #[tokio::test]
@@ -1070,24 +763,17 @@ async fn logout_clears_cookie_and_redirects_to_login() {
 // ---- Dashboard requires auth ----
 
 #[tokio::test]
-async fn unauthenticated_dashboard_redirects_to_login() {
-    // The Dioxus SPA at `/` is guarded by `require_auth` in `server::serve`
-    // (outside `build_router`); the legacy agents/incidents dashboards carry
-    // the same guard here, so `/agents` exercises the redirect.
+async fn unauthenticated_api_rejects_without_token() {
+    // Session-authenticated SPA routes are guarded outside `build_router`.
+    // The JSON API requires a bearer token (or session) via `require_api_auth`.
     let ctx = setup().await;
     let req = Request::builder()
-        .uri("/agents")
+        .uri("/api/v1/sites")
         .body(Body::empty())
         .unwrap();
 
     let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
-    let location = resp
-        .headers()
-        .get("location")
-        .and_then(|v: &axum::http::HeaderValue| v.to_str().ok())
-        .unwrap_or("");
-    assert_eq!(location, "/login");
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
 // ---- Helpers ----
@@ -1296,7 +982,7 @@ async fn send_json(
 }
 
 #[tokio::test]
-async fn entry_exit_realtime_routes_resolve() {
+async fn entry_exit_routes_resolve() {
     let ctx = setup().await;
     let (site, token) = site_and_token(&ctx).await;
 
@@ -1310,18 +996,6 @@ async fn entry_exit_realtime_routes_resolve() {
         assert_eq!(status, StatusCode::OK, "{path} should resolve");
         assert!(json.get("rows").is_some(), "{path} carries rows");
     }
-
-    let (status, json) = get_json(
-        ctx.state.clone(),
-        &format!("/api/v1/sites/{}/realtime", site.id),
-        &token,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    // Zero active sessions is a valid empty state, not an error.
-    assert_eq!(json["active_sessions"], 0);
-    assert!(json.get("top_pages").is_some());
-    assert!(json.get("recent_events").is_some());
 }
 
 #[tokio::test]
@@ -1380,79 +1054,6 @@ async fn export_endpoints_serve_csv_and_json() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
     assert!(body.starts_with("id,name,kind,timestamp"));
-}
-
-#[tokio::test]
-async fn goals_crud_lifecycle() {
-    let ctx = setup().await;
-    let (site, token) = site_and_token(&ctx).await;
-
-    // Create.
-    let (status, json) = send_json(
-        ctx.state.clone(),
-        "POST",
-        &format!("/api/v1/sites/{}/goals", site.id),
-        &token,
-        Some(serde_json::json!({"name": "Signup", "event_name": "user_signed_up"})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "goal create, got {json}");
-    let goal_id = json["id"].as_str().unwrap().to_string();
-
-    // List shows it.
-    let (status, json) = get_json(
-        ctx.state.clone(),
-        &format!("/api/v1/sites/{}/goals", site.id),
-        &token,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["goals"].as_array().unwrap().len(), 1);
-
-    // Stats resolve and carry the conversion fields.
-    let (status, json) = get_json(
-        ctx.state.clone(),
-        &format!("/api/v1/sites/{}/goals/{goal_id}/stats", site.id),
-        &token,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["goal_id"], goal_id);
-    assert_eq!(json["name"], "Signup");
-    assert!(json.get("conversion_rate").is_some());
-
-    // Delete.
-    let (status, _) = send_json(
-        ctx.state.clone(),
-        "DELETE",
-        &format!("/api/v1/sites/{}/goals/{goal_id}", site.id),
-        &token,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    let (_, json) = get_json(
-        ctx.state.clone(),
-        &format!("/api/v1/sites/{}/goals", site.id),
-        &token,
-    )
-    .await;
-    assert!(json["goals"].as_array().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn create_goal_rejects_blank_event_name() {
-    let ctx = setup().await;
-    let (site, token) = site_and_token(&ctx).await;
-    let (status, _) = send_json(
-        ctx.state.clone(),
-        "POST",
-        &format!("/api/v1/sites/{}/goals", site.id),
-        &token,
-        Some(serde_json::json!({"name": "Bad", "event_name": ""})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -1561,9 +1162,6 @@ fn analytics_alert_decide_logic() {
     // Drop fires when current is far below baseline.
     assert!(decide(TrafficDrop, 50.0, 30.0, 100.0).is_some());
     assert!(decide(TrafficDrop, 50.0, 80.0, 100.0).is_none());
-    // Goal threshold is an absolute crossing.
-    assert!(decide(GoalThreshold, 100.0, 100.0, 0.0).is_some());
-    assert!(decide(GoalThreshold, 100.0, 99.0, 0.0).is_none());
     // Referrer spike: share above threshold percent.
     assert!(decide(NewReferrerSpike, 40.0, 55.0, 0.0).is_some());
     assert!(decide(NewReferrerSpike, 40.0, 12.0, 0.0).is_none());
@@ -1621,16 +1219,16 @@ async fn analytics_alert_fires_records_and_respects_cooldown() {
         .await
         .unwrap();
 
-    // A goal-threshold alert with threshold 0 fires unconditionally
-    // (0 completions >= 0), exercising the full fire + dispatch path.
+    // A new-referrer-spike alert with a negative threshold fires when
+    // the top referrer share is 0 (empty site), exercising the full
+    // fire + dispatch path without needing seeded traffic.
     let alert = AnalyticsAlert {
         id: Ulid::new(),
         site_id: site.id,
-        kind: AnalyticsAlertKind::GoalThreshold,
+        kind: AnalyticsAlertKind::NewReferrerSpike,
         config: AnalyticsAlertConfig {
-            threshold: 0.0,
+            threshold: -1.0,
             window_minutes: 60,
-            goal_event_name: Some("signup".into()),
         },
         channel_id: channel.id,
         enabled: true,
@@ -1652,7 +1250,7 @@ async fn analytics_alert_fires_records_and_respects_cooldown() {
 
     // First evaluation fires + records.
     let fired = process_alert(&alert, &backend, &meta, &webhook, &slack, &telegram, now).await;
-    assert!(fired, "threshold-0 goal alert should fire");
+    assert!(fired, "negative-threshold referrer alert should fire");
     let last = ctx
         .backend
         .meta
@@ -1673,7 +1271,7 @@ async fn analytics_alert_fires_records_and_respects_cooldown() {
     assert!(!again, "cooldown should suppress a re-fire within the hour");
 }
 
-// ---- Tier-3 analytics endpoints: campaigns, retention, paths, annotations ----
+// ---- Tier-3 analytics endpoints: campaigns ----
 
 #[tokio::test]
 async fn api_campaigns_returns_utm_breakdowns() {
@@ -1698,148 +1296,6 @@ async fn api_campaigns_returns_utm_breakdowns() {
             json.get(dim).and_then(|d| d.get("rows")).is_some(),
             "campaigns response should include {dim}.rows, got {json}"
         );
-    }
-}
-
-#[tokio::test]
-async fn api_retention_returns_cohort_grid() {
-    let ctx = setup().await;
-    let (site, token) = site_and_token(&ctx).await;
-
-    let (status, json) = get_json(
-        ctx.state.clone(),
-        &format!("/api/v1/sites/{}/retention?range=90d", site.id),
-        &token,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(
-        json.get("cohorts").map(|c| c.is_array()).unwrap_or(false),
-        "retention response should carry a cohorts array, got {json}"
-    );
-}
-
-#[tokio::test]
-async fn api_paths_returns_report() {
-    let ctx = setup().await;
-    let (site, token) = site_and_token(&ctx).await;
-
-    let (status, json) = get_json(
-        ctx.state.clone(),
-        &format!("/api/v1/sites/{}/paths?depth=3", site.id),
-        &token,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(
-        json.get("rows").map(|r| r.is_array()).unwrap_or(false),
-        "paths response should carry a rows array, got {json}"
-    );
-    assert!(json.get("total_sessions").is_some());
-}
-
-#[tokio::test]
-async fn api_annotations_create_list_delete_round_trip() {
-    let ctx = setup().await;
-    let (site, token) = site_and_token(&ctx).await;
-
-    // Create.
-    let body = serde_json::json!({ "date": "2026-06-01", "text": "Deployed v2" });
-    let req = Request::builder()
-        .method("POST")
-        .uri(format!("/api/v1/sites/{}/annotations", site.id))
-        .header("authorization", format!("Bearer {token}"))
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap();
-    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::CREATED);
-    let created: serde_json::Value = serde_json::from_slice(&body_bytes(resp).await).unwrap();
-    let id = created["id"].as_str().unwrap().to_string();
-
-    // List (within range).
-    let (status, json) = get_json(
-        ctx.state.clone(),
-        &format!(
-            "/api/v1/sites/{}/annotations?from=2026-05-01&to=2026-06-30",
-            site.id
-        ),
-        &token,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let anns = json["annotations"].as_array().unwrap();
-    assert_eq!(anns.len(), 1);
-    assert_eq!(anns[0]["text"], "Deployed v2");
-
-    // Delete.
-    let req = Request::builder()
-        .method("DELETE")
-        .uri(format!("/api/v1/sites/{}/annotations/{id}", site.id))
-        .header("authorization", format!("Bearer {token}"))
-        .body(Body::empty())
-        .unwrap();
-    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-}
-
-// ============================================================================
-// Tier-4 API contract tests
-//
-// Assert the new analytics surfaces resolve and return their documented
-// top-level fields. Deep aggregation correctness is covered by the
-// store-level tier-4 tests; here we lock the HTTP contract.
-// ============================================================================
-
-#[tokio::test]
-async fn tier4_endpoints_return_expected_schema() {
-    let ctx = setup().await;
-    let (site, token) = site_and_token(&ctx).await;
-
-    // (path, expected top-level field that must be present)
-    let cases: &[(&str, &str)] = &[
-        ("vitals", "lcp"),
-        ("vitals/pages", "rows"),
-        ("scroll", "reached_50pct"),
-        ("scroll/pages", "rows"),
-        ("search", "rows"),
-        ("search/zero-results", "rows"),
-        ("search/timeseries", "buckets"),
-        ("revenue", "total_revenue"),
-        ("revenue/timeseries", "buckets"),
-        ("revenue/pages", "rows"),
-        ("revenue/breakdown?dimension=page", "rows"),
-        ("experiments", "experiments"),
-    ];
-
-    for (path, field) in cases {
-        let (status, json) = get_json(
-            ctx.state.clone(),
-            &format!("/api/v1/sites/{}/{path}", site.id),
-            &token,
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{path} should resolve, got {json}");
-        assert!(
-            json.get(*field).is_some(),
-            "{path} response missing `{field}`: {json}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn tier4_heatmap_endpoints_require_url_and_resolve() {
-    let ctx = setup().await;
-    let (site, token) = site_and_token(&ctx).await;
-
-    for path in ["heatmaps/clicks", "heatmaps/scroll"] {
-        let (status, json) = get_json(
-            ctx.state.clone(),
-            &format!("/api/v1/sites/{}/{path}?url=/landing", site.id),
-            &token,
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{path} should resolve, got {json}");
     }
 }
 

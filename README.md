@@ -39,8 +39,7 @@ The dashboard is a Dioxus 0.7 **fullstack** app that lives in the single
 compiles two ways: to wasm (the `web` feature — the hydrating client) and to
 native (the `server` feature — the axum server that server-renders it). The
 server serves the SSR'd dashboard at `/`, its hashed wasm/JS/CSS assets, and the
-JSON API at `/api/v1`. `/login` and the legacy `/agents` and `/incidents` pages
-are server-rendered HTML (no template engine).
+JSON API at `/api/v1`. `/login` is server-rendered HTML (no template engine).
 
 ```bash
 # Build the wasm client, then run the server against it (SSR + hydration):

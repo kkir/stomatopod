@@ -7,21 +7,9 @@ pub struct ChartPoint {
     pub value: u64,
 }
 
-/// A dated marker drawn as a vertical dashed line, `x` already projected
-/// onto the chart's 0-800 coordinate space (see `crates/web/src/routes/
-/// dashboard.rs`'s `annotations_view` for the server-side equivalent).
-#[derive(Clone, PartialEq, Debug)]
-pub struct ChartAnnotation {
-    pub x: f64,
-    pub date: String,
-    pub text: String,
-}
-
-/// Traffic-over-time chart, port of the 800x120 SVG in the legacy
-/// site.jinja (lines 193-223): gradient polyline + area fill under it,
-/// with dashed red vertical lines marking annotations.
+/// Traffic-over-time chart: gradient polyline + area fill under it.
 #[component]
-pub fn TimeseriesChart(points: Vec<ChartPoint>, annotations: Vec<ChartAnnotation>) -> Element {
+pub fn TimeseriesChart(points: Vec<ChartPoint>) -> Element {
     let n = points.len();
     let max_v = points.iter().map(|p| p.value).max().unwrap_or(1).max(1) as f64;
     let line_points = if n > 1 {
@@ -64,19 +52,6 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, annotations: Vec<ChartAnnotation
                     stroke_width: "2.5",
                     stroke_linejoin: "round",
                     stroke_linecap: "round",
-                }
-            }
-            for a in annotations {
-                line {
-                    key: "{a.date}-{a.text}",
-                    x1: "{a.x}",
-                    y1: "0",
-                    x2: "{a.x}",
-                    y2: "120",
-                    stroke: "rgba(248,113,113,0.55)",
-                    stroke_width: "1",
-                    stroke_dasharray: "3 3",
-                    title { "{a.date}: {a.text}" }
                 }
             }
         }

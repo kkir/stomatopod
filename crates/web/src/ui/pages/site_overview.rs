@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::ui::api::{delete, get_json, post_json};
+use crate::ui::api::get_json;
 use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::chart::{ChartPoint, TimeseriesChart};
 use crate::ui::components::install::InstallCard;
@@ -13,10 +13,7 @@ use crate::ui::pages::{
 };
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
-use crate::ui::types::{
-    AnnotationsList, CreateAnnotationBody, EntryPages, ExitPages, PageviewsResult, SitesList,
-    TopList,
-};
+use crate::ui::types::{EntryPages, ExitPages, PageviewsResult, SitesList, TopList};
 
 /// Percent change of `cur` vs `prev`, classified for the delta badge.
 fn compute_delta(cur: u64, prev: u64) -> Option<DeltaInfo> {
@@ -118,7 +115,7 @@ use crate::ui::components::skeleton::Skeleton;
 
 /// The site overview dashboard, port of crates/web/templates/site.jinja:
 /// hero stats + traffic chart, seven breakdown tables, entry/exit tables,
-/// filter controls, period comparison, and annotations.
+/// filter controls, and period comparison.
 #[component]
 pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
     let route = use_route::<Route>();
@@ -177,18 +174,6 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
         }
     });
 
-    let refresh = use_signal(|| 0u32);
-    let annotations = use_resource({
-        let site_id = site_id.clone();
-        move || {
-            let _ = refresh();
-            let path = site_api_url(&site_id, "annotations", "");
-            async move { get_json::<AnnotationsList>(&path).await }
-        }
-    });
-
-    let mut ann_date = use_signal(String::new);
-    let mut ann_text = use_signal(String::new);
     let mut f_field = use_signal(|| "url".to_string());
     let mut f_op = use_signal(|| "eq".to_string());
     let mut f_value = use_signal(String::new);
@@ -324,7 +309,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             }
                             StatTile { label: "Bounce Rate", value: format!("{:.1}%", d.bounce_rate) }
                         }
-                        TimeseriesChart { points, annotations: Vec::new() }
+                        TimeseriesChart { points }
                     }
                 }
             }
@@ -452,108 +437,6 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                     }
                 }
             }}
-        }
-
-        div { class: "mt-4",
-            Card { title: "Annotations",
-                form {
-                    class: "flex flex-wrap items-end gap-2 mb-4",
-                    onsubmit: {
-                        let site_id = site_id.clone();
-                        move |evt: FormEvent| {
-                            evt.prevent_default();
-                            let date = ann_date();
-                            let text = ann_text();
-                            if date.is_empty() || text.trim().is_empty() {
-                                return;
-                            }
-                            let site_id = site_id.clone();
-                            spawn(async move {
-                                let path = site_api_url(&site_id, "annotations", "");
-                                let body = CreateAnnotationBody { date, text };
-                                if post_json::<_, serde_json::Value>(&path, &body).await.is_ok() {
-                                    ann_date.set(String::new());
-                                    ann_text.set(String::new());
-                                    let mut r = refresh;
-                                    r += 1;
-                                }
-                            });
-                        }
-                    },
-                    input {
-                        class: CTRL_INPUT,
-                        r#type: "date",
-                        value: "{ann_date}",
-                        oninput: move |e| ann_date.set(e.value()),
-                    }
-                    input {
-                        class: CTRL_INPUT,
-                        r#type: "text",
-                        value: "{ann_text}",
-                        placeholder: "e.g. Deployed v2",
-                        oninput: move |e| ann_text.set(e.value()),
-                    }
-                    button { r#type: "submit", class: BTN_PRIMARY, "Add" }
-                }
-                {match &*annotations.read() {
-                    None => rsx! { Skeleton { lines: 2 } },
-                    Some(Err(e)) => rsx! {
-                        EmptyState { message: format!("Failed to load ({e})") }
-                    },
-                    Some(Ok(list)) => {
-                        if list.annotations.is_empty() {
-                            rsx! { EmptyState { message: "No annotations" } }
-                        } else {
-                            let site_id = site_id.clone();
-                            rsx! {
-                                table { class: "w-full border-collapse tabular-nums",
-                                    thead {
-                                        tr {
-                                            th { class: "text-muted-1 font-semibold text-left px-2.5 py-2 text-[10.5px] uppercase tracking-[0.1em] border-b border-border-2",
-                                                "Date"
-                                            }
-                                            th { class: "text-muted-1 font-semibold text-left px-2.5 py-2 text-[10.5px] uppercase tracking-[0.1em] border-b border-border-2",
-                                                "Note"
-                                            }
-                                            th { class: "border-b border-border-2" }
-                                        }
-                                    }
-                                    tbody {
-                                        for a in list.annotations.clone() {
-                                            tr { key: "{a.id}",
-                                                td { class: "px-2.5 py-[11px] border-t border-border-1 text-text-2", "{a.date}" }
-                                                td { class: "px-2.5 py-[11px] border-t border-border-1 text-text-2", "{a.text}" }
-                                                td { class: "px-2.5 py-[11px] border-t border-border-1 text-right",
-                                                    button {
-                                                        r#type: "button",
-                                                        class: BTN_GHOST,
-                                                        onclick: {
-                                                            let site_id = site_id.clone();
-                                                            let id = a.id.clone();
-                                                            move |_| {
-                                                                let site_id = site_id.clone();
-                                                                let id = id.clone();
-                                                                spawn(async move {
-                                                                    let path = format!("/api/v1/sites/{site_id}/annotations/{id}");
-                                                                    if delete(&path).await.is_ok() {
-                                                                        let mut r = refresh;
-                                                                        r += 1;
-                                                                    }
-                                                                });
-                                                            }
-                                                        },
-                                                        "Delete"
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }}
-            }
         }
 
         div { class: "mt-4",

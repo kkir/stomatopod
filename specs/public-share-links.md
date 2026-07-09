@@ -33,7 +33,6 @@ Share links expose:
 - Pageviews timeseries
 - Top pages, referrers, countries, browsers, devices
 - Custom events summary
-- Goals (completions + conversion rate)
 
 Share links do NOT expose:
 - Raw event data

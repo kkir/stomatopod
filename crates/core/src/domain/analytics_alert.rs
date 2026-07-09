@@ -10,8 +10,6 @@ pub enum AnalyticsAlertKind {
     TrafficSpike,
     /// Pageviews in the window fall below the baseline by `threshold` percent.
     TrafficDrop,
-    /// Cumulative goal-event count today crosses `threshold` (absolute).
-    GoalThreshold,
     /// A single referrer accounts for more than `threshold` percent of
     /// traffic in the window (viral spike detection).
     NewReferrerSpike,
@@ -22,7 +20,6 @@ impl AnalyticsAlertKind {
         match self {
             AnalyticsAlertKind::TrafficSpike => "traffic_spike",
             AnalyticsAlertKind::TrafficDrop => "traffic_drop",
-            AnalyticsAlertKind::GoalThreshold => "goal_threshold",
             AnalyticsAlertKind::NewReferrerSpike => "new_referrer_spike",
         }
     }
@@ -32,7 +29,6 @@ impl AnalyticsAlertKind {
         Some(match s {
             "traffic_spike" => AnalyticsAlertKind::TrafficSpike,
             "traffic_drop" => AnalyticsAlertKind::TrafficDrop,
-            "goal_threshold" => AnalyticsAlertKind::GoalThreshold,
             "new_referrer_spike" => AnalyticsAlertKind::NewReferrerSpike,
             _ => return None,
         })
@@ -43,14 +39,11 @@ impl AnalyticsAlertKind {
 /// schema needn't change as alert kinds gain parameters.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AnalyticsAlertConfig {
-    /// Percent change (spike/drop/referrer) or absolute count (goal).
+    /// Percent change (spike/drop/referrer).
     pub threshold: f64,
     /// Evaluation window in minutes.
     #[serde(default)]
     pub window_minutes: u32,
-    /// Goal event name for `goal_threshold` alerts.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal_event_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

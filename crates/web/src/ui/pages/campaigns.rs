@@ -5,11 +5,11 @@ use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::table::{BreakdownRow, BreakdownTable};
-use crate::ui::components::tabs::RangeTabs;
-use crate::ui::pages::{active_filters, SiteScopeSelect};
+use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs};
+use crate::ui::pages::{active_filters, use_site_name};
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
-use crate::ui::types::{Campaigns as CampaignsData, SiteSummary, SitesList, TopList};
+use crate::ui::types::{Campaigns as CampaignsData, TopList};
 
 fn rows_of(list: &TopList) -> Vec<BreakdownRow> {
     list.rows
@@ -23,31 +23,30 @@ fn rows_of(list: &TopList) -> Vec<BreakdownRow> {
         .collect()
 }
 
-/// The five UTM breakdown tables for one site + range. Split out from
-/// [`Campaigns`] so `selected` initializes to the first site only after the
-/// site list has loaded.
+/// Per-site campaigns (UTM breakdown) page.
 #[component]
-fn CampaignsInner(sites: Vec<SiteSummary>, range: String) -> Element {
-    let site_list = sites;
-    let first = site_list.first().map(|s| s.id.clone()).unwrap_or_default();
-    let mut selected = use_signal(|| first.clone());
+pub fn Campaigns(site_id: String, q: DashQuery) -> Element {
+    let route = use_route::<Route>();
+    let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
+    let name = use_site_name(site_id.clone());
 
     let data = use_resource({
+        let site_id = site_id.clone();
         let range = range.clone();
         move || {
-            let site = selected();
-            let range = range.clone();
-            let path = format!("/api/v1/sites/{site}/campaigns?range={range}");
+            let path = format!("/api/v1/sites/{site_id}/campaigns?range={range}");
             async move { get_json::<CampaignsData>(&path).await }
         }
     });
 
     rsx! {
-        SiteScopeSelect {
-            sites: site_list.clone(),
-            selected: selected(),
-            on_select: move |v| selected.set(v),
+        PageHead {
+            title: name,
+            subtitle: "UTM source, medium, and campaign breakdowns.".to_string(),
+            RangeTabs { active: range.clone() }
         }
+        SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Campaigns }
+        {active_filters(&route, &q)}
         {match &*data.read() {
             None => rsx! {
                 Skeleton { lines: 4 }
@@ -99,40 +98,6 @@ fn CampaignsInner(sites: Vec<SiteSummary>, range: String) -> Element {
                     }
                 }
             },
-        }}
-    }
-}
-
-/// Global campaigns (UTM breakdown) page.
-#[component]
-pub fn Campaigns(q: DashQuery) -> Element {
-    let route = use_route::<Route>();
-    let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
-    let sites = use_resource(move || async move { get_json::<SitesList>("/api/v1/sites").await });
-
-    rsx! {
-        PageHead { title: "Campaigns", subtitle: "UTM source, medium, and campaign breakdowns.",
-            RangeTabs { active: range.clone() }
-        }
-        {active_filters(&route, &q)}
-        {match &*sites.read() {
-            None => rsx! {
-                Skeleton { lines: 3 }
-            },
-            Some(Err(e)) => rsx! {
-                Card { EmptyState { message: format!("Failed to load sites ({e})") } }
-            },
-            Some(Ok(list)) => {
-                if list.sites.is_empty() {
-                    rsx! {
-                        Card { EmptyState { message: "No sites yet" } }
-                    }
-                } else {
-                    rsx! {
-                        CampaignsInner { sites: list.sites.clone(), range: range.clone() }
-                    }
-                }
-            }
         }}
     }
 }

@@ -1,13 +1,11 @@
 use crossbeam::queue::SegQueue;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use stomatopod_core::domain::{agent_span::AgentSpan, event::Event};
+use stomatopod_core::domain::event::Event;
 
 /// Lock-free concurrent ingest buffer backed by a `crossbeam::SegQueue`.
 ///
 /// Used by the Parquet writer (drains via `drain`) and the ingest path
-/// (pushes via `push` / `push_batch`). One instance per record type —
-/// `EventBuffer` for analytics, `SpanBuffer` for agent spans — so the span
-/// ingest path can't backpressure the analytics path.
+/// (pushes via `push` / `push_batch` / `try_push_batch`).
 pub struct Buffer<T> {
     inner: SegQueue<T>,
     len: AtomicUsize,
@@ -23,17 +21,37 @@ impl<T> Buffer<T> {
         }
     }
 
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
     pub fn push(&self, item: T) {
         self.inner.push(item);
         self.len.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Unbounded push used by WAL replay (startup may exceed capacity).
     pub fn push_batch(&self, items: Vec<T>) {
         let n = items.len();
         for item in items {
             self.inner.push(item);
         }
         self.len.fetch_add(n, Ordering::Relaxed);
+    }
+
+    /// Push a batch only if it fits within capacity. On rejection returns the
+    /// items unpushed so the caller can flush and retry.
+    pub fn try_push_batch(&self, items: Vec<T>) -> Result<(), Vec<T>> {
+        let n = items.len();
+        let current = self.len.load(Ordering::Relaxed);
+        if current.saturating_add(n) > self.capacity {
+            return Err(items);
+        }
+        for item in items {
+            self.inner.push(item);
+        }
+        self.len.fetch_add(n, Ordering::Relaxed);
+        Ok(())
     }
 
     /// Drain up to `max` items from the buffer.
@@ -66,4 +84,3 @@ impl<T> Buffer<T> {
 }
 
 pub type EventBuffer = Buffer<Event>;
-pub type SpanBuffer = Buffer<AgentSpan>;
