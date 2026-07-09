@@ -5603,6 +5603,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ulid",
+ "wasm-bindgen",
  "web-sys",
 ]
 
