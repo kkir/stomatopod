@@ -1,5 +1,5 @@
-use std::time::Duration;
 use chrono::Utc;
+use std::time::Duration;
 use ulid::Ulid;
 
 use stomatopod_core::{
@@ -59,12 +59,12 @@ async fn test_pageview_metrics() {
     let backend = EmbeddedBackend::open(&cfg(&dir)).await.unwrap();
     let site_id = Ulid::new();
     let now = Utc::now();
-    
+
     // Create a pageview session
     let mut ev_pv = make_event(site_id, "/a");
     ev_pv.timestamp = now;
     ev_pv.received_at = now;
-    
+
     // Create a separate custom-only session
     let mut ev_custom = make_event(site_id, "/a");
     ev_custom.timestamp = now;
@@ -73,7 +73,7 @@ async fn test_pageview_metrics() {
     ev_custom.kind = EventKind::Custom;
     // `make_event` generates a unique session ID for each call, so this session
     // is distinct from the pageview session above.
-    
+
     let events = vec![ev_pv, ev_custom];
     backend.ingest_events(events).await.unwrap();
     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -101,13 +101,13 @@ async fn test_pageview_metrics_custom_only() {
     let backend = EmbeddedBackend::open(&cfg(&dir)).await.unwrap();
     let site_id = Ulid::new();
     let now = Utc::now();
-    
+
     let mut ev_custom = make_event(site_id, "/a");
     ev_custom.timestamp = now;
     ev_custom.received_at = now;
     ev_custom.name = "__click__".into();
     ev_custom.kind = EventKind::Custom;
-    
+
     backend.ingest_events(vec![ev_custom]).await.unwrap();
     tokio::time::sleep(Duration::from_secs(2)).await;
 
@@ -124,6 +124,6 @@ async fn test_pageview_metrics_custom_only() {
         .await
         .unwrap();
 
-    assert_eq!(res.total_sessions, 0); 
-    assert_eq!(res.total_pageviews, 0); 
+    assert_eq!(res.total_sessions, 0);
+    assert_eq!(res.total_pageviews, 0);
 }

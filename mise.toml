@@ -68,6 +68,10 @@ run = "cargo clippy --all-targets --all-features -- -D warnings"
 description = "Run clippy with warnings denied and apply suggestions"
 run = "cargo clippy --allow-dirty --all-targets --all-features --fix -- -D warnings"
 
+[tasks.fix]
+description = "Fix formatting and lint issues"
+depends = ["fmt:fix", "lint:fix"]
+
 [tasks.test]
 description = "Run all Rust tests"
 run = "cargo nextest run --all --all-features"
