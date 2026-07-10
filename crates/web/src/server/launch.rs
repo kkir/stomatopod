@@ -83,6 +83,16 @@ async fn serve(cfg: Config) -> Result<()> {
             "auth.secret_key must be set. Set STOMATOPOD_AUTH__SECRET_KEY or add it to stomatopod.toml"
         );
     }
+    // Self-hosted is single-tenant / single-owner only. SaaS multi-org is not
+    // implemented; refuse so operators never run multi-tenant traffic on
+    // authz that assumes one admin for the whole instance.
+    if cfg.mode == Mode::Saas {
+        anyhow::bail!(
+            "mode = \"saas\" is not supported yet. Use the default self-hosted mode \
+             (single organization, single owner user). Multi-tenant SaaS is planned \
+             for a future release."
+        );
+    }
 
     let cfg = Arc::new(cfg);
 
@@ -175,6 +185,7 @@ async fn serve(cfg: Config) -> Result<()> {
         api_key_cache: Arc::new(DashMap::new()),
         geo,
         digest_sender,
+        login_failures: Arc::new(DashMap::new()),
     });
 
     // REST/ingest/auth router (no catch-all fallback).
@@ -237,6 +248,9 @@ fn load_config(path: &str) -> Result<Config> {
     Ok(cfg.try_deserialize()?)
 }
 
+/// Minimum length for the first-boot admin password.
+const MIN_ADMIN_PASSWORD_LEN: usize = 12;
+
 async fn bootstrap_self_hosted(
     meta: &Arc<dyn stomatopod_core::traits::MetaStore>,
     _cfg: &Config,
@@ -247,10 +261,37 @@ async fn bootstrap_self_hosted(
 
     let orgs = meta.list_orgs().await?;
     if !orgs.is_empty() {
+        // Self-hosted is a single-org appliance. Extra orgs (manual DB edits)
+        // are not used by the API (handlers take the first org); warn so
+        // operators know the second org is effectively dead weight.
+        if orgs.len() > 1 {
+            tracing::warn!(
+                org_count = orgs.len(),
+                "self-hosted mode expects a single organization; only the first is used"
+            );
+        }
         return Ok(());
     }
 
-    // Create default org
+    // First boot: require an explicit admin password. Never ship a known
+    // default like "changeme" — empty data dirs on the public internet would
+    // otherwise be takeable in one login attempt.
+    let password = match std::env::var("STOMATOPOD_ADMIN_PASSWORD") {
+        Ok(p) if p.len() >= MIN_ADMIN_PASSWORD_LEN => p,
+        Ok(_) => anyhow::bail!(
+            "STOMATOPOD_ADMIN_PASSWORD must be at least {MIN_ADMIN_PASSWORD_LEN} characters \
+             (first-boot admin user). Generate one with: openssl rand -base64 24"
+        ),
+        Err(_) => anyhow::bail!(
+            "First boot requires STOMATOPOD_ADMIN_PASSWORD (min {MIN_ADMIN_PASSWORD_LEN} chars). \
+             Example: export STOMATOPOD_ADMIN_PASSWORD=\"$(openssl rand -base64 24)\". \
+             Optional: STOMATOPOD_ADMIN_EMAIL (default admin@localhost)."
+        ),
+    };
+    let email =
+        std::env::var("STOMATOPOD_ADMIN_EMAIL").unwrap_or_else(|_| "admin@localhost".into());
+
+    // Create the single default org + owner user for this instance.
     let org = Organization {
         id: Ulid::new(),
         name: "Default Organization".into(),
@@ -259,11 +300,6 @@ async fn bootstrap_self_hosted(
         created_at: Utc::now(),
     };
     meta.create_org(&org).await?;
-
-    // Create admin user if STOMATOPOD_ADMIN_EMAIL/PASSWORD are set
-    let email =
-        std::env::var("STOMATOPOD_ADMIN_EMAIL").unwrap_or_else(|_| "admin@localhost".into());
-    let password = std::env::var("STOMATOPOD_ADMIN_PASSWORD").unwrap_or_else(|_| "changeme".into());
 
     let hash = hash_password(&password)?;
     let user = User {
@@ -276,7 +312,10 @@ async fn bootstrap_self_hosted(
     };
     meta.create_user(&user).await?;
 
-    info!("First-boot: created default org and admin user ({email})");
+    info!(
+        "First-boot: created single-tenant org and owner user ({email}). \
+         Self-hosted mode supports one owner account per instance."
+    );
     Ok(())
 }
 

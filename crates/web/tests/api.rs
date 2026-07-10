@@ -71,6 +71,7 @@ async fn setup_with_flush(flush_rows: usize, flush_interval_s: u64) -> TestCtx {
         auth: AuthConfig {
             secret_key: secret.clone(),
             session_ttl_s: 86400,
+            ..AuthConfig::default()
         },
         ..Config::default()
     });
@@ -89,6 +90,7 @@ async fn setup_with_flush(flush_rows: usize, flush_interval_s: u64) -> TestCtx {
         api_key_cache: Arc::new(DashMap::new()),
         geo: Arc::new(GeoLookup::new(None)),
         digest_sender: Arc::new(digest_sink.clone()),
+        login_failures: Arc::new(DashMap::new()),
     });
 
     TestCtx {
@@ -345,15 +347,22 @@ async fn webhook_alert_delivered_to_mock_sink() {
     };
 
     let sink = WebhookSink::new(reqwest::Client::new());
-    sink.dispatch(&channel, &incident).await.unwrap();
-
-    let body = received
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("webhook never received the alert");
-    assert_eq!(body["agent_id"], "analytics");
-    assert_eq!(body["trigger_kind"], "analytics_alert");
+    // Loopback destinations are rejected by SSRF hardening before the HTTP call.
+    let err = sink
+        .dispatch(&channel, &incident)
+        .await
+        .expect_err("loopback webhook must be blocked");
+    assert!(
+        err.to_string().contains("not publicly routable")
+            || err.to_string().contains("not allowed"),
+        "unexpected error: {err}"
+    );
+    assert!(
+        received.lock().unwrap().is_none(),
+        "SSRF block must prevent delivery"
+    );
+    // Payload shape is still covered by unit tests on incident_payload.
+    let _ = incident;
 }
 
 #[tokio::test]
@@ -395,7 +404,7 @@ async fn api_sites_accepts_valid_bearer_token() {
     ctx.backend.meta.create_org(&org).await.unwrap();
 
     let user_id = Ulid::new().to_string();
-    let token = sign_session(&ctx.secret, &user_id);
+    let token = sign_session(&ctx.secret, &user_id, 3600);
 
     let req = Request::builder()
         .uri("/api/v1/sites")
@@ -434,7 +443,7 @@ async fn api_sites_rejects_tampered_token() {
 async fn api_site_not_found_returns_404() {
     let ctx = setup().await;
     let user_id = Ulid::new().to_string();
-    let token = sign_session(&ctx.secret, &user_id);
+    let token = sign_session(&ctx.secret, &user_id, 3600);
 
     let req = Request::builder()
         .uri("/api/v1/sites/nonexistent.example.com/pageviews")
@@ -455,7 +464,7 @@ async fn api_pageviews_resolves_known_site() {
     ctx.backend.meta.create_site(&site).await.unwrap();
 
     let user_id = Ulid::new().to_string();
-    let token = sign_session(&ctx.secret, &user_id);
+    let token = sign_session(&ctx.secret, &user_id, 3600);
 
     let req = Request::builder()
         .uri(format!("/api/v1/sites/{}/pageviews", site.domain))
@@ -477,7 +486,7 @@ async fn site_and_token(ctx: &TestCtx) -> (Site, String) {
     ctx.backend.meta.create_org(&org).await.unwrap();
     let site = make_site(org.id);
     ctx.backend.meta.create_site(&site).await.unwrap();
-    let token = sign_session(&ctx.secret, &Ulid::new().to_string());
+    let token = sign_session(&ctx.secret, &Ulid::new().to_string(), 3600);
     (site, token)
 }
 
@@ -928,6 +937,102 @@ async fn read_key_rejects_unknown_key() {
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
+#[tokio::test]
+async fn read_key_cannot_create_share_link() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let (key, plaintext) =
+        stomatopod_core::domain::api_key::ApiKey::new_read(org.id, None, "agent".into());
+    ctx.backend.meta.create_api_key(&key).await.unwrap();
+
+    let (status, json) = send_json(
+        ctx.state.clone(),
+        "POST",
+        &format!("/api/v1/sites/{}/share-links", site.id),
+        &plaintext,
+        Some(serde_json::json!({"label": "nope"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "got {json}");
+}
+
+#[tokio::test]
+async fn read_key_cannot_create_analytics_alert() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let (key, plaintext) =
+        stomatopod_core::domain::api_key::ApiKey::new_read(org.id, None, "agent".into());
+    ctx.backend.meta.create_api_key(&key).await.unwrap();
+
+    let (status, json) = send_json(
+        ctx.state.clone(),
+        "POST",
+        &format!("/api/v1/sites/{}/analytics-alerts", site.id),
+        &plaintext,
+        Some(serde_json::json!({
+            "type": "traffic_spike",
+            "threshold": 100.0,
+            "channel_id": Ulid::new().to_string()
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "got {json}");
+}
+
+#[tokio::test]
+async fn expired_session_bearer_is_rejected() {
+    let ctx = setup().await;
+    // Craft a correctly signed but already-expired token.
+    let exp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .saturating_sub(60);
+    let user_id = Ulid::new().to_string();
+    let payload = format!("{user_id}.{exp}");
+    let key = blake3::derive_key("stomatopod session signing key v1", ctx.secret.as_bytes());
+    let mac = blake3::keyed_hash(&key, payload.as_bytes());
+    let token = format!("{payload}.{}", hex::encode(&mac.as_bytes()[..16]));
+
+    let req = Request::builder()
+        .uri("/api/v1/sites")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn responses_include_security_headers() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/tracker.js")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        resp.headers()
+            .get("x-content-type-options")
+            .and_then(|v| v.to_str().ok()),
+        Some("nosniff")
+    );
+    assert_eq!(
+        resp.headers()
+            .get("x-frame-options")
+            .and_then(|v| v.to_str().ok()),
+        Some("DENY")
+    );
+    assert!(resp.headers().get("content-security-policy").is_some());
+}
+
 // ---- Docs ----
 
 #[tokio::test]
@@ -1248,7 +1353,9 @@ async fn analytics_alert_fires_records_and_respects_cooldown() {
     let telegram = TelegramSink::new(client);
     let now = Utc::now();
 
-    // First evaluation fires + records.
+    // First evaluation fires + records. Loopback destinations are blocked by
+    // SSRF checks, so delivery itself must not succeed - we only assert the
+    // fire was recorded and cooldown engages.
     let fired = process_alert(&alert, &backend, &meta, &webhook, &slack, &telegram, now).await;
     assert!(fired, "negative-threshold referrer alert should fire");
     let last = ctx
@@ -1259,12 +1366,13 @@ async fn analytics_alert_fires_records_and_respects_cooldown() {
         .unwrap();
     assert!(last.is_some(), "fire should be recorded");
 
-    // Wait for the async webhook delivery.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    while *received.lock().unwrap() == 0 && std::time::Instant::now() < deadline {
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    assert_eq!(*received.lock().unwrap(), 1, "webhook delivered once");
+    // Give any accidental dispatch a moment; loopback must stay undelivered.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_eq!(
+        *received.lock().unwrap(),
+        0,
+        "loopback webhook must be blocked by SSRF checks"
+    );
 
     // Second evaluation within the hour is suppressed by cooldown.
     let again = process_alert(&alert, &backend, &meta, &webhook, &slack, &telegram, now).await;
@@ -1453,7 +1561,7 @@ async fn site_user_and_token(ctx: &TestCtx) -> (Site, stomatopod_core::domain::o
 async fn digest_subscription_crud_and_test_send() {
     let ctx = setup().await;
     let (site, user) = site_user_and_token(&ctx).await;
-    let token = sign_session(&ctx.secret, &user.id.to_string());
+    let token = sign_session(&ctx.secret, &user.id.to_string(), 3600);
 
     // No subscription initially.
     let (status, json) = get_json(

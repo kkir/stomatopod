@@ -14,11 +14,15 @@ pub fn Shell() -> Element {
     use_effect(move || hydrated.set(true));
 
     rsx! {
+        // `h-dvh` + `min-h-0` on main make main the real scrollport. Without
+        // a fixed-height ancestor, `overflow-y-auto` never clips and sticky
+        // sub-navs (docs TOC) fail to stick because they sit inside a tall
+        // overflow box that does not scroll.
         div {
-            class: "grid grid-cols-[232px_minmax(0,1fr)] min-h-screen bg-bg font-ui text-text-1",
+            class: "grid grid-cols-[232px_minmax(0,1fr)] h-dvh bg-bg font-ui text-text-1",
             "data-hydrated": if hydrated() { "true" },
             Sidebar {}
-            main { class: "main min-w-0 overflow-y-auto",
+            main { class: "main min-w-0 min-h-0 overflow-y-auto",
                 div { class: "container mx-auto max-w-[1200px] px-f4 pt-8 pb-16",
                     Outlet::<Route> {}
                 }

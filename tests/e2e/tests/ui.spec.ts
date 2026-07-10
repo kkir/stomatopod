@@ -77,18 +77,33 @@ test("a created site appears and its overview loads", async ({ page }) => {
   // Navigate straight to the overview route (client-side routing).
   await page.goto(`${UI}/sites/${siteId}`);
   await waitForSpa(page);
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  // The hero stat tiles render even with zero data.
+  // Site tab "Overview" is the active insight tab; hero stats render even with zero data.
+  await expect(page.getByRole("link", { name: "Overview" })).toBeVisible();
   await expect(page.getByText("Pageviews", { exact: true })).toBeVisible();
   await expect(page.getByText("Bounce Rate", { exact: true })).toBeVisible();
-  // Entry/exit panels + export links (ported from legacy tier2 coverage).
+  // Progressive layout: tabbed breakdown cards instead of a wall of tables.
+  // `exact: true` so "Pages" does not also match empty-state "No pages yet".
   await expect(
-    page.getByRole("heading", { name: "Entry Pages" }),
+    page.getByRole("heading", { name: "Pages", exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Exit Pages" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Export" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Sources", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Locations", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Technology", exact: true }),
+  ).toBeVisible();
+  // Entry/exit live under Pages dimension tabs (not always mounted).
+  await page.getByRole("button", { name: "Entry", exact: true }).click();
+  await expect(page.getByText("No Entry pages yet")).toBeVisible();
+  await page.getByRole("button", { name: "Exit", exact: true }).click();
+  await expect(page.getByText("No Exit pages yet")).toBeVisible();
+  // Export is behind a disclosure control, not a permanent card.
+  await page.getByRole("button", { name: "Export", exact: true }).click();
   await expect(page.getByRole("link", { name: "Events CSV" })).toBeVisible();
-  // Breakdown panels carry the CSV export link (literal `csv-btn` class).
+  // Active dimension cards expose a compact CSV link.
   await expect(page.locator("a.csv-btn").first()).toBeVisible();
   await expect(page.locator("body")).not.toContainText("Failed to load");
 });
@@ -205,8 +220,10 @@ test("an alert channel can be added and an alert created", async ({ page }) => {
     .allInnerTexts();
   expect(kinds.join(" ").toLowerCase()).toContain("telegram");
 
-  // Add a webhook channel.
-  const hookUrl = `https://hooks.e2e.test/${Date.now().toString(36)}`;
+  // Add a webhook channel. Host must resolve to a public address so the
+  // server's SSRF checks accept it (fake TLDs like .e2e.test fail DNS and
+  // are rejected as invalid destinations).
+  const hookUrl = `https://example.com/hooks/${Date.now().toString(36)}`;
   await page.getByPlaceholder("Webhook URL / chat id").fill(hookUrl);
   await page.getByRole("button", { name: "Add channel" }).click();
   // The URL shows both in the channel list and later in the alert form's

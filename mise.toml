@@ -41,6 +41,10 @@ CONFIG="$PWD/stomatopod.toml"
 cd crates/web && dx serve --platform web @server --args="--config $CONFIG serve"
 """
 
+[tasks.seed]
+description = "Seed the running dev server with demo analytics traffic (pageviews + custom events)"
+run = "cargo run -q -p stomatopod-seed --"
+
 [tasks."dev:watch"]
 description = "Run the dev server with file watching (rebuild the client separately via `mise run ui:build`)"
 run = """

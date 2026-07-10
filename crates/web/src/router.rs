@@ -8,7 +8,7 @@ use axum::{
 use tower_http::{compression::CompressionLayer, trace::TraceLayer};
 
 use crate::{
-    middleware::{auth::require_api_auth, cors::ingest_cors},
+    middleware::{auth::require_api_auth, cors::ingest_cors, security_headers::security_headers},
     routes::{analytics, api, api_keys, auth, digest, insights, share_links, sites},
     state::AppState,
 };
@@ -17,6 +17,9 @@ use crate::{
 /// pages. The Dioxus application itself (SSR + hydration + static assets) is
 /// merged on top of this by [`crate::server::serve`], which owns the catch-all
 /// fallback.
+///
+/// There is intentionally no public user-registration or org-creation route:
+/// self-hosted mode is a single-owner appliance bootstrapped at first start.
 pub fn build_router(state: Arc<AppState>) -> Router {
     // Public ingest routes (CORS-enabled)
     let ingest_routes = Router::new()
@@ -193,6 +196,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     Router::new()
         .merge(compressed)
+        .layer(middleware::from_fn(security_headers))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

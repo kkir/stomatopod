@@ -207,10 +207,7 @@ pub async fn run_analytics_alert_evaluator(
     backend: Arc<dyn StorageBackend>,
     period: Duration,
 ) {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .expect("reqwest client");
+    let client = super::sinks::alert_http_client();
     let webhook = WebhookSink::new(client.clone());
     let slack = SlackSink::new(client.clone());
     let telegram = TelegramSink::new(client);

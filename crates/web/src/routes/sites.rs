@@ -144,23 +144,22 @@ pub async fn patch_site_api(
         site_row.is_active = active;
     }
     match state.meta.update_site(&site_row).await {
-        Ok(_) => Json(site_json(&site_row)).into_response(),
+        Ok(_) => {
+            // Evict any cached public key so deactivate / key rotation take
+            // effect without waiting for a process restart.
+            state.site_cache.retain(|_, id| *id != site_id);
+            if !site_row.is_active {
+                state.site_cache.retain(|k, _| k != &site_row.public_key);
+            }
+            Json(site_json(&site_row)).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
 fn generate_api_key() -> String {
-    use blake3::Hasher;
-    let mut h = Hasher::new();
-    h.update(&Ulid::new().to_bytes());
-    h.update(
-        &std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-            .to_le_bytes(),
-    );
-    let hash = h.finalize();
-    // 32 hex chars = 128 bits of entropy
-    hex::encode(&hash.as_bytes()[..16])
+    // 32 hex chars = 128 bits of OS CSPRNG entropy (public site key for beacons).
+    let mut raw = [0u8; 16];
+    getrandom::getrandom(&mut raw).expect("OS RNG");
+    hex::encode(raw)
 }

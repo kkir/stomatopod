@@ -25,8 +25,14 @@ named volume:
 
 ```bash
 export STOMATOPOD_AUTH__SECRET_KEY="$(openssl rand -hex 32)"
+export STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)"
+# optional: STOMATOPOD_ADMIN_EMAIL=you@example.com
 docker compose up -d
 ```
+
+Self-hosted Stomatopod is a **single-owner appliance**: one organization and
+one admin user per instance (many sites under that org are fine). Multi-tenant
+SaaS mode is not supported yet.
 
 Redeploy to a new image without losing data:
 
@@ -45,6 +51,7 @@ Use a **named volume** (or a host bind mount) for `/app/data`:
 docker run -d \
   -p 8080:8080 \
   -e STOMATOPOD_AUTH__SECRET_KEY="$(openssl rand -hex 32)" \
+  -e STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)" \
   -v stomatopod_data:/app/data \
   ghcr.io/kkir/stomatopod:latest
 ```
@@ -105,8 +112,21 @@ url = "postgresql://user:pass@host:5432/stomatopod"
 
 - `STOMATOPOD_AUTH__SECRET_KEY` — required; a long random string used to sign
   sessions. The server refuses to start without it.
+- `STOMATOPOD_ADMIN_PASSWORD` — required on **first boot** (empty data dir);
+  min 12 characters. Creates the single owner account. Optional
+  `STOMATOPOD_ADMIN_EMAIL` (default `admin@localhost`).
 - `STOMATOPOD_BASE_URL` — public URL for share links and email digests
-  (e.g. `https://analytics.example.com`).
+  (e.g. `https://analytics.example.com`). Set this to an `https://` URL so the
+  session cookie is marked `Secure`, or set `STOMATOPOD_AUTH__COOKIE_SECURE=true`.
+
+### Optional security knobs
+
+- `STOMATOPOD_AUTH__TRUST_FORWARDED_HEADERS` — default `true`. Set `false` if
+  the process is exposed directly to the internet without a reverse proxy, so
+  clients cannot spoof `X-Forwarded-For` / `X-Real-IP` for geo and session
+  derivation.
+- `STOMATOPOD_AUTH__COOKIE_SECURE` — force the session cookie `Secure` flag
+  on/off instead of inferring from `base_url`.
 
 See [`stomatopod.example.toml`](./stomatopod.example.toml) for the full reference.
 

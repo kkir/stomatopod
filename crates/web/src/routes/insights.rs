@@ -20,7 +20,10 @@ use stomatopod_core::domain::{
 };
 
 use crate::{
-    alerts::sinks::{AlertSink, SlackSink, TelegramSink, WebhookSink},
+    alerts::{
+        sinks::{alert_http_client, AlertSink, SlackSink, TelegramSink, WebhookSink},
+        validate_outbound_url,
+    },
     middleware::auth::Principal,
     state::AppState,
 };
@@ -41,10 +44,7 @@ async fn dispatch_test_notification(site_id: Ulid, channel: &AlertChannel) -> Re
         opened_at: Utc::now(),
         closed_at: None,
     };
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .unwrap_or_default();
+    let client = alert_http_client();
     let webhook = WebhookSink::new(client.clone());
     let slack = SlackSink::new(client.clone());
     let telegram = TelegramSink::new(client);
@@ -148,6 +148,14 @@ pub async fn create_channel_api(
     let url = body.url.trim().to_string();
     if url.is_empty() {
         return bad_request("destination is required");
+    }
+    // Telegram stores a chat id in `url`, not an HTTP endpoint - skip SSRF
+    // checks (dispatch always posts to api.telegram.org). Webhook/Slack
+    // destinations are fetched by the server and must be public HTTPS/HTTP.
+    if kind != AlertChannelKind::Telegram {
+        if let Err(e) = validate_outbound_url(&url) {
+            return bad_request(&format!("invalid destination: {e}"));
+        }
     }
     let secret = body
         .secret
