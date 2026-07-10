@@ -125,9 +125,9 @@ impl EmbeddedReader {
 
         // `timestamp` is a reserved keyword in DataFusion's SQL parser (it
         // expects `timestamp '2024-...'` literal syntax after it); quote the
-        // column to force identifier parsing. We also avoid the `FILTER
-        // (WHERE ...)` aggregate clause, which the parser rejects — `CASE
-        // WHEN ... THEN 1 END` is equivalent.
+        // column to force identifier parsing. By strictly pre-filtering on
+        // `kind = 'pageview'`, we can use standard `COUNT(*)` and avoid conditional
+        // aggregate hacks.
         //
         // Each aggregate is wrapped in `CAST(... AS BIGINT)` so the read
         // side can rely on a single `Int64Array` downcast — DataFusion
@@ -138,12 +138,13 @@ impl EmbeddedReader {
             r#"
             SELECT
                 date_trunc('{granularity_fn}', "timestamp") AS bucket,
-                CAST(SUM(CASE WHEN kind = 'pageview' THEN 1 ELSE 0 END) AS BIGINT) AS pageviews,
+                CAST(COUNT(*) AS BIGINT) AS pageviews,
                 CAST(COUNT(DISTINCT session_id) AS BIGINT) AS sessions
             FROM {table}
             WHERE site_id = '{site_id}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
+              AND CAST(kind AS VARCHAR) = 'pageview'
               {filters}
             GROUP BY 1
             ORDER BY 1

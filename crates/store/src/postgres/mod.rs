@@ -147,10 +147,11 @@ impl StorageBackend for PostgresBackend {
         let (filter_sql, filter_vals) = pg_filter_clause(&q.filters, 4);
         let sql = format!(
             "SELECT date_trunc('{bucket}', timestamp) AS bucket, \
-                    COUNT(*) FILTER (WHERE kind = 'pageview')::BIGINT AS pageviews, \
+                    COUNT(*)::BIGINT AS pageviews, \
                     COUNT(DISTINCT session_id)::BIGINT AS sessions \
              FROM events \
-             WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 {filter_sql} \
+             WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
+               AND kind = 'pageview' {filter_sql} \
              GROUP BY 1 ORDER BY 1"
         );
         let mut query = sqlx::query(&sql)
