@@ -204,6 +204,63 @@ async fn tracker_js_body_contains_function() {
     );
 }
 
+/// Source-level contracts for regressions that previously shipped:
+/// scroll/replaceState spam, missing load pageview (wrong endpoint), etc.
+#[tokio::test]
+async fn tracker_js_has_pageview_and_endpoint_guards() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/tracker.js")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+
+    // Initial pageview path exists (not SPA-only).
+    assert!(
+        body.contains("trackInitial") || body.contains("visibilityState"),
+        "tracker should fire an initial pageview (possibly deferred on prerender)"
+    );
+
+    // Path+query dedupe so hash-only replaceState (scroll-spy) does not spam.
+    assert!(
+        body.contains("pathname") && body.contains("search"),
+        "tracker should key pageviews on pathname+search to ignore hash-only updates"
+    );
+    assert!(
+        body.contains("lastPath"),
+        "tracker should remember the last counted path for dedupe"
+    );
+
+    // Prefer data-api; otherwise derive from script.src origin (not page origin).
+    assert!(
+        body.contains("data-api") && body.contains("script.src"),
+        "tracker should read data-api and fall back to script.src origin"
+    );
+    assert!(
+        body.contains("/api/v1/event"),
+        "default ingest path must be /api/v1/event"
+    );
+
+    // SPA hooks still present.
+    assert!(body.contains("pushState"), "must hook history.pushState");
+    assert!(
+        body.contains("replaceState"),
+        "must hook history.replaceState"
+    );
+    assert!(body.contains("popstate"), "must listen for popstate");
+
+    // Double-include and pre-load queue.
+    assert!(
+        body.contains(".l") || body.contains("stomatopod.l"),
+        "must guard against double initialization"
+    );
+    assert!(
+        body.contains("Array.isArray"),
+        "must drain a pre-load stomatopod.push queue"
+    );
+}
+
 // ---- Ingest endpoint ----
 
 #[tokio::test]
@@ -1053,6 +1110,37 @@ async fn llms_txt_is_public_markdown() {
     let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
     assert!(body.contains("Stomatopod Documentation"));
     assert!(body.contains("/api/v1/ingest"));
+}
+
+/// Install snippet must show both data-site and data-api so copy-paste works
+/// cross-origin (page origin != analytics host).
+#[tokio::test]
+async fn llms_txt_install_snippet_includes_data_api() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/llms.txt")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+
+    assert!(
+        body.contains("data-api="),
+        "docs install snippet must include data-api"
+    );
+    assert!(
+        body.contains("data-site="),
+        "docs install snippet must include data-site"
+    );
+    assert!(
+        body.contains("data-api=\"https://your-host/api/v1/event\"")
+            || body.contains("data-api='https://your-host/api/v1/event'"),
+        "docs should show a full absolute data-api URL in the install example"
+    );
+    assert!(
+        body.contains("/tracker.js"),
+        "docs should reference /tracker.js"
+    );
 }
 
 // ---- Tier-2 analytics endpoints ----

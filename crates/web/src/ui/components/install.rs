@@ -19,8 +19,9 @@ pub fn InstallCard(public_key: String, domain: String, prominent: bool) -> Eleme
     } else {
         host
     };
-    let snippet =
-        format!("<script defer src=\"{src_host}/tracker.js\" data-site=\"{public_key}\"></script>");
+    let snippet = format!(
+        "<script defer src=\"{src_host}/tracker.js\" data-api=\"{src_host}/api/v1/event\" data-site=\"{public_key}\"></script>"
+    );
 
     let title = if prominent {
         "Start collecting analytics"
@@ -54,7 +55,7 @@ pub fn InstallCard(public_key: String, domain: String, prominent: bool) -> Eleme
 
             div { class: "flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-1 text-[12px]",
                 span {
-                    "data-site is your public key - safe to expose; it only authorizes writing to this site."
+                    "data-site is your public key (safe to expose); data-api is the ingest endpoint on this host."
                 }
                 Link {
                     class: "text-teal-hi underline whitespace-nowrap",
