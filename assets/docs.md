@@ -112,7 +112,10 @@ load and on client-side route changes. No cookies are set and no cross-site
 identifier is used.
 
 ```html
-<script defer src="https://your-host/tracker.js" data-site="YOUR_PUBLIC_KEY"></script>
+<script defer
+  src="https://your-host/tracker.js"
+  data-api="https://your-host/api/v1/event"
+  data-site="YOUR_PUBLIC_KEY"></script>
 ```
 
 `data-site` is the site's **public key** (the `Public Key` shown on the site's
@@ -122,6 +125,10 @@ pageviews and events to that one site through the public `POST /api/v1/event`
 endpoint, and grants no read or cross-site access. The tracker resolves the
 site from this key, so you never pass a site id.
 
+`data-api` is the full event ingest URL on your Stomatopod host. Always set it
+alongside `data-site` so beacons go to the analytics server rather than the
+page's own origin.
+
 The script is served with a one-day immutable cache, so reference it directly
 from your host rather than copying its contents.
 
@@ -130,19 +137,27 @@ from your host rather than copying its contents.
 | Attribute        | Effect                                                                                      |
 |------------------|---------------------------------------------------------------------------------------------|
 | `data-site`      | **Required.** Site public key. The tracker no-ops if it is missing.                         |
-| `data-api`       | Override the event endpoint (default `/api/v1/event`) — e.g. when the tracker and API are on different hosts. |
+| `data-api`       | **Recommended.** Full event endpoint URL (e.g. `https://your-host/api/v1/event`). If omitted, the tracker derives `{script origin}/api/v1/event` from the script `src`. |
 | `data-exclude`   | Disable the tracker for this page load entirely (handy for staging/admin pages).            |
 
 ### Behavior
 
-- A `pageview` is sent on initial load and on every SPA navigation the tracker
-  intercepts (`history.pushState` / `replaceState` and `popstate`).
+- A `pageview` is sent on initial load (or when the tab becomes visible if the
+  page was prerendered / opened in the background) and on SPA navigations the
+  tracker intercepts (`history.pushState` / `replaceState` and `popstate`).
+- SPA pageviews only fire when `pathname` or `search` changes. Hash-only
+  updates (common for scroll-spy section links) and other same-URL
+  `replaceState` calls are ignored, so scrolling does not spam pageviews.
+- Consecutive navigations to the same path+query are deduplicated.
+- Restores from the back/forward cache (`pageshow` with `persisted`) count as
+  a fresh pageview.
 - Every beacon carries the current URL, referrer, screen size, and browser
   language; UTM parameters are parsed from the URL server-side.
 - Beacons use `navigator.sendBeacon` when available (falling back to
   `fetch(..., {keepalive:true})`), so they survive page unload.
 - **Do Not Track is honored:** if the browser reports
   `navigator.doNotTrack === "1"`, the tracker sends nothing.
+- Loading the script twice is a no-op after the first init.
 
 ### Manual events from the browser
 
@@ -151,6 +166,13 @@ Once loaded, the tracker exposes a global helper for your own custom events
 
 ```js
 stomatopod("event", "signup", { plan: "pro" });
+```
+
+You can also queue calls before the script loads:
+
+```js
+window.stomatopod = window.stomatopod || [];
+stomatopod.push(["event", "signup", { plan: "pro" }]);
 ```
 
 The first argument is always `"event"`, followed by the event name and an
