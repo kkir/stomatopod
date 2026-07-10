@@ -5519,6 +5519,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "stomatopod-seed"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "rand 0.8.6",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "stomatopod-store"
 version = "0.1.0"
 dependencies = [
@@ -5589,6 +5603,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ulid",
+ "wasm-bindgen",
  "web-sys",
 ]
 

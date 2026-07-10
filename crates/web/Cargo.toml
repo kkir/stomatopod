@@ -98,7 +98,20 @@ clap = { workspace = true, optional = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-net = "0.6"
 gloo-timers = { version = "0.3", features = ["futures"] }
-web-sys = { version = "0.3", features = ["Window", "Location", "RequestCredentials"] }
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Location",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "DomRect",
+    "Event",
+    "EventTarget",
+    "Node",
+    "NodeList",
+    "RequestCredentials",
+] }
 getrandom-v3 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]

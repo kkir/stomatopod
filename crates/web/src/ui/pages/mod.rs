@@ -36,7 +36,7 @@ pub(crate) const CTRL_INPUT: &str = "bg-black/32 border border-border-2 text-tex
 
 use crate::ui::api::get_json;
 use crate::ui::components::pill::FilterPill;
-use crate::ui::query::DashQuery;
+use crate::ui::query::{humanize_filter, DashQuery};
 use crate::ui::routes::Route;
 use crate::ui::types::SitesList;
 
@@ -89,7 +89,7 @@ pub(crate) fn active_filters(route: &Route, q: &DashQuery) -> Element {
                 for filter in q.filters.clone() {
                     FilterPill {
                         key: "{filter}",
-                        label: filter.clone(),
+                        label: humanize_filter(&filter),
                         on_remove: {
                             let route = route.clone();
                             let q = q.clone();

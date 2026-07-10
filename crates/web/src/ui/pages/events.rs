@@ -27,11 +27,10 @@ pub fn Events(site_id: String, q: DashQuery) -> Element {
 
     let csv_href = Some(site_csv_url(&site_id, "events", &qs));
 
-    let site_id_for_resource = site_id.clone();
-    let events = use_resource(move || {
-        let path = site_api_url(&site_id_for_resource, "events", &qs);
-        async move { api::get_json::<TopList>(&path).await }
-    });
+    let events = use_resource(use_reactive!(|site_id, qs| async move {
+        let path = site_api_url(&site_id, "events", &qs);
+        api::get_json::<TopList>(&path).await
+    }));
 
     let body = match &*events.read() {
         None => rsx! { Skeleton { lines: 4 } },
