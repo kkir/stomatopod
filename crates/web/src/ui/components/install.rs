@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 
 use crate::ui::api::origin;
 use crate::ui::components::card::Card;
-use crate::ui::routes::Route;
+use crate::ui::docs_anchors::{docs_href, INSTALLING_THE_BROWSER_TRACKER};
 
 /// The tracker install card shown on a site's overview: the one-line script
 /// snippet (pre-filled with this site's public key and this dashboard's
@@ -57,9 +57,9 @@ pub fn InstallCard(public_key: String, domain: String, prominent: bool) -> Eleme
                 span {
                     "data-site is your public key (safe to expose); data-api is the ingest endpoint on this host."
                 }
-                Link {
+                a {
                     class: "text-teal-hi underline whitespace-nowrap",
-                    to: Route::Docs {},
+                    href: "{docs_href(INSTALLING_THE_BROWSER_TRACKER)}",
                     "Full setup guide \u{2192}"
                 }
             }

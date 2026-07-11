@@ -16,10 +16,17 @@ pub struct SiteSummary {
     pub id: String,
     pub domain: String,
     pub name: String,
+    /// IANA timezone (e.g. `America/New_York`). Defaulted for older shapes.
+    #[serde(default = "default_timezone")]
+    pub timezone: String,
     /// The site's public tracker key, embedded in the browser snippet's
     /// `data-site`. Present in the list response; defaulted for older shapes.
     #[serde(default)]
     pub public_key: String,
+}
+
+fn default_timezone() -> String {
+    "UTC".into()
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]

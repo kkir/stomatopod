@@ -32,7 +32,12 @@ use dioxus::prelude::*;
 /// e.g. `type="submit"` or `<a>` links) stay visually consistent.
 pub(crate) const BTN_PRIMARY: &str = "inline-flex items-center gap-1.5 px-[15px] py-2 rounded-[10px] text-[13px] font-semibold tracking-tight cursor-pointer bg-grad-btn text-[#032621] shadow-glow";
 pub(crate) const BTN_GHOST: &str = "inline-flex items-center gap-1.5 px-[13px] py-1.5 rounded-[10px] text-[12px] font-semibold tracking-tight cursor-pointer bg-text-1/3 text-text-2 border border-border-2 shadow-inner-hi hover:text-text-1 no-underline";
+/// Quiet action for the site-tab bar (filter / export) - lighter than BTN_GHOST.
+pub(crate) const BTN_TAB_ACTION: &str = "inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-[12px] font-semibold tracking-tight cursor-pointer text-muted-1 hover:text-text-1 hover:bg-text-1/5 border border-transparent hover:border-border-1 transition-colors";
+pub(crate) const BTN_TAB_ACTION_ON: &str = "inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-[12px] font-semibold tracking-tight cursor-pointer text-teal-hi bg-teal-soft border border-teal/25";
 pub(crate) const CTRL_INPUT: &str = "bg-black/32 border border-border-2 text-text-1 rounded-[10px] px-3 py-2 text-[13px] shadow-inner-hi focus:outline-none focus:border-teal/55";
+/// Compact control matching range-tab height (page-head toolbar).
+pub(crate) const CTRL_TOOLBAR: &str = "h-9 inline-flex items-center bg-surface-2/80 border border-border-1 text-text-1 rounded-[11px] px-3.5 text-[12.5px] font-semibold shadow-inner-hi focus:outline-none focus:border-teal/55 cursor-pointer hover:text-text-1 appearance-none";
 
 use crate::ui::api::get_json;
 use crate::ui::components::pill::FilterPill;

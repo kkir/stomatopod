@@ -13,15 +13,18 @@ pub fn RangeTabs(active: String) -> Element {
     let route = use_route::<Route>();
     let current = route.query().cloned().unwrap_or_default();
     rsx! {
-        div { class: "inline-flex gap-0.5 p-[3px] rounded-[11px] bg-surface-2/80 border border-border-1 shadow-inner-hi",
+        div {
+            class: "inline-flex items-center h-9 gap-0.5 p-[3px] rounded-[11px] bg-surface-2/80 border border-border-1 shadow-inner-hi shrink-0",
+            role: "tablist",
+            "aria-label": "Date range",
             for range in RANGES {
                 Link {
                     key: "{range}",
                     to: route.with_query(current.with_range(range)),
                     class: if active == range {
-                        "px-3 py-1.5 rounded-lg text-xs font-semibold bg-grad-btn text-[#032621] shadow-[inset_0_1px_0_rgba(255,255,255,.35),0_1px_6px_rgba(45,212,191,.45)]"
+                        "inline-flex items-center justify-center h-full min-w-[2.65rem] px-3.5 rounded-[8px] text-[12.5px] font-semibold bg-grad-btn text-[#032621] shadow-[inset_0_1px_0_rgba(255,255,255,.35),0_1px_6px_rgba(45,212,191,.45)] no-underline"
                     } else {
-                        "px-3 py-1.5 rounded-lg text-xs font-semibold text-muted-1 hover:text-text-1"
+                        "inline-flex items-center justify-center h-full min-w-[2.65rem] px-3.5 rounded-[8px] text-[12.5px] font-semibold text-muted-1 hover:text-text-1 no-underline"
                     },
                     "{range}"
                 }
@@ -48,8 +51,11 @@ pub enum SiteTab {
 /// Insight tabs (Overview, Events, Funnels, Campaigns) carry the full
 /// [`DashQuery`] so range, filters, and compare survive navigation.
 /// Management tabs (Alerts, Keys, Settings) stay query-free.
+///
+/// Optional `children` render on the right of the tab strip (e.g. filter /
+/// export on Overview) so secondary actions do not take a full row below.
 #[component]
-pub fn SiteTabs(site_id: String, range: String, active: SiteTab) -> Element {
+pub fn SiteTabs(site_id: String, range: String, active: SiteTab, children: Element) -> Element {
     let route = use_route::<Route>();
     let current = route.query().cloned().unwrap_or_else(|| DashQuery {
         range: Some(range.clone()),
@@ -120,18 +126,25 @@ pub fn SiteTabs(site_id: String, range: String, active: SiteTab) -> Element {
         ),
     ];
     rsx! {
-        div { class: "flex gap-f4 border-b border-border-1 mb-7 relative",
-            for (tab , label , to) in tabs {
-                Link {
-                    key: "{label}",
-                    to,
-                    class: if tab == active {
-                        "pb-[11px] text-[13.5px] font-medium text-text-1 relative after:content-[''] after:absolute after:left-0 after:right-0 after:-bottom-px after:h-0.5 after:rounded-full after:bg-iri after:shadow-[0_0_10px_rgba(45,212,191,0.55)]"
-                    } else {
-                        "pb-[11px] text-[13.5px] font-medium text-muted-1 hover:text-text-2"
-                    },
-                    "{label}"
+        div { class: "flex items-end justify-between gap-4 border-b border-border-1 mb-8",
+            nav {
+                class: "flex gap-5 sm:gap-6 min-w-0 overflow-x-auto scrollbar-none",
+                "aria-label": "Site sections",
+                for (tab , label , to) in tabs {
+                    Link {
+                        key: "{label}",
+                        to,
+                        class: if tab == active {
+                            "shrink-0 pb-[11px] text-[13.5px] font-medium text-text-1 relative after:content-[''] after:absolute after:left-0 after:right-0 after:-bottom-px after:h-0.5 after:rounded-full after:bg-iri after:shadow-[0_0_10px_rgba(45,212,191,0.55)]"
+                        } else {
+                            "shrink-0 pb-[11px] text-[13.5px] font-medium text-muted-1 hover:text-text-2"
+                        },
+                        "{label}"
+                    }
                 }
+            }
+            div { class: "flex items-center gap-1.5 shrink-0 pb-1.5",
+                {children}
             }
         }
     }
@@ -173,8 +186,8 @@ pub fn TabbedCard(
     children: Element,
 ) -> Element {
     rsx! {
-        div { class: "relative bg-surface-1 border border-border-1 rounded-lg p-f3 shadow-sm shadow-inner-hi",
-            div { class: "flex justify-between items-center mb-3 gap-3 flex-wrap",
+        div { class: "relative bg-surface-1 border border-border-1 rounded-xl p-5 sm:p-6 shadow-sm shadow-inner-hi",
+            div { class: "flex justify-between items-center mb-4 gap-3 flex-wrap",
                 h2 { class: "inline-flex items-center gap-2.5 text-[15px] font-semibold tracking-tight text-text-1",
                     span {
                         class: "inline-block w-[3px] h-3.5 rounded-sm bg-iri shadow-[0_0_8px_rgba(45,212,191,0.4)]",

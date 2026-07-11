@@ -6,6 +6,7 @@ pub mod funnel;
 pub mod install;
 pub mod layout;
 pub mod pill;
+pub mod refresh;
 pub mod skeleton;
 pub mod stat;
 pub mod table;

@@ -5,16 +5,33 @@ use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::chart::{ChartPoint, TimeseriesChart};
 use crate::ui::components::install::InstallCard;
 use crate::ui::components::layout::PageHead;
+use crate::ui::components::refresh::AutoRefresh;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::stat::{DeltaDir, DeltaInfo, StatTile};
 use crate::ui::components::table::{BreakdownRow, BreakdownTable, EntryExitRow, EntryExitTable};
 use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs, TabbedCard};
 use crate::ui::pages::{
-    active_filters, site_api_url, site_csv_url, BTN_GHOST, BTN_PRIMARY, CTRL_INPUT,
+    active_filters, site_api_url, site_csv_url, BTN_GHOST, BTN_PRIMARY, BTN_TAB_ACTION,
+    BTN_TAB_ACTION_ON, CTRL_INPUT,
 };
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
+use crate::ui::series::{fill_time_buckets, range_from_query};
+use crate::ui::timefmt::{
+    browser_timezone, format_ts, label_style_for_buckets, timezone_short_label,
+};
 use crate::ui::types::{EntryPages, ExitPages, PageviewsResult, SitesList, TopList};
+
+/// Whether to hoist the prominent "Start collecting analytics" card.
+/// Hidden when filters are active so a zero filtered view is not mistaken
+/// for an uninstrumented site.
+pub(crate) fn should_show_install_hero(
+    can_install: bool,
+    zero_pageviews: bool,
+    active_filters: usize,
+) -> bool {
+    can_install && zero_pageviews && active_filters == 0
+}
 
 /// Percent change of `cur` vs `prev`, classified for the delta badge.
 fn compute_delta(cur: u64, prev: u64) -> Option<DeltaInfo> {
@@ -58,6 +75,9 @@ fn BreakdownPanel(
     title: Option<String>,
     csv_href: Option<String>,
     #[props(default = false)] framed: bool,
+    /// Auto-refresh tick from the overview toolbar.
+    #[props(default)]
+    refresh_tick: u32,
 ) -> Element {
     let route = use_route::<Route>();
     let q = route.query().cloned().unwrap_or_default();
@@ -66,10 +86,13 @@ fn BreakdownPanel(
 
     // Range/filters live on the route as plain props; subscribe explicitly so
     // the resource restarts when the user flips 7d/30d/90d/12m (or filters).
-    let res = use_resource(use_reactive!(|site_id, endpoint, qs| async move {
-        let path = site_api_url(&site_id, &endpoint, &qs);
-        get_json::<TopList>(&path).await
-    }));
+    let res = use_resource(use_reactive!(
+        |site_id, endpoint, qs, refresh_tick| async move {
+            let _ = refresh_tick;
+            let path = site_api_url(&site_id, &endpoint, &qs);
+            get_json::<TopList>(&path).await
+        }
+    ));
 
     rsx! {
         {match &*res.read() {
@@ -126,7 +149,7 @@ fn BreakdownPanel(
 }
 
 #[component]
-fn EntryExitPanel(site_id: String, is_entry: bool) -> Element {
+fn EntryExitPanel(site_id: String, is_entry: bool, #[props(default)] refresh_tick: u32) -> Element {
     let q = use_route::<Route>().query().cloned().unwrap_or_default();
     let qs = q.to_string();
     let endpoint = if is_entry {
@@ -143,7 +166,8 @@ fn EntryExitPanel(site_id: String, is_entry: bool) -> Element {
 
     let endpoint = endpoint.to_string();
     let res = use_resource(use_reactive!(
-        |site_id, endpoint, qs, is_entry| async move {
+        |site_id, endpoint, qs, is_entry, refresh_tick| async move {
+            let _ = refresh_tick;
             let path = site_api_url(&site_id, &endpoint, &qs);
             if is_entry {
                 get_json::<EntryPages>(&path).await.map(|p| {
@@ -201,19 +225,16 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
     let route = use_route::<Route>();
     let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
     let qs = q.to_string();
+    let refresh_tick = use_signal(|| 0u32);
+    let tick = refresh_tick();
 
-    let site = use_resource({
-        let site_id = site_id.clone();
-        move || {
-            let site_id = site_id.clone();
-            async move {
-                get_json::<SitesList>("/api/v1/sites")
-                    .await
-                    .ok()
-                    .and_then(|l| l.sites.into_iter().find(|s| s.id == site_id))
-            }
-        }
-    });
+    let site = use_resource(use_reactive!(|site_id, tick| async move {
+        let _ = tick;
+        get_json::<SitesList>("/api/v1/sites")
+            .await
+            .ok()
+            .and_then(|l| l.sites.into_iter().find(|s| s.id == site_id))
+    }));
     let (site_name, site_domain, public_key) = {
         let guard = site.read();
         match guard.as_ref().and_then(|o| o.as_ref()) {
@@ -226,8 +247,12 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
         }
     };
     let head_title = site_name.clone().unwrap_or_else(|| "Overview".to_string());
+    // Chart labels use the browser's local zone (no site-level timezone UI).
+    let tz = browser_timezone();
+    let tz_label = timezone_short_label(&tz);
 
-    let pv = use_resource(use_reactive!(|site_id, qs| async move {
+    let pv = use_resource(use_reactive!(|site_id, qs, tick| async move {
+        let _ = tick;
         let path = site_api_url(&site_id, "pageviews", &qs);
         get_json::<PageviewsResult>(&path).await
     }));
@@ -273,45 +298,54 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
 
     let can_install = public_key.as_deref().is_some_and(|k| !k.is_empty());
     let zero_data = matches!(&*pv.read(), Some(Ok(d)) if d.total_pageviews == 0);
+    let show_install_hero = should_show_install_hero(can_install, zero_data, q.filters.len());
 
     rsx! {
         PageHead { title: head_title, subtitle: site_domain.clone(),
-            div { class: "flex items-center gap-2 flex-wrap",
-                RangeTabs { active: range.clone() }
-                Link {
-                    to: compare_route,
-                    class: if comparing {
-                        "px-3 py-1.5 rounded-lg text-xs font-semibold bg-teal-soft text-teal-hi border border-border-2 no-underline"
-                    } else {
-                        "px-3 py-1.5 rounded-lg text-xs font-semibold text-muted-1 hover:text-text-1 border border-border-2 no-underline"
-                    },
-                    if comparing { "Comparing" } else { "Compare" }
-                }
+            RangeTabs { active: range.clone() }
+            Link {
+                to: compare_route,
+                class: if comparing {
+                    "h-9 inline-flex items-center px-4 rounded-[11px] text-[12.5px] font-semibold bg-teal-soft text-teal-hi border border-teal/35 no-underline shrink-0"
+                } else {
+                    "h-9 inline-flex items-center px-4 rounded-[11px] text-[12.5px] font-semibold text-muted-1 hover:text-text-1 bg-surface-2/80 border border-border-1 shadow-inner-hi no-underline shrink-0"
+                },
+                if comparing { "Comparing" } else { "Compare" }
+            }
+            AutoRefresh { tick: refresh_tick }
+        }
+        SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Overview,
+            button {
+                r#type: "button",
+                class: if show_filter() { BTN_TAB_ACTION_ON } else { BTN_TAB_ACTION },
+                onclick: move |_| {
+                    let next = !show_filter();
+                    show_filter.set(next);
+                    if next {
+                        show_export.set(false);
+                    }
+                },
+                "Filter"
+            }
+            button {
+                r#type: "button",
+                class: if show_export() { BTN_TAB_ACTION_ON } else { BTN_TAB_ACTION },
+                onclick: move |_| {
+                    let next = !show_export();
+                    show_export.set(next);
+                    if next {
+                        show_filter.set(false);
+                    }
+                },
+                "Export"
             }
         }
-        SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Overview }
 
         {active_filters(&route, &q)}
 
-        // Compact filter chrome: Add filter reveals the form.
-        div { class: "flex flex-wrap items-center gap-2 mb-6",
-            button {
-                r#type: "button",
-                class: BTN_GHOST,
-                onclick: move |_| show_filter.set(!show_filter()),
-                if show_filter() { "Hide filter" } else { "Add filter" }
-            }
-            button {
-                r#type: "button",
-                class: BTN_GHOST,
-                onclick: move |_| show_export.set(!show_export()),
-                if show_export() { "Hide export" } else { "Export" }
-            }
-        }
-
         if show_filter() {
             form {
-                class: "flex flex-wrap items-center gap-2 mb-6 p-3 rounded-lg border border-border-1 bg-surface-1",
+                class: "flex flex-wrap items-end gap-2.5 mb-6 p-3.5 rounded-xl border border-border-1 bg-surface-1 shadow-inner-hi",
                 onsubmit: {
                     let route = route.clone();
                     let q = q.clone();
@@ -352,7 +386,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                     option { value: "starts_with", "starts with" }
                 }
                 input {
-                    class: CTRL_INPUT,
+                    class: "{CTRL_INPUT} min-w-[10rem] flex-1",
                     r#type: "text",
                     value: "{f_value}",
                     placeholder: "filter value",
@@ -363,14 +397,15 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
         }
 
         if show_export() {
-            div { class: "flex flex-wrap gap-2 mb-6 p-3 rounded-lg border border-border-1 bg-surface-1",
+            div { class: "flex flex-wrap items-center gap-2 mb-6 p-3.5 rounded-xl border border-border-1 bg-surface-1 shadow-inner-hi",
+                span { class: "text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-2 mr-1", "Download" }
                 a { class: BTN_GHOST, href: "{events_csv}", "Events CSV" }
                 a { class: BTN_GHOST, href: "{sessions_csv}", "Sessions CSV" }
                 a { class: BTN_GHOST, href: "{pageviews_csv}", "Pageviews CSV" }
             }
         }
 
-        if can_install && zero_data {
+        if show_install_hero {
             div { class: "mb-4",
                 InstallCard {
                     public_key: public_key.clone().unwrap_or_default(),
@@ -396,29 +431,40 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                 } else {
                     (None, None, None, None)
                 };
-                let points = d
-                    .buckets
+                // Fill missing buckets so empty days show as zero (chart gaps).
+                let time_range = range_from_query(&q);
+                let dense = fill_time_buckets(&d.buckets, &time_range);
+                let style = label_style_for_buckets(
+                    &dense.iter().map(|b| b.ts).collect::<Vec<_>>(),
+                );
+                let points = dense
                     .iter()
                     .map(|b| ChartPoint {
-                        label: b.ts.format("%m/%d").to_string(),
+                        label: format_ts(b.ts, &tz, style),
                         pageviews: b.pageviews,
                         sessions: b.sessions,
                     })
                     .collect::<Vec<_>>();
-                // Prior period buckets aligned by relative offset (day 0 vs day 0).
+                // Prior period: densify on its own window, then align by index.
                 let previous = d.comparison.as_ref().map(|cmp| {
-                    cmp.buckets
+                    let prev_range = time_range.previous();
+                    let prev_dense = fill_time_buckets(&cmp.buckets, &prev_range);
+                    let prev_style = label_style_for_buckets(
+                        &prev_dense.iter().map(|b| b.ts).collect::<Vec<_>>(),
+                    );
+                    prev_dense
                         .iter()
                         .map(|b| ChartPoint {
-                            label: b.ts.format("%m/%d").to_string(),
+                            label: format_ts(b.ts, &tz, prev_style),
                             pageviews: b.pageviews,
                             sessions: b.sessions,
                         })
                         .collect::<Vec<_>>()
                 });
+                let tz_hint = tz_label.clone();
                 rsx! {
                     Card {
-                        div { class: "grid grid-cols-2 md:grid-cols-3 gap-4 mb-4",
+                        div { class: "grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8 mb-7",
                             StatTile {
                                 label: "Pageviews",
                                 value: format!("{}", d.total_pageviews),
@@ -433,14 +479,19 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             }
                             StatTile { label: "Bounce Rate", value: format!("{:.1}%", d.bounce_rate) }
                         }
-                        TimeseriesChart { points, previous }
+                        div { class: "pt-5 border-t border-border-1",
+                            TimeseriesChart { points, previous }
+                            div { class: "mt-2.5 text-right text-muted-2 text-[11px]",
+                                "Times in {tz_hint}"
+                            }
+                        }
                     }
                 }
             }
         }}
 
         // Primary: pages + sources
-        div { class: "grid grid-cols-1 md:grid-cols-2 gap-4 mt-4",
+        div { class: "grid grid-cols-1 md:grid-cols-2 gap-5 mt-5",
             TabbedCard {
                 title: "Pages",
                 tabs: vec!["Top pages".into(), "Entry".into(), "Exit".into()],
@@ -449,10 +500,10 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                 csv_href: pages_csv,
                 {match pages_tab() {
                     1 => rsx! {
-                        EntryExitPanel { site_id: site_id.clone(), is_entry: true }
+                        EntryExitPanel { site_id: site_id.clone(), is_entry: true, refresh_tick: tick }
                     },
                     2 => rsx! {
-                        EntryExitPanel { site_id: site_id.clone(), is_entry: false }
+                        EntryExitPanel { site_id: site_id.clone(), is_entry: false, refresh_tick: tick }
                     },
                     _ => rsx! {
                         BreakdownPanel {
@@ -463,6 +514,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             use_pageviews: true,
                             field: "url",
                             empty_title: "No pages yet",
+                            refresh_tick: tick,
                         }
                     },
                 }}
@@ -478,11 +530,12 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                 title: "Sources".to_string(),
                 csv_href: sources_csv.clone(),
                 framed: true,
+                refresh_tick: tick,
             }
         }
 
         // Secondary: locations + technology
-        div { class: "grid grid-cols-1 md:grid-cols-2 gap-4 mt-4",
+        div { class: "grid grid-cols-1 md:grid-cols-2 gap-5 mt-5",
             TabbedCard {
                 title: "Locations",
                 tabs: vec!["Countries".into(), "Regions".into()],
@@ -499,6 +552,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             use_pageviews: false,
                             field: "region",
                             empty_title: "No regions yet",
+                            refresh_tick: tick,
                         }
                     },
                     _ => rsx! {
@@ -510,6 +564,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             use_pageviews: false,
                             field: "country",
                             empty_title: "No countries yet",
+                            refresh_tick: tick,
                         }
                     },
                 }}
@@ -530,6 +585,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             use_pageviews: false,
                             field: "browser",
                             empty_title: "No browsers yet",
+                            refresh_tick: tick,
                         }
                     },
                     2 => rsx! {
@@ -541,6 +597,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             use_pageviews: false,
                             field: "os",
                             empty_title: "No operating systems yet",
+                            refresh_tick: tick,
                         }
                     },
                     _ => rsx! {
@@ -552,6 +609,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             use_pageviews: false,
                             field: "device_type",
                             empty_title: "No devices yet",
+                            refresh_tick: tick,
                         }
                     },
                 }}
@@ -567,5 +625,21 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_show_install_hero;
+
+    #[test]
+    fn install_hero_only_without_filters() {
+        assert!(should_show_install_hero(true, true, 0));
+        assert!(
+            !should_show_install_hero(true, true, 1),
+            "filters with zero rows must not hoist install CTA"
+        );
+        assert!(!should_show_install_hero(true, false, 0));
+        assert!(!should_show_install_hero(false, true, 0));
     }
 }

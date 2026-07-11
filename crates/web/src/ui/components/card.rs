@@ -6,9 +6,9 @@ use dioxus::prelude::*;
 #[component]
 pub fn Card(title: Option<String>, actions: Option<Element>, children: Element) -> Element {
     rsx! {
-        div { class: "relative bg-surface-1 border border-border-1 rounded-lg p-f3 shadow-sm shadow-inner-hi",
+        div { class: "relative bg-surface-1 border border-border-1 rounded-xl p-5 sm:p-6 shadow-sm shadow-inner-hi",
             if title.is_some() || actions.is_some() {
-                div { class: "flex justify-between items-center mb-4 gap-4",
+                div { class: "flex justify-between items-center mb-5 gap-4",
                     if let Some(title) = title {
                         h2 { class: "inline-flex items-center gap-2.5 text-[15px] font-semibold tracking-tight text-text-1",
                             span {

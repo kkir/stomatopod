@@ -98,14 +98,14 @@ pub fn Sidebar() -> Element {
 #[component]
 pub fn PageHead(title: String, subtitle: Option<String>, children: Element) -> Element {
     rsx! {
-        div { class: "flex justify-between items-center gap-4 mb-7 flex-wrap",
-            div {
-                h1 { class: "text-[22px] font-bold tracking-tight text-text-1", "{title}" }
+        div { class: "flex justify-between items-start sm:items-center gap-x-6 gap-y-4 mb-8 flex-wrap",
+            div { class: "min-w-0",
+                h1 { class: "text-[22px] sm:text-[24px] font-bold tracking-tight text-text-1 leading-tight", "{title}" }
                 if let Some(sub) = subtitle {
-                    p { class: "text-muted-1 text-[12.5px] mt-0.5", "{sub}" }
+                    p { class: "text-muted-1 text-[13px] mt-1", "{sub}" }
                 }
             }
-            div { class: "flex items-center gap-2.5", {children} }
+            div { class: "flex items-center gap-2.5 sm:gap-3 flex-wrap", {children} }
         }
     }
 }

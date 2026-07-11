@@ -3,9 +3,11 @@ use dioxus::prelude::*;
 use crate::ui::api;
 use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::layout::PageHead;
+use crate::ui::components::refresh::AutoRefresh;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::table::{BreakdownRow, BreakdownTable};
 use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs};
+use crate::ui::docs_anchors::{docs_href, EMITTING_CUSTOM_EVENTS};
 use crate::ui::pages::{active_filters, site_api_url, site_csv_url, use_site_name, BTN_PRIMARY};
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
@@ -24,10 +26,13 @@ pub fn Events(site_id: String, q: DashQuery) -> Element {
     let site_name = use_site_name(site_id.clone());
     let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
     let qs = q.to_string();
+    let refresh_tick = use_signal(|| 0u32);
+    let tick = refresh_tick();
 
     let csv_href = Some(site_csv_url(&site_id, "events", &qs));
 
-    let events = use_resource(use_reactive!(|site_id, qs| async move {
+    let events = use_resource(use_reactive!(|site_id, qs, tick| async move {
+        let _ = tick;
         let path = site_api_url(&site_id, "events", &qs);
         api::get_json::<TopList>(&path).await
     }));
@@ -42,7 +47,11 @@ pub fn Events(site_id: String, q: DashQuery) -> Element {
                 EmptyState {
                     title: "No custom events yet",
                     message: "Custom events track the actions that matter - signups, purchases, clicks. Fire them from the browser with stomatopod(\"event\", \"signup\") or POST to the ingest API, and they'll show up here.",
-                    Link { class: "{BTN_PRIMARY} mt-6", to: Route::Docs {}, "Learn how to send events" }
+                    a {
+                        class: "{BTN_PRIMARY} mt-6 no-underline",
+                        href: "{docs_href(EMITTING_CUSTOM_EVENTS)}",
+                        "Learn how to send events"
+                    }
                 }
             }
         },
@@ -73,6 +82,7 @@ pub fn Events(site_id: String, q: DashQuery) -> Element {
     rsx! {
         PageHead { title: "Events", subtitle: "{site_name}",
             RangeTabs { active: range.clone() }
+            AutoRefresh { tick: refresh_tick }
         }
         SiteTabs { site_id: site_id.clone(), range, active: SiteTab::Events }
         {active_filters(&route, &q)}

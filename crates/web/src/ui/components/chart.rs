@@ -8,6 +8,9 @@ pub struct ChartPoint {
     pub sessions: u64,
 }
 
+/// Chart plot height in SVG units (also drives the rendered CSS height).
+const CHART_H: f64 = 168.0;
+
 fn series_polyline(values: &[u64], max_v: f64, height: f64) -> String {
     let n = values.len();
     if n < 2 {
@@ -18,7 +21,7 @@ fn series_polyline(values: &[u64], max_v: f64, height: f64) -> String {
         .enumerate()
         .map(|(i, v)| {
             let x = (i as f64 / (n as f64 - 1.0)) * 800.0;
-            let y = height - (*v as f64 / max_v) * (height - 10.0);
+            let y = height - (*v as f64 / max_v) * (height - 12.0);
             format!("{x},{y}")
         })
         .collect::<Vec<_>>()
@@ -75,7 +78,7 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
 
     if n == 0 || all_zero {
         return rsx! {
-            div { class: "flex items-center justify-center h-[140px] text-muted-1 text-[13px]",
+            div { class: "flex items-center justify-center h-[180px] text-muted-1 text-[13px]",
                 "No traffic in this range yet"
             }
         };
@@ -83,15 +86,15 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
 
     let pageview_vals: Vec<u64> = points.iter().map(|p| p.pageviews).collect();
     let session_vals: Vec<u64> = points.iter().map(|p| p.sessions).collect();
-    let pv_line = series_polyline(&pageview_vals, max_v, 120.0);
-    let sess_line = series_polyline(&session_vals, max_v, 120.0);
+    let pv_line = series_polyline(&pageview_vals, max_v, CHART_H);
+    let sess_line = series_polyline(&session_vals, max_v, CHART_H);
     let prev_pv_line = if comparing {
-        series_polyline(&prev_pv_vals, max_v, 120.0)
+        series_polyline(&prev_pv_vals, max_v, CHART_H)
     } else {
         String::new()
     };
     let prev_sess_line = if comparing {
-        series_polyline(&prev_sess_vals, max_v, 120.0)
+        series_polyline(&prev_sess_vals, max_v, CHART_H)
     } else {
         String::new()
     };
@@ -113,36 +116,40 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
         })
     });
 
+    let plot_h = CHART_H;
+    let plot_bottom = CHART_H;
+    let y_scale = CHART_H - 12.0;
+
     rsx! {
         div { class: "relative",
             // Legend
-            div { class: "flex items-center gap-4 mb-2 flex-wrap",
-                span { class: "inline-flex items-center gap-1.5 text-[11px] font-semibold text-muted-1",
+            div { class: "flex items-center gap-5 mb-4 flex-wrap",
+                span { class: "inline-flex items-center gap-2 text-[12px] font-semibold text-muted-1",
                     span {
-                        class: "inline-block w-3 h-0.5 rounded-full",
+                        class: "inline-block w-3.5 h-0.5 rounded-full",
                         style: "background: linear-gradient(90deg, #5eead4, #22d3ee)",
                         "aria-hidden": "true",
                     }
                     "Pageviews"
                 }
-                span { class: "inline-flex items-center gap-1.5 text-[11px] font-semibold text-muted-1",
+                span { class: "inline-flex items-center gap-2 text-[12px] font-semibold text-muted-1",
                     span {
-                        class: "inline-block w-3 h-0.5 rounded-full bg-indigo-400",
+                        class: "inline-block w-3.5 h-0.5 rounded-full bg-indigo-400",
                         "aria-hidden": "true",
                     }
                     "Sessions"
                 }
                 if comparing {
-                    span { class: "inline-flex items-center gap-1.5 text-[11px] font-semibold text-muted-1",
+                    span { class: "inline-flex items-center gap-2 text-[12px] font-semibold text-muted-1",
                         span {
-                            class: "inline-block w-3 border-t border-dashed border-teal-hi/70",
+                            class: "inline-block w-3.5 border-t border-dashed border-teal-hi/70",
                             "aria-hidden": "true",
                         }
                         "Prior pageviews"
                     }
-                    span { class: "inline-flex items-center gap-1.5 text-[11px] font-semibold text-muted-1",
+                    span { class: "inline-flex items-center gap-2 text-[12px] font-semibold text-muted-1",
                         span {
-                            class: "inline-block w-3 border-t border-dashed border-indigo-400/70",
+                            class: "inline-block w-3.5 border-t border-dashed border-indigo-400/70",
                             "aria-hidden": "true",
                         }
                         "Prior sessions"
@@ -150,9 +157,9 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
                 }
             }
             svg {
-                view_box: "0 0 800 120",
+                view_box: "0 0 800 {plot_h}",
                 preserve_aspect_ratio: "none",
-                class: "w-full h-[140px]",
+                class: "w-full h-[180px]",
                 onmouseleave: move |_| hover.set(None),
                 defs {
                     linearGradient { id: "chart-line-pv", x1: "0", y1: "0", x2: "1", y2: "0",
@@ -190,7 +197,10 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
                 }
                 // Current pageviews: filled area + solid line
                 if !pv_line.is_empty() {
-                    polygon { points: "0,120 {pv_line} 800,120", fill: "url(#chart-area-pv)" }
+                    polygon {
+                        points: "0,{plot_bottom} {pv_line} 800,{plot_bottom}",
+                        fill: "url(#chart-area-pv)",
+                    }
                     polyline {
                         points: "{pv_line}",
                         fill: "none",
@@ -225,7 +235,7 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
                                     x: "{left}",
                                     y: "0",
                                     width: "{strip_w}",
-                                    height: "120",
+                                    height: "{plot_h}",
                                     fill: "transparent",
                                     onmouseenter: move |_| hover.set(Some(i)),
                                 }
@@ -236,11 +246,11 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
                 if let Some((i, p, prev)) = &hover_info {
                     {
                         let x = (*i as f64 / (n as f64 - 1.0).max(1.0)) * 800.0;
-                        let y_pv = 120.0 - (p.pageviews as f64 / max_v) * 110.0;
-                        let y_sess = 120.0 - (p.sessions as f64 / max_v) * 110.0;
+                        let y_pv = plot_h - (p.pageviews as f64 / max_v) * y_scale;
+                        let y_sess = plot_h - (p.sessions as f64 / max_v) * y_scale;
                         rsx! {
                             line {
-                                x1: "{x}", y1: "0", x2: "{x}", y2: "120",
+                                x1: "{x}", y1: "0", x2: "{x}", y2: "{plot_h}",
                                 stroke: "rgba(148, 163, 184, 0.35)",
                                 stroke_width: "1",
                                 stroke_dasharray: "3 3",
@@ -259,8 +269,8 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
                             }
                             if let Some((ppv, psess)) = prev {
                                 {
-                                    let y_ppv = 120.0 - (*ppv as f64 / max_v) * 110.0;
-                                    let y_ps = 120.0 - (*psess as f64 / max_v) * 110.0;
+                                    let y_ppv = plot_h - (*ppv as f64 / max_v) * y_scale;
+                                    let y_ps = plot_h - (*psess as f64 / max_v) * y_scale;
                                     rsx! {
                                         circle {
                                             cx: "{x}", cy: "{y_ppv}", r: "3",
@@ -285,23 +295,23 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
             }
             if let Some((_, p, prev)) = &hover_info {
                 div {
-                    class: "pointer-events-none absolute top-7 left-1/2 -translate-x-1/2 px-2.5 py-1.5 rounded-md bg-surface-2 border border-border-2 text-[11px] font-semibold text-text-1 shadow-sm tabular-nums",
-                    div { class: "text-center text-muted-1 mb-0.5", "{p.label}" }
-                    div { class: "flex gap-3 justify-center",
+                    class: "pointer-events-none absolute top-10 left-1/2 -translate-x-1/2 px-3 py-2 rounded-lg bg-surface-2 border border-border-2 text-[11.5px] font-semibold text-text-1 shadow-sm tabular-nums",
+                    div { class: "text-center text-muted-1 mb-1", "{p.label}" }
+                    div { class: "flex gap-3.5 justify-center",
                         span { class: "text-teal-hi", "{p.pageviews} pageviews" }
                         span { class: "text-indigo-300", "{p.sessions} sessions" }
                     }
                     if let Some((ppv, psess)) = prev {
-                        div { class: "flex gap-3 justify-center mt-0.5 text-muted-1 font-medium",
+                        div { class: "flex gap-3.5 justify-center mt-1 text-muted-1 font-medium",
                             span { "{ppv} pageviews" }
                             span { "{psess} sessions" }
                         }
                     }
                 }
             }
-            div { class: "flex justify-between mt-1.5 px-0.5",
-                span { class: "text-muted-2 text-[10.5px] tabular-nums", "{first_label}" }
-                span { class: "text-muted-2 text-[10.5px] tabular-nums", "{last_label}" }
+            div { class: "flex justify-between mt-2.5 px-0.5",
+                span { class: "text-muted-2 text-[11px] tabular-nums", "{first_label}" }
+                span { class: "text-muted-2 text-[11px] tabular-nums", "{last_label}" }
             }
         }
     }

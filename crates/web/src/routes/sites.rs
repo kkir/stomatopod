@@ -138,6 +138,14 @@ pub async fn patch_site_api(
         site_row.name = n;
     }
     if let Some(tz) = body.timezone {
+        let tz = tz.trim().to_string();
+        if tz.is_empty() {
+            return bad_request("timezone must not be empty");
+        }
+        // Accept IANA-looking names (Area/Location) or UTC; avoid free-form junk.
+        if tz != "UTC" && !tz.contains('/') {
+            return bad_request("timezone must be an IANA name (e.g. America/New_York) or UTC");
+        }
         site_row.timezone = tz;
     }
     if let Some(active) = body.is_active {

@@ -1143,6 +1143,91 @@ async fn llms_txt_install_snippet_includes_data_api() {
     );
 }
 
+#[tokio::test]
+async fn api_docs_json_includes_heading_ids_for_ui_deep_links() {
+    let ctx = setup().await;
+    let token = sign_session(&ctx.secret, &Ulid::new().to_string(), 3600);
+    let req = Request::builder()
+        .uri("/api/v1/docs")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes(resp).await).unwrap();
+    let html = json["html"].as_str().unwrap_or("");
+    let toc = json["toc"].as_array().cloned().unwrap_or_default();
+    assert!(!html.is_empty(), "docs html should be non-empty");
+    assert!(!toc.is_empty(), "docs toc should list sections");
+
+    for slug in ["installing-the-browser-tracker", "emitting-custom-events"] {
+        assert!(
+            html.contains(&format!("id=\"{slug}\"")),
+            "docs HTML missing id={slug}"
+        );
+        assert!(
+            toc.iter().any(|t| t["slug"].as_str() == Some(slug)),
+            "docs TOC missing slug={slug}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn api_sites_list_includes_timezone() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let mut site = make_site(org.id);
+    site.timezone = "America/New_York".into();
+    ctx.backend.meta.create_site(&site).await.unwrap();
+
+    let token = sign_session(&ctx.secret, &Ulid::new().to_string(), 3600);
+    let req = Request::builder()
+        .uri("/api/v1/sites")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes(resp).await).unwrap();
+    let sites = json["sites"].as_array().unwrap();
+    let found = sites.iter().find(|s| s["id"] == site.id.to_string());
+    let found = found.expect("site present in list");
+    assert_eq!(found["timezone"], "America/New_York");
+}
+
+#[tokio::test]
+async fn api_patch_site_timezone_validates_iana() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    ctx.backend.meta.create_site(&site).await.unwrap();
+    let token = sign_session(&ctx.secret, &Ulid::new().to_string(), 3600);
+
+    let bad = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/v1/sites/{}", site.id))
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"timezone":"NotAZone"}"#))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(bad).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+    let good = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/v1/sites/{}", site.id))
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"timezone":"Europe/Berlin"}"#))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(good).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes(resp).await).unwrap();
+    assert_eq!(json["timezone"], "Europe/Berlin");
+}
+
 // ---- Tier-2 analytics endpoints ----
 
 /// Send an authorized request with an optional JSON body; return (status, json).

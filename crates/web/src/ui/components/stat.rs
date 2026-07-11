@@ -27,15 +27,15 @@ pub fn StatTile(
     prev: Option<String>,
 ) -> Element {
     rsx! {
-        div {
-            div { class: "text-muted-1 text-[11px] uppercase tracking-[0.12em] font-semibold", "{label}" }
-            div { class: "text-grad-value font-display text-[34px] font-bold tracking-tight tabular-nums mt-[5px]", "{value}" }
+        div { class: "min-w-0",
+            div { class: "text-muted-1 text-[11px] uppercase tracking-[0.14em] font-semibold", "{label}" }
+            div { class: "text-grad-value font-display text-[36px] sm:text-[40px] font-bold tracking-tight tabular-nums mt-1.5 leading-none", "{value}" }
             if let Some(d) = delta {
                 div {
                     class: match d.dir {
-                        DeltaDir::Up => "inline-flex items-center gap-1 mt-1.5 text-xs font-semibold text-green",
-                        DeltaDir::Down => "inline-flex items-center gap-1 mt-1.5 text-xs font-semibold text-red",
-                        DeltaDir::New | DeltaDir::Flat => "inline-flex items-center gap-1 mt-1.5 text-xs font-semibold text-muted-2",
+                        DeltaDir::Up => "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-green",
+                        DeltaDir::Down => "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-red",
+                        DeltaDir::New | DeltaDir::Flat => "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-muted-2",
                     },
                     {match d.dir {
                         DeltaDir::Up => rsx! { "▲ {d.pct:.1}%" },
@@ -46,7 +46,7 @@ pub fn StatTile(
                 }
             }
             if let Some(p) = prev {
-                div { class: "text-muted-2 text-[11px] mt-1", "prev {p}" }
+                div { class: "text-muted-2 text-[11.5px] mt-1", "prev {p}" }
             }
         }
     }
