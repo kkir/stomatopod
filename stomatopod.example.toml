@@ -12,7 +12,7 @@ port = 8080
 # tls_cert = "/etc/ssl/certs/server.crt"
 # tls_key  = "/etc/ssl/private/server.key"
 
-# Public base URL used to build share-link and email-digest URLs.
+# Public base URL used to build email-digest URLs.
 # No trailing slash. Defaults to http://localhost:8080.
 # base_url = "https://analytics.example.com"
 

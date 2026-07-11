@@ -10,7 +10,7 @@ a roadmap of what ships today.
 - Pageviews timeseries, top-N breakdowns, filters, period comparison
 - Custom events, funnels
 - Campaigns (UTM)
-- Analytics alerts + channels, share links, email digests
+- Analytics alerts + channels, email digests
 - Data export, entry/exit pages
 - `spq` CLI and `/llms.txt`
 
@@ -28,5 +28,5 @@ a roadmap of what ships today.
 
 ## Specs still useful as design notes
 
-See sibling files for alerts, digests, share links, campaigns, filtering,
+See sibling files for alerts, digests, campaigns, filtering,
 period comparison, etc. Specs for removed features were deleted with the code.

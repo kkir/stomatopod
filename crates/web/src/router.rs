@@ -9,14 +9,14 @@ use tower_http::{compression::CompressionLayer, trace::TraceLayer};
 
 use crate::{
     middleware::{auth::require_api_auth, cors::ingest_cors, security_headers::security_headers},
-    routes::{analytics, api, api_keys, auth, digest, insights, share_links, sites},
+    routes::{analytics, api, api_keys, auth, digest, insights, sites},
     state::AppState,
 };
 
-/// Builds the non-SPA router: the REST API, ingest, auth, and public share
-/// pages. The Dioxus application itself (SSR + hydration + static assets) is
-/// merged on top of this by [`crate::server::serve`], which owns the catch-all
-/// fallback.
+/// Builds the non-SPA router: the REST API, ingest, auth, and public
+/// surfaces (digest unsubscribe). The Dioxus application itself (SSR +
+/// hydration + static assets) is merged on top of this by
+/// [`crate::server::serve`], which owns the catch-all fallback.
 ///
 /// There is intentionally no public user-registration or org-creation route:
 /// self-hosted mode is a single-owner appliance bootstrapped at first start.
@@ -109,16 +109,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/api/v1/sites/{site}/funnels/{funnel_id}",
             get(analytics::funnel_result),
         )
-        // ---- Share links (CRUD) ----
-        .route(
-            "/api/v1/sites/{site}/share-links",
-            get(share_links::list_share_links).post(share_links::create_share_link),
-        )
-        .route(
-            "/api/v1/sites/{site}/share-links/{id}",
-            axum::routing::patch(share_links::patch_share_link)
-                .delete(share_links::delete_share_link),
-        )
         // ---- API keys (CRUD): global + per-site ----
         .route(
             "/api/v1/keys",
@@ -165,19 +155,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             require_api_auth,
         ));
 
-    // Public, unauthenticated surfaces: token-scoped share dashboards and
-    // one-click digest unsubscribe. No auth middleware.
-    let public_share_routes = Router::new()
-        .route("/share/{token}", get(share_links::public_page))
-        .route(
-            "/share/{token}/api/pageviews",
-            get(share_links::public_pageviews),
-        )
-        .route(
-            "/share/{token}/api/top/{dimension}",
-            get(share_links::public_top),
-        )
-        .route("/share/{token}/api/events", get(share_links::public_events))
+    // Public, unauthenticated surfaces: one-click digest unsubscribe.
+    let public_routes = Router::new()
         .route("/digest/unsubscribe/{token}", get(digest::unsubscribe));
 
     // Auth routes (no auth required)
@@ -189,7 +168,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(ingest_routes)
         .merge(key_ingest_routes)
         .merge(analytics_routes)
-        .merge(public_share_routes)
+        .merge(public_routes)
         .merge(auth_routes)
         .merge(public_assets)
         .layer(CompressionLayer::new());

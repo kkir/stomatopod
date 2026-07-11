@@ -96,10 +96,6 @@ spq alerts toggle       --site <id|domain> --alert <id> --enabled true|false
 spq annotations list    --site <id|domain> [--range 90d]
 spq annotations create  --site <id|domain> --date 2025-06-03 --label "Launched v2.0" [--note "HN post + email"]
 spq annotations delete  --site <id|domain> --id <id>
-
-spq share list          --site <id|domain>
-spq share create        --site <id|domain> [--label "Client view"] [--expires 2025-12-31]
-spq share revoke        --site <id|domain> --link <id>
 ```
 
 ## Creating a funnel (the one write)

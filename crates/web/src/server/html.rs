@@ -1,7 +1,7 @@
 //! Server-rendered HTML for the login screen. These used to be minijinja
 //! templates; they are now plain Rust string builders (the same approach
-//! `routes::share_links` and `routes::digest` already use for their public
-//! pages), so the crate carries no template engine.
+//! `routes::digest` uses for its public pages), so the crate carries no
+//! template engine.
 //!
 //! The main dashboard is the Dioxus app and is server-rendered by
 //! `dioxus-server`; nothing here overlaps with it.

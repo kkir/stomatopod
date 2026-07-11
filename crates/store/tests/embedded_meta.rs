@@ -516,14 +516,11 @@ async fn api_key_crud_round_trip() {
     assert_eq!(meta.list_api_keys(org.id).await.unwrap().len(), 1);
 }
 
-// ---- Share links ----
+// ---- Digest subscriptions ----
 
-use stomatopod_core::domain::{
-    digest::{DigestFrequency, DigestSubscription},
-    share_link::ShareLink,
-};
+use stomatopod_core::domain::digest::{DigestFrequency, DigestSubscription};
 
-/// Create an org + site and return the site, satisfying the share_links FK.
+/// Create an org + site and return the site.
 async fn org_and_site(meta: &SqliteMeta) -> Site {
     let org = make_org();
     meta.create_org(&org).await.unwrap();
@@ -544,77 +541,6 @@ async fn make_persisted_user(meta: &SqliteMeta, site: &Site, email: &str) -> Use
     meta.create_user(&user).await.unwrap();
     user
 }
-
-#[tokio::test]
-async fn share_link_crud_lifecycle() {
-    let dir = tempfile::tempdir().unwrap();
-    let meta = open_meta(&dir).await;
-    let site = org_and_site(&meta).await;
-
-    let link = ShareLink {
-        id: Ulid::new(),
-        site_id: site.id,
-        token: "tok-abc123".into(),
-        label: Some("Client view".into()),
-        expires_at: None,
-        created_by: "user-1".into(),
-        created_at: Utc::now(),
-    };
-    meta.create_share_link(&link).await.unwrap();
-
-    // Lookup by id and by token.
-    let by_id = meta.get_share_link(link.id).await.unwrap().unwrap();
-    assert_eq!(by_id.token, "tok-abc123");
-    let by_token = meta
-        .get_share_link_by_token("tok-abc123")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(by_token.id, link.id);
-    assert_eq!(by_token.label.as_deref(), Some("Client view"));
-
-    // List scoped to site.
-    assert_eq!(meta.list_share_links(site.id).await.unwrap().len(), 1);
-
-    // Update label + expiry.
-    let expiry = Utc::now() + chrono::Duration::days(7);
-    meta.update_share_link(link.id, Some("Public".into()), Some(expiry))
-        .await
-        .unwrap();
-    let updated = meta.get_share_link(link.id).await.unwrap().unwrap();
-    assert_eq!(updated.label.as_deref(), Some("Public"));
-    assert!(updated.expires_at.is_some());
-
-    // Delete → 404 on token lookup (revoked tokens must not resolve).
-    meta.delete_share_link(link.id).await.unwrap();
-    assert!(meta
-        .get_share_link_by_token("tok-abc123")
-        .await
-        .unwrap()
-        .is_none());
-    assert!(meta.list_share_links(site.id).await.unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn share_link_token_is_unique() {
-    let dir = tempfile::tempdir().unwrap();
-    let meta = open_meta(&dir).await;
-    let site = org_and_site(&meta).await;
-
-    let mk = |token: &str| ShareLink {
-        id: Ulid::new(),
-        site_id: site.id,
-        token: token.into(),
-        label: None,
-        expires_at: None,
-        created_by: "u".into(),
-        created_at: Utc::now(),
-    };
-    meta.create_share_link(&mk("dup")).await.unwrap();
-    assert!(meta.create_share_link(&mk("dup")).await.is_err());
-}
-
-// ---- Digest subscriptions ----
 
 #[tokio::test]
 async fn digest_subscription_upsert_and_get() {

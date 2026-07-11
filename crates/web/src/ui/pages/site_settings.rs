@@ -1,18 +1,17 @@
 use dioxus::prelude::*;
 use serde_json::json;
 
-use crate::ui::api::{delete, get_json, patch_json, post_json, put_json};
+use crate::ui::api::{get_json, patch_json, put_json};
 use crate::ui::components::button::{Button, ButtonVariant};
 use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::form::Switch;
 use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::tabs::{SiteTab, SiteTabs};
-use crate::ui::pages::{BTN_GHOST, BTN_PRIMARY, CTRL_INPUT};
+use crate::ui::pages::{BTN_PRIMARY, CTRL_INPUT};
 use crate::ui::routes::Route;
 use crate::ui::types::{
-    CreateShareLinkBody, DigestSubscriptionResponse, PutSubscriptionBody, ShareLinksList,
-    SiteSummary, SitesList,
+    DigestSubscriptionResponse, PutSubscriptionBody, SiteSummary, SitesList,
 };
 
 /// General settings (name/domain) via PATCH /api/v1/sites/:site.
@@ -163,118 +162,8 @@ fn DigestCard(site_id: String) -> Element {
     }
 }
 
-/// Public share links: list, create (label), delete.
-#[component]
-fn ShareLinksCard(site_id: String) -> Element {
-    let refresh = use_signal(|| 0u32);
-    let links = use_resource({
-        let site_id = site_id.clone();
-        move || {
-            let _ = refresh();
-            let path = format!("/api/v1/sites/{site_id}/share-links");
-            async move { get_json::<ShareLinksList>(&path).await }
-        }
-    });
-    let mut label = use_signal(String::new);
-
-    rsx! {
-        Card { title: "Share links",
-            form {
-                class: "flex flex-wrap items-end gap-2 mb-4",
-                onsubmit: {
-                    let site_id = site_id.clone();
-                    move |evt: FormEvent| {
-                        evt.prevent_default();
-                        let l = label().trim().to_string();
-                        let body = CreateShareLinkBody {
-                            label: if l.is_empty() { None } else { Some(l) },
-                            expires_at: None,
-                        };
-                        let site_id = site_id.clone();
-                        let mut label = label;
-                        let mut refresh = refresh;
-                        spawn(async move {
-                            let path = format!("/api/v1/sites/{site_id}/share-links");
-                            if post_json::<_, serde_json::Value>(&path, &body).await.is_ok() {
-                                label.set(String::new());
-                                refresh += 1;
-                            }
-                        });
-                    }
-                },
-                input {
-                    class: CTRL_INPUT,
-                    r#type: "text",
-                    value: "{label}",
-                    placeholder: "Label (optional)",
-                    oninput: move |e| label.set(e.value()),
-                }
-                button { r#type: "submit", class: BTN_PRIMARY, "Create link" }
-            }
-            {match &*links.read() {
-                None => rsx! {
-                    Skeleton { lines: 2 }
-                },
-                Some(Err(e)) => rsx! {
-                    EmptyState { message: format!("Failed to load share links ({e})") }
-                },
-                Some(Ok(list)) => {
-                    if list.share_links.is_empty() {
-                        rsx! {
-                            EmptyState { message: "No share links" }
-                        }
-                    } else {
-                        let site_id = site_id.clone();
-                        rsx! {
-                            div { class: "flex flex-col gap-2",
-                                for link in list.share_links.clone() {
-                                    div {
-                                        key: "{link.id}",
-                                        class: "flex items-center justify-between gap-3 py-2 border-t border-border-1",
-                                        div { class: "min-w-0",
-                                            div { class: "text-text-1 text-[13px] font-medium",
-                                                {link.label.clone().unwrap_or_else(|| "Untitled".to_string())}
-                                            }
-                                            a {
-                                                class: "text-muted-1 text-xs font-mono block max-w-[320px] overflow-hidden text-ellipsis whitespace-nowrap hover:text-teal-hi",
-                                                href: "{link.url}",
-                                                target: "_blank",
-                                                "{link.url}"
-                                            }
-                                        }
-                                        button {
-                                            r#type: "button",
-                                            class: BTN_GHOST,
-                                            onclick: {
-                                                let site_id = site_id.clone();
-                                                let id = link.id.clone();
-                                                move |_| {
-                                                    let site_id = site_id.clone();
-                                                    let id = id.clone();
-                                                    spawn(async move {
-                                                        let path = format!("/api/v1/sites/{site_id}/share-links/{id}");
-                                                        if delete(&path).await.is_ok() {
-                                                            let mut refresh = refresh;
-                                                            refresh += 1;
-                                                        }
-                                                    });
-                                                }
-                                            },
-                                            "Delete"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }}
-        }
-    }
-}
-
-/// Per-site settings page: general, digest, share links, and a danger zone
-/// that deactivates the site (there is no hard-delete endpoint; PATCH
+/// Per-site settings page: general, digest, and a danger zone that
+/// deactivates the site (there is no hard-delete endpoint; PATCH
 /// `is_active=false` is the closest operation).
 #[component]
 pub fn SiteSettings(site_id: String) -> Element {
@@ -313,7 +202,6 @@ pub fn SiteSettings(site_id: String) -> Element {
                             div { class: "flex flex-col gap-4",
                                 GeneralCard { site }
                                 DigestCard { site_id: site_id.clone() }
-                                ShareLinksCard { site_id: site_id.clone() }
                                 Card { title: "Danger zone",
                                     p { class: "text-muted-1 text-[12.5px] mb-3",
                                         "Deactivating a site stops it from accepting new events and hides it from the dashboard."

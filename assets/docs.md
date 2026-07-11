@@ -180,30 +180,6 @@ optional properties object. Properties are stored as JSON and shown in custom
 event breakdowns; use them for anything your app needs (plan name, feature
 flag, etc.).
 
-## Public share links
-
-Mint a token-scoped, read-only public dashboard for a single site — no login
-required. **Managing** share links requires a dashboard session (not a read
-API key); read keys are query-only.
-
-| Method & path                                      | Action                          |
-|----------------------------------------------------|---------------------------------|
-| `POST /api/v1/sites/:site/share-links`             | Create (body: `label?`, `expires_at?` RFC3339). Dashboard only. |
-| `GET /api/v1/sites/:site/share-links`              | List links (with public `url`). Dashboard only. |
-| `PATCH /api/v1/sites/:site/share-links/:id`        | Update `label`/`expires_at`. Dashboard only. |
-| `DELETE /api/v1/sites/:site/share-links/:id`       | Revoke. Dashboard only. |
-
-The public surface needs no auth:
-
-- `GET /share/:token` — read-only HTML dashboard shell.
-- `GET /share/:token/api/pageviews` — pageview timeseries.
-- `GET /share/:token/api/top/:dimension` — `pages`, `referrers`, `countries`, `browsers`, `devices`, `os`, `regions`.
-- `GET /share/:token/api/events` - custom event summary.
-
-Share links expose only aggregate reports — never raw events, sessions, API
-keys, or settings. A revoked token returns `404` (existence is never leaked);
-an expired token returns `410 Gone`.
-
 ## Email digests
 
 Opt in to weekly and/or monthly summary emails per site. Subscriptions are
@@ -290,13 +266,11 @@ spq query events        --site <id|domain> [--name signup] [--range 30d]
 spq query funnels       --site <id|domain>
 spq query funnel        --site <id|domain> --funnel <funnel_id> [--range 30d]
 spq query funnel-create --site <id|domain> --name <name> --steps '<json-array>'
-spq share list|create|revoke   # share-link management needs a session token
 ```
 
 `funnel-create` is the one write command available to **read API keys**: it
 posts a new funnel and prints the created record (with its `id`) as JSON.
-`--steps` is a JSON array of step objects with at least two entries. Share-link
-management (`spq share …`) requires a dashboard session bearer, not a read key.
+`--steps` is a JSON array of step objects with at least two entries.
 
 ```bash
 spq query funnel-create --site example.com --name "Signup flow" \

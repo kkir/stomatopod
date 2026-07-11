@@ -6,5 +6,4 @@ pub mod event;
 pub mod incident;
 pub mod org;
 pub mod session;
-pub mod share_link;
 pub mod site;

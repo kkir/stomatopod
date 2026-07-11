@@ -12,9 +12,9 @@ pub struct Config {
     pub auth: AuthConfig,
     pub limits: LimitsConfig,
     pub email: EmailConfig,
-    /// Public base URL used to build share-link and digest URLs in emails
-    /// and the share UI, e.g. `https://analytics.example.com`. No trailing
-    /// slash. Defaults to `http://localhost:8080`.
+    /// Public base URL used to build digest URLs in emails, e.g.
+    /// `https://analytics.example.com`. No trailing slash. Defaults to
+    /// `http://localhost:8080`.
     pub base_url: String,
 }
 
