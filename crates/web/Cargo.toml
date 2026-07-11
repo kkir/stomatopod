@@ -107,12 +107,16 @@ web-sys = { version = "0.3", features = [
     "Element",
     "HtmlElement",
     "DomRect",
+    "DomRectReadOnly",
     "Event",
     "EventTarget",
     "Node",
     "NodeList",
     "RequestCredentials",
     "Storage",
+    "IntersectionObserver",
+    "IntersectionObserverEntry",
+    "IntersectionObserverInit",
 ] }
 getrandom-v3 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 

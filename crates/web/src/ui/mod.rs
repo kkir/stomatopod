@@ -10,6 +10,7 @@
 pub mod api;
 pub mod app;
 pub mod components;
+pub mod docs_anchors;
 pub mod pages;
 pub mod query;
 pub mod routes;

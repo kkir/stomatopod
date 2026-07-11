@@ -7,6 +7,7 @@ use crate::ui::components::refresh::AutoRefresh;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::table::{BreakdownRow, BreakdownTable};
 use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs};
+use crate::ui::docs_anchors::{docs_href, EMITTING_CUSTOM_EVENTS};
 use crate::ui::pages::{active_filters, site_api_url, site_csv_url, use_site_name, BTN_PRIMARY};
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
@@ -46,7 +47,11 @@ pub fn Events(site_id: String, q: DashQuery) -> Element {
                 EmptyState {
                     title: "No custom events yet",
                     message: "Custom events track the actions that matter - signups, purchases, clicks. Fire them from the browser with stomatopod(\"event\", \"signup\") or POST to the ingest API, and they'll show up here.",
-                    Link { class: "{BTN_PRIMARY} mt-6", to: Route::Docs {}, "Learn how to send events" }
+                    a {
+                        class: "{BTN_PRIMARY} mt-6 no-underline",
+                        href: "{docs_href(EMITTING_CUSTOM_EVENTS)}",
+                        "Learn how to send events"
+                    }
                 }
             }
         },
