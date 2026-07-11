@@ -51,8 +51,11 @@ pub enum SiteTab {
 /// Insight tabs (Overview, Events, Funnels, Campaigns) carry the full
 /// [`DashQuery`] so range, filters, and compare survive navigation.
 /// Management tabs (Alerts, Keys, Settings) stay query-free.
+///
+/// Optional `children` render on the right of the tab strip (e.g. filter /
+/// export on Overview) so secondary actions do not take a full row below.
 #[component]
-pub fn SiteTabs(site_id: String, range: String, active: SiteTab) -> Element {
+pub fn SiteTabs(site_id: String, range: String, active: SiteTab, children: Element) -> Element {
     let route = use_route::<Route>();
     let current = route.query().cloned().unwrap_or_else(|| DashQuery {
         range: Some(range.clone()),
@@ -123,18 +126,25 @@ pub fn SiteTabs(site_id: String, range: String, active: SiteTab) -> Element {
         ),
     ];
     rsx! {
-        div { class: "flex gap-5 sm:gap-6 border-b border-border-1 mb-8 relative",
-            for (tab , label , to) in tabs {
-                Link {
-                    key: "{label}",
-                    to,
-                    class: if tab == active {
-                        "pb-[11px] text-[13.5px] font-medium text-text-1 relative after:content-[''] after:absolute after:left-0 after:right-0 after:-bottom-px after:h-0.5 after:rounded-full after:bg-iri after:shadow-[0_0_10px_rgba(45,212,191,0.55)]"
-                    } else {
-                        "pb-[11px] text-[13.5px] font-medium text-muted-1 hover:text-text-2"
-                    },
-                    "{label}"
+        div { class: "flex items-end justify-between gap-4 border-b border-border-1 mb-8",
+            nav {
+                class: "flex gap-5 sm:gap-6 min-w-0 overflow-x-auto scrollbar-none",
+                "aria-label": "Site sections",
+                for (tab , label , to) in tabs {
+                    Link {
+                        key: "{label}",
+                        to,
+                        class: if tab == active {
+                            "shrink-0 pb-[11px] text-[13.5px] font-medium text-text-1 relative after:content-[''] after:absolute after:left-0 after:right-0 after:-bottom-px after:h-0.5 after:rounded-full after:bg-iri after:shadow-[0_0_10px_rgba(45,212,191,0.55)]"
+                        } else {
+                            "shrink-0 pb-[11px] text-[13.5px] font-medium text-muted-1 hover:text-text-2"
+                        },
+                        "{label}"
+                    }
                 }
+            }
+            div { class: "flex items-center gap-1.5 shrink-0 pb-1.5",
+                {children}
             }
         }
     }

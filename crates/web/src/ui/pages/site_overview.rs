@@ -11,7 +11,8 @@ use crate::ui::components::stat::{DeltaDir, DeltaInfo, StatTile};
 use crate::ui::components::table::{BreakdownRow, BreakdownTable, EntryExitRow, EntryExitTable};
 use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs, TabbedCard};
 use crate::ui::pages::{
-    active_filters, site_api_url, site_csv_url, BTN_GHOST, BTN_PRIMARY, CTRL_INPUT,
+    active_filters, site_api_url, site_csv_url, BTN_GHOST, BTN_PRIMARY, BTN_TAB_ACTION,
+    BTN_TAB_ACTION_ON, CTRL_INPUT,
 };
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
@@ -302,29 +303,38 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
             }
             AutoRefresh { tick: refresh_tick }
         }
-        SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Overview }
-
-        {active_filters(&route, &q)}
-
-        // Compact filter chrome: Add filter reveals the form.
-        div { class: "flex flex-wrap items-center gap-2 mb-7",
+        SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Overview,
             button {
                 r#type: "button",
-                class: BTN_GHOST,
-                onclick: move |_| show_filter.set(!show_filter()),
-                if show_filter() { "Hide filter" } else { "Add filter" }
+                class: if show_filter() { BTN_TAB_ACTION_ON } else { BTN_TAB_ACTION },
+                onclick: move |_| {
+                    let next = !show_filter();
+                    show_filter.set(next);
+                    if next {
+                        show_export.set(false);
+                    }
+                },
+                "Filter"
             }
             button {
                 r#type: "button",
-                class: BTN_GHOST,
-                onclick: move |_| show_export.set(!show_export()),
-                if show_export() { "Hide export" } else { "Export" }
+                class: if show_export() { BTN_TAB_ACTION_ON } else { BTN_TAB_ACTION },
+                onclick: move |_| {
+                    let next = !show_export();
+                    show_export.set(next);
+                    if next {
+                        show_filter.set(false);
+                    }
+                },
+                "Export"
             }
         }
 
+        {active_filters(&route, &q)}
+
         if show_filter() {
             form {
-                class: "flex flex-wrap items-center gap-2 mb-6 p-3 rounded-lg border border-border-1 bg-surface-1",
+                class: "flex flex-wrap items-end gap-2.5 mb-6 p-3.5 rounded-xl border border-border-1 bg-surface-1 shadow-inner-hi",
                 onsubmit: {
                     let route = route.clone();
                     let q = q.clone();
@@ -365,7 +375,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                     option { value: "starts_with", "starts with" }
                 }
                 input {
-                    class: CTRL_INPUT,
+                    class: "{CTRL_INPUT} min-w-[10rem] flex-1",
                     r#type: "text",
                     value: "{f_value}",
                     placeholder: "filter value",
@@ -376,7 +386,8 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
         }
 
         if show_export() {
-            div { class: "flex flex-wrap gap-2 mb-6 p-3 rounded-lg border border-border-1 bg-surface-1",
+            div { class: "flex flex-wrap items-center gap-2 mb-6 p-3.5 rounded-xl border border-border-1 bg-surface-1 shadow-inner-hi",
+                span { class: "text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-2 mr-1", "Download" }
                 a { class: BTN_GHOST, href: "{events_csv}", "Events CSV" }
                 a { class: BTN_GHOST, href: "{sessions_csv}", "Sessions CSV" }
                 a { class: BTN_GHOST, href: "{pageviews_csv}", "Pageviews CSV" }
