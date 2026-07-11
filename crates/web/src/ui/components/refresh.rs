@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 
-use crate::ui::pages::CTRL_INPUT;
+use crate::ui::pages::CTRL_TOOLBAR;
 
 #[cfg(target_arch = "wasm32")]
 const STORAGE_KEY: &str = "stomatopod.auto_refresh_secs";
@@ -52,18 +52,13 @@ fn save_interval(secs: u32) {
 /// Dropdown that periodically bumps `tick` so dependent `use_resource`s
 /// re-fetch. Preference is stored in `localStorage`.
 ///
-/// While auto-refresh is on, a teal status dot sits inside the select.
-/// Each tick re-blips the dot so a refresh is obvious even when data is
-/// unchanged.
-///
-/// Place next to range tabs on insight pages. Wire `tick` into each
-/// resource that should auto-refresh (include it in `use_reactive!`).
+/// Styled as a toolbar control (same height as range tabs / compare). While
+/// auto-refresh is on, a teal status dot sits inside the select and blips
+/// on each tick.
 #[component]
 pub fn AutoRefresh(mut tick: Signal<u32>) -> Element {
     let mut interval_secs = use_signal(load_interval);
-    // Bumped when the interval changes so the effect loop restarts cleanly.
     let mut generation = use_signal(|| 0u32);
-    // Increments on every auto-refresh so the indicator remounts and re-blips.
     let blip = use_signal(|| 0u32);
 
     use_effect(move || {
@@ -95,48 +90,46 @@ pub fn AutoRefresh(mut tick: Signal<u32>) -> Element {
 
     let live = interval_secs() > 0;
     let blip_n = blip();
-    // Extra left padding when the live dot is inset into the control.
-    let select_pad = if live {
-        "pl-7"
-    } else {
-        ""
-    };
+    let select_pad = if live { "pl-8" } else { "pl-3.5" };
 
     rsx! {
-        label {
-            class: "inline-flex items-center gap-1.5 text-[11px] font-semibold text-muted-1",
-            title: "Automatically reload dashboard data",
-            span { class: "hidden sm:inline", "Refresh" }
-            span {
-                class: "relative inline-flex items-center",
-                if live {
-                    span {
-                        class: "pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 z-[1] inline-flex items-center justify-center w-[9px] h-[9px]",
-                        "aria-hidden": "true",
-                        span { class: "refresh-dot refresh-dot-live" }
-                        if blip_n > 0 {
-                            span {
-                                key: "{blip_n}",
-                                class: "absolute inset-0 m-auto refresh-dot refresh-dot-blip",
-                            }
+        span {
+            class: "relative inline-flex items-center shrink-0",
+            title: "Auto-refresh interval",
+            if live {
+                span {
+                    class: "pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 z-[1] inline-flex items-center justify-center w-[9px] h-[9px]",
+                    "aria-hidden": "true",
+                    span { class: "refresh-dot refresh-dot-live" }
+                    if blip_n > 0 {
+                        span {
+                            key: "{blip_n}",
+                            class: "absolute inset-0 m-auto refresh-dot refresh-dot-blip",
                         }
                     }
                 }
-                select {
-                    class: "{CTRL_INPUT} py-1.5 text-[12px] min-w-[7.5rem] {select_pad}",
-                    value: "{interval_secs}",
-                    "aria-label": "Auto refresh interval",
-                    onchange: move |e| {
-                        let v = e.value().parse::<u32>().unwrap_or(0);
-                        let v = if OPTIONS.iter().any(|(s, _)| *s == v) { v } else { 0 };
-                        interval_secs.set(v);
-                        save_interval(v);
-                        generation.with_mut(|g| *g = g.wrapping_add(1));
-                    },
-                    for (secs, label) in OPTIONS {
-                        option { value: "{secs}", selected: interval_secs() == secs, "{label}" }
-                    }
+            }
+            select {
+                class: "{CTRL_TOOLBAR} pr-8 min-w-[8.25rem] {select_pad}",
+                value: "{interval_secs}",
+                "aria-label": "Auto refresh interval",
+                onchange: move |e| {
+                    let v = e.value().parse::<u32>().unwrap_or(0);
+                    let v = if OPTIONS.iter().any(|(s, _)| *s == v) { v } else { 0 };
+                    interval_secs.set(v);
+                    save_interval(v);
+                    generation.with_mut(|g| *g = g.wrapping_add(1));
+                },
+                for (secs, label) in OPTIONS {
+                    option { value: "{secs}", selected: interval_secs() == secs, "{label}" }
                 }
+            }
+            // Custom chevron so the control matches the rest of the toolbar
+            // (native arrows vary and sit poorly with the live dot).
+            span {
+                class: "pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-2 text-[9px] leading-none",
+                "aria-hidden": "true",
+                "▾"
             }
         }
     }

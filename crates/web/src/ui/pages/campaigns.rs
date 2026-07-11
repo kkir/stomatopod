@@ -45,10 +45,8 @@ pub fn Campaigns(site_id: String, q: DashQuery) -> Element {
         PageHead {
             title: name,
             subtitle: "UTM source, medium, and campaign breakdowns.".to_string(),
-            div { class: "flex items-center gap-2 flex-wrap",
-                RangeTabs { active: range.clone() }
-                AutoRefresh { tick: refresh_tick }
-            }
+            RangeTabs { active: range.clone() }
+            AutoRefresh { tick: refresh_tick }
         }
         SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Campaigns }
         {active_filters(&route, &q)}

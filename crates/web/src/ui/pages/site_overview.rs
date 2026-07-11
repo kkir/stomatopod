@@ -290,26 +290,24 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
 
     rsx! {
         PageHead { title: head_title, subtitle: site_domain.clone(),
-            div { class: "flex items-center gap-2 flex-wrap",
-                RangeTabs { active: range.clone() }
-                Link {
-                    to: compare_route,
-                    class: if comparing {
-                        "px-3 py-1.5 rounded-lg text-xs font-semibold bg-teal-soft text-teal-hi border border-border-2 no-underline"
-                    } else {
-                        "px-3 py-1.5 rounded-lg text-xs font-semibold text-muted-1 hover:text-text-1 border border-border-2 no-underline"
-                    },
-                    if comparing { "Comparing" } else { "Compare" }
-                }
-                AutoRefresh { tick: refresh_tick }
+            RangeTabs { active: range.clone() }
+            Link {
+                to: compare_route,
+                class: if comparing {
+                    "h-9 inline-flex items-center px-4 rounded-[11px] text-[12.5px] font-semibold bg-teal-soft text-teal-hi border border-teal/35 no-underline shrink-0"
+                } else {
+                    "h-9 inline-flex items-center px-4 rounded-[11px] text-[12.5px] font-semibold text-muted-1 hover:text-text-1 bg-surface-2/80 border border-border-1 shadow-inner-hi no-underline shrink-0"
+                },
+                if comparing { "Comparing" } else { "Compare" }
             }
+            AutoRefresh { tick: refresh_tick }
         }
         SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Overview }
 
         {active_filters(&route, &q)}
 
         // Compact filter chrome: Add filter reveals the form.
-        div { class: "flex flex-wrap items-center gap-2 mb-6",
+        div { class: "flex flex-wrap items-center gap-2 mb-7",
             button {
                 r#type: "button",
                 class: BTN_GHOST,
@@ -444,7 +442,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                 let tz_hint = tz_label.clone();
                 rsx! {
                     Card {
-                        div { class: "grid grid-cols-2 md:grid-cols-3 gap-4 mb-4",
+                        div { class: "grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8 mb-7",
                             StatTile {
                                 label: "Pageviews",
                                 value: format!("{}", d.total_pageviews),
@@ -459,9 +457,11 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             }
                             StatTile { label: "Bounce Rate", value: format!("{:.1}%", d.bounce_rate) }
                         }
-                        TimeseriesChart { points, previous }
-                        div { class: "mt-1.5 text-right text-muted-2 text-[10.5px]",
-                            "Times in {tz_hint}"
+                        div { class: "pt-5 border-t border-border-1",
+                            TimeseriesChart { points, previous }
+                            div { class: "mt-2.5 text-right text-muted-2 text-[11px]",
+                                "Times in {tz_hint}"
+                            }
                         }
                     }
                 }
@@ -469,7 +469,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
         }}
 
         // Primary: pages + sources
-        div { class: "grid grid-cols-1 md:grid-cols-2 gap-4 mt-4",
+        div { class: "grid grid-cols-1 md:grid-cols-2 gap-5 mt-5",
             TabbedCard {
                 title: "Pages",
                 tabs: vec!["Top pages".into(), "Entry".into(), "Exit".into()],
@@ -513,7 +513,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
         }
 
         // Secondary: locations + technology
-        div { class: "grid grid-cols-1 md:grid-cols-2 gap-4 mt-4",
+        div { class: "grid grid-cols-1 md:grid-cols-2 gap-5 mt-5",
             TabbedCard {
                 title: "Locations",
                 tabs: vec!["Countries".into(), "Regions".into()],

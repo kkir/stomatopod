@@ -76,10 +76,8 @@ pub fn Events(site_id: String, q: DashQuery) -> Element {
 
     rsx! {
         PageHead { title: "Events", subtitle: "{site_name}",
-            div { class: "flex items-center gap-2 flex-wrap",
-                RangeTabs { active: range.clone() }
-                AutoRefresh { tick: refresh_tick }
-            }
+            RangeTabs { active: range.clone() }
+            AutoRefresh { tick: refresh_tick }
         }
         SiteTabs { site_id: site_id.clone(), range, active: SiteTab::Events }
         {active_filters(&route, &q)}

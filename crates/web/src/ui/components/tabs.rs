@@ -13,15 +13,18 @@ pub fn RangeTabs(active: String) -> Element {
     let route = use_route::<Route>();
     let current = route.query().cloned().unwrap_or_default();
     rsx! {
-        div { class: "inline-flex gap-0.5 p-[3px] rounded-[11px] bg-surface-2/80 border border-border-1 shadow-inner-hi",
+        div {
+            class: "inline-flex items-center h-9 gap-0.5 p-[3px] rounded-[11px] bg-surface-2/80 border border-border-1 shadow-inner-hi shrink-0",
+            role: "tablist",
+            "aria-label": "Date range",
             for range in RANGES {
                 Link {
                     key: "{range}",
                     to: route.with_query(current.with_range(range)),
                     class: if active == range {
-                        "px-3 py-1.5 rounded-lg text-xs font-semibold bg-grad-btn text-[#032621] shadow-[inset_0_1px_0_rgba(255,255,255,.35),0_1px_6px_rgba(45,212,191,.45)]"
+                        "inline-flex items-center justify-center h-full min-w-[2.65rem] px-3.5 rounded-[8px] text-[12.5px] font-semibold bg-grad-btn text-[#032621] shadow-[inset_0_1px_0_rgba(255,255,255,.35),0_1px_6px_rgba(45,212,191,.45)] no-underline"
                     } else {
-                        "px-3 py-1.5 rounded-lg text-xs font-semibold text-muted-1 hover:text-text-1"
+                        "inline-flex items-center justify-center h-full min-w-[2.65rem] px-3.5 rounded-[8px] text-[12.5px] font-semibold text-muted-1 hover:text-text-1 no-underline"
                     },
                     "{range}"
                 }
@@ -120,7 +123,7 @@ pub fn SiteTabs(site_id: String, range: String, active: SiteTab) -> Element {
         ),
     ];
     rsx! {
-        div { class: "flex gap-f4 border-b border-border-1 mb-7 relative",
+        div { class: "flex gap-5 sm:gap-6 border-b border-border-1 mb-8 relative",
             for (tab , label , to) in tabs {
                 Link {
                     key: "{label}",
@@ -173,8 +176,8 @@ pub fn TabbedCard(
     children: Element,
 ) -> Element {
     rsx! {
-        div { class: "relative bg-surface-1 border border-border-1 rounded-lg p-f3 shadow-sm shadow-inner-hi",
-            div { class: "flex justify-between items-center mb-3 gap-3 flex-wrap",
+        div { class: "relative bg-surface-1 border border-border-1 rounded-xl p-5 sm:p-6 shadow-sm shadow-inner-hi",
+            div { class: "flex justify-between items-center mb-4 gap-3 flex-wrap",
                 h2 { class: "inline-flex items-center gap-2.5 text-[15px] font-semibold tracking-tight text-text-1",
                     span {
                         class: "inline-block w-[3px] h-3.5 rounded-sm bg-iri shadow-[0_0_8px_rgba(45,212,191,0.4)]",
