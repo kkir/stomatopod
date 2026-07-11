@@ -22,6 +22,17 @@ use crate::ui::timefmt::{
 };
 use crate::ui::types::{EntryPages, ExitPages, PageviewsResult, SitesList, TopList};
 
+/// Whether to hoist the prominent "Start collecting analytics" card.
+/// Hidden when filters are active so a zero filtered view is not mistaken
+/// for an uninstrumented site.
+pub(crate) fn should_show_install_hero(
+    can_install: bool,
+    zero_pageviews: bool,
+    active_filters: usize,
+) -> bool {
+    can_install && zero_pageviews && active_filters == 0
+}
+
 /// Percent change of `cur` vs `prev`, classified for the delta badge.
 fn compute_delta(cur: u64, prev: u64) -> Option<DeltaInfo> {
     if prev == 0 {
@@ -65,7 +76,8 @@ fn BreakdownPanel(
     csv_href: Option<String>,
     #[props(default = false)] framed: bool,
     /// Auto-refresh tick from the overview toolbar.
-    #[props(default)] refresh_tick: u32,
+    #[props(default)]
+    refresh_tick: u32,
 ) -> Element {
     let route = use_route::<Route>();
     let q = route.query().cloned().unwrap_or_default();
@@ -74,11 +86,13 @@ fn BreakdownPanel(
 
     // Range/filters live on the route as plain props; subscribe explicitly so
     // the resource restarts when the user flips 7d/30d/90d/12m (or filters).
-    let res = use_resource(use_reactive!(|site_id, endpoint, qs, refresh_tick| async move {
-        let _ = refresh_tick;
-        let path = site_api_url(&site_id, &endpoint, &qs);
-        get_json::<TopList>(&path).await
-    }));
+    let res = use_resource(use_reactive!(
+        |site_id, endpoint, qs, refresh_tick| async move {
+            let _ = refresh_tick;
+            let path = site_api_url(&site_id, &endpoint, &qs);
+            get_json::<TopList>(&path).await
+        }
+    ));
 
     rsx! {
         {match &*res.read() {
@@ -135,11 +149,7 @@ fn BreakdownPanel(
 }
 
 #[component]
-fn EntryExitPanel(
-    site_id: String,
-    is_entry: bool,
-    #[props(default)] refresh_tick: u32,
-) -> Element {
+fn EntryExitPanel(site_id: String, is_entry: bool, #[props(default)] refresh_tick: u32) -> Element {
     let q = use_route::<Route>().query().cloned().unwrap_or_default();
     let qs = q.to_string();
     let endpoint = if is_entry {
@@ -288,9 +298,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
 
     let can_install = public_key.as_deref().is_some_and(|k| !k.is_empty());
     let zero_data = matches!(&*pv.read(), Some(Ok(d)) if d.total_pageviews == 0);
-    // Only promote the install snippet when the site has no traffic at all —
-    // not when a filter simply matched nothing.
-    let show_install_hero = can_install && zero_data && q.filters.is_empty();
+    let show_install_hero = should_show_install_hero(can_install, zero_data, q.filters.len());
 
     rsx! {
         PageHead { title: head_title, subtitle: site_domain.clone(),
@@ -617,5 +625,21 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_show_install_hero;
+
+    #[test]
+    fn install_hero_only_without_filters() {
+        assert!(should_show_install_hero(true, true, 0));
+        assert!(
+            !should_show_install_hero(true, true, 1),
+            "filters with zero rows must not hoist install CTA"
+        );
+        assert!(!should_show_install_hero(true, false, 0));
+        assert!(!should_show_install_hero(false, true, 0));
     }
 }

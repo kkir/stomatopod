@@ -209,7 +209,8 @@ struct TocItem {
 }
 
 /// URL-safe anchor slug from heading text: lowercase alphanumerics, other
-/// runs collapsed to single dashes.
+/// runs collapsed to single dashes. Keep in lockstep with UI deep-link
+/// constants in `ui/docs_anchors.rs`.
 fn slugify(s: &str) -> String {
     let mut out = String::new();
     let mut prev_dash = true; // suppress leading dash
@@ -318,4 +319,60 @@ pub async fn dashboard_css() -> impl IntoResponse {
         ],
         DASHBOARD_CSS,
     )
+}
+
+#[cfg(test)]
+mod docs_slug_tests {
+    use super::{render_docs, slugify};
+    use crate::ui::docs_anchors::{EMITTING_CUSTOM_EVENTS, INSTALLING_THE_BROWSER_TRACKER};
+
+    #[test]
+    fn known_heading_slugs() {
+        let cases = [
+            (
+                "Installing the browser tracker",
+                INSTALLING_THE_BROWSER_TRACKER,
+            ),
+            ("Emitting custom events", EMITTING_CUSTOM_EVENTS),
+            (
+                "Manual events from the browser",
+                "manual-events-from-the-browser",
+            ),
+            ("Creating funnels", "creating-funnels"),
+            ("Authentication", "authentication"),
+            ("Querying analytics", "querying-analytics"),
+            ("Concepts", "concepts"),
+        ];
+        for (heading, expected) in cases {
+            assert_eq!(slugify(heading), expected, "heading {heading:?}");
+        }
+    }
+
+    #[test]
+    fn rendered_docs_stamp_ids_matching_toc_and_ui_deep_links() {
+        let rendered = render_docs();
+        assert!(
+            !rendered.toc.is_empty(),
+            "docs TOC should list H2/H3 headings"
+        );
+        for item in &rendered.toc {
+            let needle = format!("id=\"{}\"", item.slug);
+            assert!(
+                rendered.body.contains(&needle),
+                "heading id missing in HTML for slug {}",
+                item.slug
+            );
+        }
+        // UI deep links must resolve to real anchors in the rendered HTML.
+        for slug in [INSTALLING_THE_BROWSER_TRACKER, EMITTING_CUSTOM_EVENTS] {
+            assert!(
+                rendered.body.contains(&format!("id=\"{slug}\"")),
+                "UI deep-link slug {slug} missing from docs HTML"
+            );
+            assert!(
+                rendered.toc.iter().any(|t| t.slug == slug),
+                "UI deep-link slug {slug} missing from docs TOC"
+            );
+        }
+    }
 }

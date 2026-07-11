@@ -93,7 +93,10 @@ fn advance(ts: DateTime<Utc>, g: Granularity) -> DateTime<Utc> {
             } else {
                 (d.year(), d.month() + 1)
             };
-            NaiveDate_ymd(y, m, 1).and_hms_opt(0, 0, 0).unwrap().and_utc()
+            NaiveDate_ymd(y, m, 1)
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc()
         }
     }
 }
@@ -211,5 +214,68 @@ mod tests {
         assert_eq!(filled[0].pageviews, 0);
         assert_eq!(filled[2].pageviews, 7);
         assert_eq!(filled[4].pageviews, 0);
+    }
+
+    #[test]
+    fn empty_buckets_still_build_full_axis() {
+        let range = TimeRange {
+            start: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 1, 3, 12, 0, 0).unwrap(),
+        };
+        let filled = fill_time_buckets(&[], &range);
+        assert_eq!(filled.len(), 3);
+        assert!(filled.iter().all(|b| b.pageviews == 0 && b.sessions == 0));
+    }
+
+    #[test]
+    fn range_from_query_uses_preset_and_custom_dates() {
+        let q = DashQuery {
+            range: Some("7d".into()),
+            ..Default::default()
+        };
+        let r = range_from_query(&q);
+        assert!((r.end - r.start).num_days() >= 6);
+
+        let custom = DashQuery {
+            from: Some("2026-02-01".into()),
+            to: Some("2026-02-10".into()),
+            ..Default::default()
+        };
+        let r = range_from_query(&custom);
+        assert_eq!(r.start, Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap());
+        assert_eq!(r.end.date_naive().to_string(), "2026-02-10");
+    }
+
+    #[test]
+    fn infer_granularity_prefers_hourly_when_observed() {
+        let range = TimeRange {
+            start: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
+        };
+        // 30d-ish window auto is Day, but hourly spacing stays Hour.
+        let hourly = vec![
+            TimeBucket {
+                ts: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+                pageviews: 1,
+                sessions: 1,
+            },
+            TimeBucket {
+                ts: Utc.with_ymd_and_hms(2026, 1, 1, 1, 0, 0).unwrap(),
+                pageviews: 2,
+                sessions: 1,
+            },
+        ];
+        assert_eq!(infer_granularity(&hourly, &range), Granularity::Hour);
+    }
+
+    #[test]
+    fn densify_caps_at_max_points() {
+        let range = TimeRange {
+            start: Utc.with_ymd_and_hms(2000, 1, 1, 0, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+        };
+        // Long window + day granularity would exceed 400 without the cap.
+        let filled = fill_time_buckets(&[], &range);
+        assert!(filled.len() <= 400);
     }
 }

@@ -36,10 +36,7 @@ pub fn format_ts(ts: DateTime<Utc>, timezone: &str, style: TsLabelStyle) -> Stri
     let _ = tz;
     match style {
         TsLabelStyle::Day => ts.format("%b %e").to_string().replace("  ", " "),
-        TsLabelStyle::Hour => ts
-            .format("%b %e, %H:%M")
-            .to_string()
-            .replace("  ", " "),
+        TsLabelStyle::Hour => ts.format("%b %e, %H:%M").to_string().replace("  ", " "),
     }
 }
 
@@ -73,10 +70,44 @@ pub fn browser_timezone() -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn label_style_hour_vs_day() {
+        let t0 = Utc.with_ymd_and_hms(2026, 3, 1, 0, 0, 0).unwrap();
+        let t1h = Utc.with_ymd_and_hms(2026, 3, 1, 1, 0, 0).unwrap();
+        let t1d = Utc.with_ymd_and_hms(2026, 3, 2, 0, 0, 0).unwrap();
+        assert_eq!(label_style_for_buckets(&[t0, t1h]), TsLabelStyle::Hour);
+        assert_eq!(label_style_for_buckets(&[t0, t1d]), TsLabelStyle::Day);
+        assert_eq!(label_style_for_buckets(&[t0]), TsLabelStyle::Day);
+    }
+
+    #[test]
+    fn timezone_short_label_strips_region() {
+        assert_eq!(timezone_short_label("America/New_York"), "New York");
+        assert_eq!(timezone_short_label("UTC"), "UTC");
+        assert_eq!(timezone_short_label("Europe/Berlin"), "Berlin");
+    }
+
+    #[test]
+    fn format_ts_native_is_nonempty() {
+        let ts = Utc.with_ymd_and_hms(2026, 7, 4, 15, 30, 0).unwrap();
+        let day = format_ts(ts, "UTC", TsLabelStyle::Day);
+        let hour = format_ts(ts, "UTC", TsLabelStyle::Hour);
+        assert!(day.contains("Jul"), "{day}");
+        assert!(hour.contains("15:30") || hour.contains("3"), "{hour}");
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn detect_browser_timezone() -> Option<String> {
-    let intl = js_sys::Reflect::get(&js_sys::global(), &wasm_bindgen::JsValue::from_str("Intl")).ok()?;
-    let dtf_ctor = js_sys::Reflect::get(&intl, &wasm_bindgen::JsValue::from_str("DateTimeFormat")).ok()?;
+    let intl =
+        js_sys::Reflect::get(&js_sys::global(), &wasm_bindgen::JsValue::from_str("Intl")).ok()?;
+    let dtf_ctor =
+        js_sys::Reflect::get(&intl, &wasm_bindgen::JsValue::from_str("DateTimeFormat")).ok()?;
     let dtf = js_sys::Reflect::construct(&dtf_ctor.into(), &js_sys::Array::new()).ok()?;
     let resolved = js_sys::Reflect::apply(
         &js_sys::Reflect::get(&dtf, &wasm_bindgen::JsValue::from_str("resolvedOptions"))
@@ -128,14 +159,12 @@ fn format_ts_js(ts: DateTime<Utc>, timezone: &str, style: TsLabelStyle) -> Optio
 
     // Prefer Intl for timeZone support; fall back to toLocaleString.
     let intl = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("Intl")).ok()?;
-    let dtf_ctor =
-        js_sys::Reflect::get(&intl, &JsValue::from_str("DateTimeFormat")).ok()?;
+    let dtf_ctor = js_sys::Reflect::get(&intl, &JsValue::from_str("DateTimeFormat")).ok()?;
     let args = js_sys::Array::new();
     args.push(&JsValue::UNDEFINED);
     args.push(&options);
     let dtf = js_sys::Reflect::construct(&dtf_ctor.into(), &args).ok()?;
-    let format_fn =
-        js_sys::Reflect::get(&dtf, &JsValue::from_str("format")).ok()?;
+    let format_fn = js_sys::Reflect::get(&dtf, &JsValue::from_str("format")).ok()?;
     let call_args = js_sys::Array::new();
     call_args.push(&date);
     let formatted = js_sys::Reflect::apply(&format_fn.into(), &dtf, &call_args).ok()?;
@@ -145,4 +174,3 @@ fn format_ts_js(ts: DateTime<Utc>, timezone: &str, style: TsLabelStyle) -> Optio
     }
     Some(s)
 }
-
