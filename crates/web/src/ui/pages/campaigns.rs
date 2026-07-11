@@ -3,6 +3,7 @@ use dioxus::prelude::*;
 use crate::ui::api::get_json;
 use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::layout::PageHead;
+use crate::ui::components::refresh::AutoRefresh;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::table::{BreakdownRow, BreakdownTable};
 use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs, TabbedCard};
@@ -30,9 +31,12 @@ pub fn Campaigns(site_id: String, q: DashQuery) -> Element {
     let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
     let name = use_site_name(site_id.clone());
     let mut tab = use_signal(|| 0usize);
+    let refresh_tick = use_signal(|| 0u32);
+    let tick = refresh_tick();
 
     let qs = q.to_string();
-    let data = use_resource(use_reactive!(|site_id, qs| async move {
+    let data = use_resource(use_reactive!(|site_id, qs, tick| async move {
+        let _ = tick;
         let path = site_api_url(&site_id, "campaigns", &qs);
         get_json::<CampaignsData>(&path).await
     }));
@@ -41,7 +45,10 @@ pub fn Campaigns(site_id: String, q: DashQuery) -> Element {
         PageHead {
             title: name,
             subtitle: "UTM source, medium, and campaign breakdowns.".to_string(),
-            RangeTabs { active: range.clone() }
+            div { class: "flex items-center gap-2 flex-wrap",
+                RangeTabs { active: range.clone() }
+                AutoRefresh { tick: refresh_tick }
+            }
         }
         SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Campaigns }
         {active_filters(&route, &q)}

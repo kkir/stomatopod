@@ -15,13 +15,17 @@ use crate::ui::types::{
     SiteSummary, SitesList,
 };
 
-/// General settings (name/domain/timezone) via PATCH /api/v1/sites/:site.
+/// General settings (name/domain) via PATCH /api/v1/sites/:site.
+///
+/// Site timezone is kept on the model/API for future digest scheduling, but
+/// is not exposed here: digests still fire in UTC, and the dashboard shows
+/// times in the browser's local zone.
 #[component]
 fn GeneralCard(site: SiteSummary) -> Element {
     let mut name = use_signal(|| site.name.clone());
     let mut domain = use_signal(|| site.domain.clone());
-    let mut timezone = use_signal(String::new);
     let mut saved = use_signal(|| false);
+    let error = use_signal(|| None::<String>);
     let site_id = site.id.clone();
 
     rsx! {
@@ -30,17 +34,24 @@ fn GeneralCard(site: SiteSummary) -> Element {
                 class: "flex flex-col gap-3",
                 onsubmit: move |evt: FormEvent| {
                     evt.prevent_default();
-                    let mut body = json!({ "name" : name(), "domain" : domain() });
-                    let tz = timezone().trim().to_string();
-                    if !tz.is_empty() {
-                        body["timezone"] = json!(tz);
-                    }
+                    let body = json!({
+                        "name": name(),
+                        "domain": domain(),
+                    });
                     let site_id = site_id.clone();
                     let mut saved = saved;
+                    let mut error = error;
                     spawn(async move {
                         let path = format!("/api/v1/sites/{site_id}");
-                        if patch_json::<_, serde_json::Value>(&path, &body).await.is_ok() {
-                            saved.set(true);
+                        match patch_json::<_, serde_json::Value>(&path, &body).await {
+                            Ok(_) => {
+                                error.set(None);
+                                saved.set(true);
+                            }
+                            Err(e) => {
+                                saved.set(false);
+                                error.set(Some(e.to_string()));
+                            }
                         }
                     });
                 },
@@ -67,23 +78,14 @@ fn GeneralCard(site: SiteSummary) -> Element {
                             },
                         }
                     }
-                    label { class: "flex flex-col gap-1.5",
-                        span { class: "text-[0.72rem] tracking-[0.06em] uppercase text-muted-1 font-semibold", "Timezone (leave blank to keep)" }
-                        input {
-                            class: "{CTRL_INPUT} w-full",
-                            value: "{timezone}",
-                            placeholder: "e.g. UTC",
-                            oninput: move |e| {
-                                timezone.set(e.value());
-                                saved.set(false);
-                            },
-                        }
-                    }
                 }
                 div { class: "flex items-center gap-3",
                     button { r#type: "submit", class: BTN_PRIMARY, "Save" }
                     if saved() {
                         span { class: "text-green text-xs", "Saved" }
+                    }
+                    if let Some(err) = error() {
+                        span { class: "text-red-400 text-xs", "{err}" }
                     }
                 }
             }

@@ -11,7 +11,9 @@ use crate::ui::components::stat::{DeltaDir, DeltaInfo};
 use crate::ui::pages::BTN_PRIMARY;
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
+use crate::ui::series::fill_time_buckets;
 use crate::ui::types::{CreateSiteBody, CreatedSite, PageviewsResult, SiteSummary, SitesList};
+use stomatopod_core::query::pageviews::TimeRange;
 
 /// Grouped thousands for card metrics (e.g. 12345 → "12,345").
 fn fmt_count(n: u64) -> String {
@@ -120,11 +122,13 @@ fn SiteCard(site: SiteSummary) -> Element {
                     }
                 },
                 Some(Ok(pv)) => {
-                    let spark: Vec<f64> = pv
-                        .buckets
-                        .iter()
-                        .map(|b| b.pageviews as f64)
-                        .collect();
+                    let spark: Vec<f64> = fill_time_buckets(
+                        &pv.buckets,
+                        &TimeRange::from_label("7d"),
+                    )
+                    .iter()
+                    .map(|b| b.pageviews as f64)
+                    .collect();
                     let pv_delta = pv
                         .comparison
                         .as_ref()

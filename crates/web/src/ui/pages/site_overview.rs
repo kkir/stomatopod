@@ -5,6 +5,7 @@ use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::chart::{ChartPoint, TimeseriesChart};
 use crate::ui::components::install::InstallCard;
 use crate::ui::components::layout::PageHead;
+use crate::ui::components::refresh::AutoRefresh;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::stat::{DeltaDir, DeltaInfo, StatTile};
 use crate::ui::components::table::{BreakdownRow, BreakdownTable, EntryExitRow, EntryExitTable};
@@ -14,6 +15,10 @@ use crate::ui::pages::{
 };
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
+use crate::ui::series::{fill_time_buckets, range_from_query};
+use crate::ui::timefmt::{
+    browser_timezone, format_ts, label_style_for_buckets, timezone_short_label,
+};
 use crate::ui::types::{EntryPages, ExitPages, PageviewsResult, SitesList, TopList};
 
 /// Percent change of `cur` vs `prev`, classified for the delta badge.
@@ -58,6 +63,8 @@ fn BreakdownPanel(
     title: Option<String>,
     csv_href: Option<String>,
     #[props(default = false)] framed: bool,
+    /// Auto-refresh tick from the overview toolbar.
+    #[props(default)] refresh_tick: u32,
 ) -> Element {
     let route = use_route::<Route>();
     let q = route.query().cloned().unwrap_or_default();
@@ -66,7 +73,8 @@ fn BreakdownPanel(
 
     // Range/filters live on the route as plain props; subscribe explicitly so
     // the resource restarts when the user flips 7d/30d/90d/12m (or filters).
-    let res = use_resource(use_reactive!(|site_id, endpoint, qs| async move {
+    let res = use_resource(use_reactive!(|site_id, endpoint, qs, refresh_tick| async move {
+        let _ = refresh_tick;
         let path = site_api_url(&site_id, &endpoint, &qs);
         get_json::<TopList>(&path).await
     }));
@@ -126,7 +134,11 @@ fn BreakdownPanel(
 }
 
 #[component]
-fn EntryExitPanel(site_id: String, is_entry: bool) -> Element {
+fn EntryExitPanel(
+    site_id: String,
+    is_entry: bool,
+    #[props(default)] refresh_tick: u32,
+) -> Element {
     let q = use_route::<Route>().query().cloned().unwrap_or_default();
     let qs = q.to_string();
     let endpoint = if is_entry {
@@ -143,7 +155,8 @@ fn EntryExitPanel(site_id: String, is_entry: bool) -> Element {
 
     let endpoint = endpoint.to_string();
     let res = use_resource(use_reactive!(
-        |site_id, endpoint, qs, is_entry| async move {
+        |site_id, endpoint, qs, is_entry, refresh_tick| async move {
+            let _ = refresh_tick;
             let path = site_api_url(&site_id, &endpoint, &qs);
             if is_entry {
                 get_json::<EntryPages>(&path).await.map(|p| {
@@ -201,19 +214,16 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
     let route = use_route::<Route>();
     let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
     let qs = q.to_string();
+    let refresh_tick = use_signal(|| 0u32);
+    let tick = refresh_tick();
 
-    let site = use_resource({
-        let site_id = site_id.clone();
-        move || {
-            let site_id = site_id.clone();
-            async move {
-                get_json::<SitesList>("/api/v1/sites")
-                    .await
-                    .ok()
-                    .and_then(|l| l.sites.into_iter().find(|s| s.id == site_id))
-            }
-        }
-    });
+    let site = use_resource(use_reactive!(|site_id, tick| async move {
+        let _ = tick;
+        get_json::<SitesList>("/api/v1/sites")
+            .await
+            .ok()
+            .and_then(|l| l.sites.into_iter().find(|s| s.id == site_id))
+    }));
     let (site_name, site_domain, public_key) = {
         let guard = site.read();
         match guard.as_ref().and_then(|o| o.as_ref()) {
@@ -226,8 +236,12 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
         }
     };
     let head_title = site_name.clone().unwrap_or_else(|| "Overview".to_string());
+    // Chart labels use the browser's local zone (no site-level timezone UI).
+    let tz = browser_timezone();
+    let tz_label = timezone_short_label(&tz);
 
-    let pv = use_resource(use_reactive!(|site_id, qs| async move {
+    let pv = use_resource(use_reactive!(|site_id, qs, tick| async move {
+        let _ = tick;
         let path = site_api_url(&site_id, "pageviews", &qs);
         get_json::<PageviewsResult>(&path).await
     }));
@@ -287,6 +301,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                     },
                     if comparing { "Comparing" } else { "Compare" }
                 }
+                AutoRefresh { tick: refresh_tick }
             }
         }
         SiteTabs { site_id: site_id.clone(), range: range.clone(), active: SiteTab::Overview }
@@ -396,26 +411,37 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                 } else {
                     (None, None, None, None)
                 };
-                let points = d
-                    .buckets
+                // Fill missing buckets so empty days show as zero (chart gaps).
+                let time_range = range_from_query(&q);
+                let dense = fill_time_buckets(&d.buckets, &time_range);
+                let style = label_style_for_buckets(
+                    &dense.iter().map(|b| b.ts).collect::<Vec<_>>(),
+                );
+                let points = dense
                     .iter()
                     .map(|b| ChartPoint {
-                        label: b.ts.format("%m/%d").to_string(),
+                        label: format_ts(b.ts, &tz, style),
                         pageviews: b.pageviews,
                         sessions: b.sessions,
                     })
                     .collect::<Vec<_>>();
-                // Prior period buckets aligned by relative offset (day 0 vs day 0).
+                // Prior period: densify on its own window, then align by index.
                 let previous = d.comparison.as_ref().map(|cmp| {
-                    cmp.buckets
+                    let prev_range = time_range.previous();
+                    let prev_dense = fill_time_buckets(&cmp.buckets, &prev_range);
+                    let prev_style = label_style_for_buckets(
+                        &prev_dense.iter().map(|b| b.ts).collect::<Vec<_>>(),
+                    );
+                    prev_dense
                         .iter()
                         .map(|b| ChartPoint {
-                            label: b.ts.format("%m/%d").to_string(),
+                            label: format_ts(b.ts, &tz, prev_style),
                             pageviews: b.pageviews,
                             sessions: b.sessions,
                         })
                         .collect::<Vec<_>>()
                 });
+                let tz_hint = tz_label.clone();
                 rsx! {
                     Card {
                         div { class: "grid grid-cols-2 md:grid-cols-3 gap-4 mb-4",
@@ -434,6 +460,9 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             StatTile { label: "Bounce Rate", value: format!("{:.1}%", d.bounce_rate) }
                         }
                         TimeseriesChart { points, previous }
+                        div { class: "mt-1.5 text-right text-muted-2 text-[10.5px]",
+                            "Times in {tz_hint}"
+                        }
                     }
                 }
             }
@@ -449,10 +478,10 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                 csv_href: pages_csv,
                 {match pages_tab() {
                     1 => rsx! {
-                        EntryExitPanel { site_id: site_id.clone(), is_entry: true }
+                        EntryExitPanel { site_id: site_id.clone(), is_entry: true, refresh_tick: tick }
                     },
                     2 => rsx! {
-                        EntryExitPanel { site_id: site_id.clone(), is_entry: false }
+                        EntryExitPanel { site_id: site_id.clone(), is_entry: false, refresh_tick: tick }
                     },
                     _ => rsx! {
                         BreakdownPanel {
@@ -463,6 +492,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             use_pageviews: true,
                             field: "url",
                             empty_title: "No pages yet",
+                            refresh_tick: tick,
                         }
                     },
                 }}
@@ -478,6 +508,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                 title: "Sources".to_string(),
                 csv_href: sources_csv.clone(),
                 framed: true,
+                refresh_tick: tick,
             }
         }
 
@@ -499,6 +530,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             use_pageviews: false,
                             field: "region",
                             empty_title: "No regions yet",
+                            refresh_tick: tick,
                         }
                     },
                     _ => rsx! {
@@ -510,6 +542,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             use_pageviews: false,
                             field: "country",
                             empty_title: "No countries yet",
+                            refresh_tick: tick,
                         }
                     },
                 }}
@@ -530,6 +563,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             use_pageviews: false,
                             field: "browser",
                             empty_title: "No browsers yet",
+                            refresh_tick: tick,
                         }
                     },
                     2 => rsx! {
@@ -541,6 +575,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             use_pageviews: false,
                             field: "os",
                             empty_title: "No operating systems yet",
+                            refresh_tick: tick,
                         }
                     },
                     _ => rsx! {
@@ -552,6 +587,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                             use_pageviews: false,
                             field: "device_type",
                             empty_title: "No devices yet",
+                            refresh_tick: tick,
                         }
                     },
                 }}

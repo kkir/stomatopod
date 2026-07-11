@@ -5587,6 +5587,7 @@ dependencies = [
  "gloo-timers",
  "hex",
  "http-body-util",
+ "js-sys",
  "pulldown-cmark",
  "reqwest",
  "serde",

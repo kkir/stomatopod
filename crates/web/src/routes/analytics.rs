@@ -188,6 +188,8 @@ struct SiteListItem {
     id: String,
     domain: String,
     name: String,
+    /// IANA timezone (stored on the site; digests currently run in UTC).
+    timezone: String,
     public_key: String,
     created_at: String,
 }
@@ -221,6 +223,7 @@ pub async fn list_sites(
             id: s.id.to_string(),
             domain: s.domain,
             name: s.name,
+            timezone: s.timezone,
             public_key: s.public_key,
             created_at: s.created_at.to_rfc3339(),
         })

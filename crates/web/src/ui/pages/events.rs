@@ -3,6 +3,7 @@ use dioxus::prelude::*;
 use crate::ui::api;
 use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::layout::PageHead;
+use crate::ui::components::refresh::AutoRefresh;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::table::{BreakdownRow, BreakdownTable};
 use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs};
@@ -24,10 +25,13 @@ pub fn Events(site_id: String, q: DashQuery) -> Element {
     let site_name = use_site_name(site_id.clone());
     let range = q.range.clone().unwrap_or_else(|| "30d".to_string());
     let qs = q.to_string();
+    let refresh_tick = use_signal(|| 0u32);
+    let tick = refresh_tick();
 
     let csv_href = Some(site_csv_url(&site_id, "events", &qs));
 
-    let events = use_resource(use_reactive!(|site_id, qs| async move {
+    let events = use_resource(use_reactive!(|site_id, qs, tick| async move {
+        let _ = tick;
         let path = site_api_url(&site_id, "events", &qs);
         api::get_json::<TopList>(&path).await
     }));
@@ -72,7 +76,10 @@ pub fn Events(site_id: String, q: DashQuery) -> Element {
 
     rsx! {
         PageHead { title: "Events", subtitle: "{site_name}",
-            RangeTabs { active: range.clone() }
+            div { class: "flex items-center gap-2 flex-wrap",
+                RangeTabs { active: range.clone() }
+                AutoRefresh { tick: refresh_tick }
+            }
         }
         SiteTabs { site_id: site_id.clone(), range, active: SiteTab::Events }
         {active_filters(&route, &q)}
