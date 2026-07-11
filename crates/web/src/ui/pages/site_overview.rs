@@ -288,6 +288,9 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
 
     let can_install = public_key.as_deref().is_some_and(|k| !k.is_empty());
     let zero_data = matches!(&*pv.read(), Some(Ok(d)) if d.total_pageviews == 0);
+    // Only promote the install snippet when the site has no traffic at all —
+    // not when a filter simply matched nothing.
+    let show_install_hero = can_install && zero_data && q.filters.is_empty();
 
     rsx! {
         PageHead { title: head_title, subtitle: site_domain.clone(),
@@ -394,7 +397,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
             }
         }
 
-        if can_install && zero_data {
+        if show_install_hero {
             div { class: "mb-4",
                 InstallCard {
                     public_key: public_key.clone().unwrap_or_default(),
