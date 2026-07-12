@@ -43,8 +43,8 @@ pub struct AppState {
     pub api_key_cache: Arc<DashMap<String, ApiKeyCacheEntry>>,
     /// GeoIP lookup service.
     pub geo: Arc<GeoLookup>,
-    /// Email transport for digest delivery (test-send + scheduler).
-    pub digest_sender: Arc<dyn crate::digest::DigestSender>,
+    /// Digest transport (channel notifier in production; capture sink in tests).
+    pub digest_notifier: Arc<dyn crate::digest::DigestNotifier>,
     /// Failed login attempts by client IP (in-memory; resets on restart).
     pub login_failures: Arc<DashMap<String, LoginFailureWindow>>,
 }

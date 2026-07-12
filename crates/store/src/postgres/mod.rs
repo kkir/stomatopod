@@ -979,7 +979,7 @@ impl MetaStore for PostgresBackend {
         row.map(row_to_alert_fire).transpose()
     }
 
-    // ---- Email digest subscriptions ----
+    // ---- Analytics digest subscriptions ----
     async fn upsert_digest_subscription(&self, sub: &DigestSubscription) -> Result<(), StoreError> {
         sqlx::query(
             "INSERT INTO digest_subscriptions \

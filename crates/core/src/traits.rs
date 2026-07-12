@@ -152,7 +152,7 @@ pub trait MetaStore: Send + Sync + 'static {
         alert_id: Ulid,
     ) -> Result<Option<AnalyticsAlertFire>, StoreError>;
 
-    // ---- Email digest subscriptions ----
+    // ---- Analytics digest subscriptions ----
     async fn upsert_digest_subscription(&self, sub: &DigestSubscription) -> Result<(), StoreError>;
     async fn get_digest_subscription(
         &self,

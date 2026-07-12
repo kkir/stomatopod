@@ -93,7 +93,8 @@ fn GeneralCard(site: SiteSummary) -> Element {
     }
 }
 
-/// Email digest subscription: GET current, toggle + frequency via PUT.
+/// Analytics digest subscription: GET current, toggle + frequency via PUT.
+/// Digests go to the site's notification destinations (below).
 #[component]
 fn DigestCard(site_id: String) -> Element {
     let refresh = use_signal(|| 0u32);
@@ -122,7 +123,10 @@ fn DigestCard(site_id: String) -> Element {
     };
 
     rsx! {
-        Card { title: "Email digest",
+        Card { title: "Analytics digest",
+            p { class: "text-muted-1 text-[12.5px] mb-3",
+                "Weekly or monthly summary delivered via the notification destinations below (Slack, Telegram, or webhook)."
+            }
             {match &*sub.read() {
                 None => rsx! {
                     Skeleton { lines: 2 }

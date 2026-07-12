@@ -13,10 +13,9 @@ use crate::{
     state::AppState,
 };
 
-/// Builds the non-SPA router: the REST API, ingest, auth, and public
-/// surfaces (digest unsubscribe). The Dioxus application itself (SSR +
-/// hydration + static assets) is merged on top of this by
-/// [`crate::server::serve`], which owns the catch-all fallback.
+/// Builds the non-SPA router: the REST API, ingest, and auth. The Dioxus
+/// application itself (SSR + hydration + static assets) is merged on top of
+/// this by [`crate::server::serve`], which owns the catch-all fallback.
 ///
 /// There is intentionally no public user-registration or org-creation route:
 /// self-hosted mode is a single-owner appliance bootstrapped at first start.
@@ -139,7 +138,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/api/v1/sites/{site}/alert-channels/{id}/test",
             post(insights::test_channel_api),
         )
-        // ---- Email digest subscription ----
+        // ---- Analytics digest subscription ----
         .route(
             "/api/v1/sites/{site}/digest-subscription",
             get(digest::get_subscription)
@@ -155,10 +154,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             require_api_auth,
         ));
 
-    // Public, unauthenticated surfaces: one-click digest unsubscribe.
-    let public_routes = Router::new()
-        .route("/digest/unsubscribe/{token}", get(digest::unsubscribe));
-
     // Auth routes (no auth required)
     let auth_routes = Router::new()
         .route("/login", get(auth::login_page).post(auth::login_submit))
@@ -168,7 +163,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(ingest_routes)
         .merge(key_ingest_routes)
         .merge(analytics_routes)
-        .merge(public_routes)
         .merge(auth_routes)
         .merge(public_assets)
         .layer(CompressionLayer::new());

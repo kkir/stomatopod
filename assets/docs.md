@@ -180,10 +180,12 @@ optional properties object. Properties are stored as JSON and shown in custom
 event breakdowns; use them for anything your app needs (plan name, feature
 flag, etc.).
 
-## Email digests
+## Analytics digests
 
-Opt in to weekly and/or monthly summary emails per site. Subscriptions are
-per-user; manage the current user's subscription with a user-scoped token:
+Opt in to weekly and/or monthly summary digests per site. Digests are delivered
+through the site's configured notification channels (Slack, Telegram, or
+webhook) - the same destinations used for analytics alerts. Subscriptions are
+per-user; manage the current user's subscription with a dashboard session:
 
 | Method & path                                          | Action                                  |
 |--------------------------------------------------------|-----------------------------------------|
@@ -193,10 +195,9 @@ per-user; manage the current user's subscription with a user-scoped token:
 | `POST /api/v1/sites/:site/digest-subscription/test`    | Send a digest immediately.              |
 
 Weekly digests are sent Monday 08:00 (UTC fallback); monthly on the 1st at
-08:00. Every email carries a one-click `GET /digest/unsubscribe/:token` link
-that needs no login. Configure delivery under `[email]` in `stomatopod.toml`
-(`provider`, `api_key`, `from`) and the public link host via `base_url`; with
-no provider the scheduler renders digests but does not send.
+08:00. Configure at least one notification destination under Site Settings.
+With no channels configured the scheduler skips delivery. Dashboard links in
+the message use `base_url` from `stomatopod.toml`.
 
 ## Creating funnels
 

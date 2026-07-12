@@ -12,7 +12,7 @@ port = 8080
 # tls_cert = "/etc/ssl/certs/server.crt"
 # tls_key  = "/etc/ssl/private/server.key"
 
-# Public base URL used to build email-digest URLs.
+# Public base URL used for dashboard links in digests and Secure cookies.
 # No trailing slash. Defaults to http://localhost:8080.
 # base_url = "https://analytics.example.com"
 
@@ -24,14 +24,6 @@ secret_key = ""          # REQUIRED — set a long random string
 session_ttl_s = 2592000 # 30 days (embedded in the signed session token)
 # cookie_secure = true   # force Secure cookie; default: true when base_url is https
 # trust_forwarded_headers = true  # set false if exposed without a reverse proxy
-
-# Email digest delivery.  With provider = "none" (default) digests are
-# rendered and logged but never sent, so the scheduler is side-effect free
-# until you wire up a transactional provider.
-[email]
-provider = "none"        # none | smtp | postmark | resend
-# api_key = "..."
-from = "analytics@localhost"
 
 # Storage backend.  Only "embedded" is currently implemented.
 [storage]

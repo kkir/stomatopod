@@ -731,7 +731,7 @@ impl MetaStore for SqliteMeta {
         })
     }
 
-    // ---- Email digest subscriptions ----
+    // ---- Analytics digest subscriptions ----
     async fn upsert_digest_subscription(&self, sub: &DigestSubscription) -> Result<(), StoreError> {
         let sub = sub.clone();
         db!(self.conn, |conn: &Connection| {

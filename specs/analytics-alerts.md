@@ -14,7 +14,7 @@ and referrer anomalies.
 | `traffic_spike` | Pageviews in last N minutes > X% above rolling baseline |
 | `traffic_drop` | Pageviews in last N minutes < X% below rolling baseline |
 | `new_referrer_spike` | Single referrer > X% of traffic in last hour (viral spike detection) |
-| `daily_summary` | Fixed-time daily digest (optional, see email-digest spec) |
+| `daily_summary` | Fixed-time daily digest (optional, see email-digest spec for channel digests) |
 
 ## Data Model
 
