@@ -1093,10 +1093,10 @@ async fn llms_txt_is_public_markdown() {
     assert!(body.contains("/api/v1/ingest"));
 }
 
-/// Install snippet must show both data-site and data-api so copy-paste works
-/// cross-origin (page origin != analytics host).
+/// Install snippet needs data-site + absolute tracker.js src; data-api is
+/// optional (derived from script origin when omitted).
 #[tokio::test]
-async fn llms_txt_install_snippet_includes_data_api() {
+async fn llms_txt_install_snippet_includes_data_site() {
     let ctx = setup().await;
     let req = Request::builder()
         .uri("/llms.txt")
@@ -1106,21 +1106,27 @@ async fn llms_txt_install_snippet_includes_data_api() {
     let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
 
     assert!(
-        body.contains("data-api="),
-        "docs install snippet must include data-api"
-    );
-    assert!(
         body.contains("data-site="),
         "docs install snippet must include data-site"
     );
     assert!(
-        body.contains("data-api=\"https://your-host/api/v1/event\"")
-            || body.contains("data-api='https://your-host/api/v1/event'"),
-        "docs should show a full absolute data-api URL in the install example"
+        body.contains("src=\"https://your-host/tracker.js\"")
+            || body.contains("src='https://your-host/tracker.js'"),
+        "docs should show an absolute tracker.js src in the install example"
     );
     assert!(
         body.contains("/tracker.js"),
         "docs should reference /tracker.js"
+    );
+    // Default example should not force data-api; document override separately.
+    let install_example = body
+        .split("```html")
+        .nth(1)
+        .and_then(|s| s.split("```").next())
+        .unwrap_or("");
+    assert!(
+        !install_example.contains("data-api"),
+        "default install example should omit data-api (derived from script src)"
     );
 }
 

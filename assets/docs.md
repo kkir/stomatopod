@@ -112,10 +112,7 @@ load and on client-side route changes. No cookies are set and no cross-site
 identifier is used.
 
 ```html
-<script defer
-  src="https://your-host/tracker.js"
-  data-api="https://your-host/api/v1/event"
-  data-site="YOUR_PUBLIC_KEY"></script>
+<script defer src="https://your-host/tracker.js" data-site="YOUR_PUBLIC_KEY"></script>
 ```
 
 `data-site` is the site's **public key** (the `Public Key` shown on the site's
@@ -125,9 +122,10 @@ pageviews and events to that one site through the public `POST /api/v1/event`
 endpoint, and grants no read or cross-site access. The tracker resolves the
 site from this key, so you never pass a site id.
 
-`data-api` is the full event ingest URL on your Stomatopod host. Always set it
-alongside `data-site` so beacons go to the analytics server rather than the
-page's own origin.
+By default the tracker posts to `{script origin}/api/v1/event`, so loading
+`tracker.js` from your Stomatopod host is enough. Set `data-api` only when the
+event endpoint lives on a different origin (for example a CDN for the script
+and a separate ingest host).
 
 The script is served with a one-day immutable cache, so reference it directly
 from your host rather than copying its contents.
@@ -137,7 +135,7 @@ from your host rather than copying its contents.
 | Attribute        | Effect                                                                                      |
 |------------------|---------------------------------------------------------------------------------------------|
 | `data-site`      | **Required.** Site public key. The tracker no-ops if it is missing.                         |
-| `data-api`       | **Recommended.** Full event endpoint URL (e.g. `https://your-host/api/v1/event`). If omitted, the tracker derives `{script origin}/api/v1/event` from the script `src`. |
+| `data-api`       | **Optional.** Full event endpoint URL. If omitted, the tracker uses `{script origin}/api/v1/event` from the script `src` (not the page origin). |
 | `data-exclude`   | Disable the tracker for this page load entirely (handy for staging/admin pages).            |
 
 ### Behavior
