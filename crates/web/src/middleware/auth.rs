@@ -36,7 +36,7 @@ impl Principal {
     /// True for a logged-in dashboard user (session cookie or signed-session
     /// bearer token). False for read/ingest-scoped API keys, which must not
     /// perform account-administrative writes (creating sites, minting other
-    /// API keys, wiring alert destinations, share links, or analytics alerts).
+    /// API keys, wiring alert destinations, or analytics alerts).
     pub fn is_dashboard(&self) -> bool {
         !matches!(self, Principal::ApiKey { .. })
     }

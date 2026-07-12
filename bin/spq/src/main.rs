@@ -10,7 +10,6 @@ mod alerts;
 mod client;
 mod query;
 mod req;
-mod share;
 mod sites;
 mod skills;
 
@@ -54,11 +53,6 @@ enum Commands {
         #[command(subcommand)]
         cmd: alerts::AlertsCommand,
     },
-    /// Manage read-only dashboard share links.
-    Share {
-        #[command(subcommand)]
-        cmd: share::ShareCommand,
-    },
     /// Print a machine-readable description of every command (for LLM agents).
     Describe,
     /// Manage Claude Code skills bundled with spq.
@@ -77,7 +71,6 @@ async fn main() -> anyhow::Result<()> {
         Commands::Query { cmd, human } => query::run(cmd, &client, *human).await,
         Commands::Sites { cmd } => sites::run(cmd, &client).await,
         Commands::Alerts { cmd } => alerts::run(cmd, &client).await,
-        Commands::Share { cmd } => share::run(cmd, &client).await,
         Commands::Describe => {
             println!("{}", serde_json::to_string_pretty(&describe())?);
             Ok(())
@@ -266,28 +259,6 @@ fn describe() -> serde_json::Value {
                     { "name": "--site", "required": true },
                     { "name": "--alert", "required": true },
                     { "name": "--enabled", "required": true, "note": "true|false." }
-                ]
-            },
-            {
-                "name": "share list",
-                "description": "List read-only dashboard share links.",
-                "args": [ { "name": "--site", "required": true } ]
-            },
-            {
-                "name": "share create",
-                "description": "Create a share link (requires a write-capable key).",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--label", "required": false },
-                    { "name": "--expires", "required": false, "note": "YYYY-MM-DD." }
-                ]
-            },
-            {
-                "name": "share revoke",
-                "description": "Revoke a share link by id.",
-                "args": [
-                    { "name": "--site", "required": true },
-                    { "name": "--link", "required": true }
                 ]
             },
             {

@@ -155,6 +155,82 @@ pub fn select_sink(
     }
 }
 
+/// Deliver a free-form notification (analytics digests, etc.) through an
+/// already-configured alert channel. Shared by digest dispatch and any other
+/// non-incident outbound message.
+pub async fn deliver_text(
+    channel: &AlertChannel,
+    title: &str,
+    body: &str,
+    client: &reqwest::Client,
+) -> anyhow::Result<()> {
+    match channel.kind {
+        AlertChannelKind::Webhook => {
+            validate_outbound_url(&channel.url).map_err(anyhow::Error::msg)?;
+            let payload = json!({
+                "type": "digest",
+                "title": title,
+                "text": body,
+            });
+            let bytes = serde_json::to_vec(&payload)?;
+            let mut req = client
+                .post(&channel.url)
+                .header("content-type", "application/json");
+            if let Some(secret) = &channel.secret {
+                let sig = sign_blake3(secret.as_bytes(), &bytes);
+                req = req.header("x-stomatopod-signature", sig);
+            }
+            let resp = req.body(bytes).send().await?;
+            if !resp.status().is_success() {
+                anyhow::bail!("webhook returned {}", resp.status());
+            }
+        }
+        AlertChannelKind::Slack => {
+            validate_outbound_url(&channel.url).map_err(anyhow::Error::msg)?;
+            // Slack section text max is 3000 chars; truncate body if needed.
+            let section = if body.len() > 2800 {
+                format!("{}…", &body[..2800])
+            } else {
+                body.to_string()
+            };
+            let payload = json!({
+                "blocks": [
+                    {
+                        "type": "header",
+                        "text": {"type": "plain_text", "text": title, "emoji": true}
+                    },
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": section}
+                    }
+                ]
+            });
+            let resp = client.post(&channel.url).json(&payload).send().await?;
+            if !resp.status().is_success() {
+                anyhow::bail!("slack returned {}", resp.status());
+            }
+        }
+        AlertChannelKind::Telegram => {
+            let token = channel
+                .secret
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("telegram channel missing bot token"))?;
+            let chat_id = &channel.url;
+            // Plain text - no parse_mode (same rationale as incident alerts).
+            let text = format!("{title}\n\n{body}");
+            let api = format!("https://api.telegram.org/bot{token}/sendMessage");
+            let payload = json!({ "chat_id": chat_id, "text": text });
+            let resp = client.post(api).json(&payload).send().await?;
+            let status = resp.status();
+            if !status.is_success() {
+                let detail = resp.text().await.unwrap_or_default();
+                anyhow::bail!("telegram returned {status}: {detail}");
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn incident_payload(incident: &Incident) -> serde_json::Value {
     json!({
         "id": incident.id.to_string(),

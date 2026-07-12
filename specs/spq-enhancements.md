@@ -51,13 +51,6 @@ spq alerts delete  --site <id> --alert <id>
 spq alerts toggle  --site <id> --alert <id> --enabled true|false
 ```
 
-### Share Links
-```
-spq share list    --site <id>
-spq share create  --site <id> [--label "Client view"] [--expires 2025-12-31]
-spq share revoke  --site <id> --link <id>
-```
-
 ## Output Format Consistency
 All commands follow existing convention:
 - Default: JSON (machine-readable)

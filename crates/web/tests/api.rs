@@ -25,17 +25,20 @@ use stomatopod_web::{middleware::auth::sign_session, router::build_router, state
 
 // ---- Test harness ----
 
-/// Test email transport: records every digest handed to it so assertions
-/// can inspect recipients and rendered bodies.
+/// Test digest transport: records every message without outbound HTTP.
 #[derive(Clone, Default)]
-struct CapturingSender {
-    sent: Arc<std::sync::Mutex<Vec<stomatopod_web::digest::DigestEmail>>>,
+struct CapturingNotifier {
+    sent: Arc<std::sync::Mutex<Vec<stomatopod_web::digest::DigestMessage>>>,
 }
 
 #[async_trait::async_trait]
-impl stomatopod_web::digest::DigestSender for CapturingSender {
-    async fn send(&self, email: stomatopod_web::digest::DigestEmail) -> Result<(), String> {
-        self.sent.lock().unwrap().push(email);
+impl stomatopod_web::digest::DigestNotifier for CapturingNotifier {
+    async fn send(
+        &self,
+        _channels: &[stomatopod_core::domain::agent::AlertChannel],
+        msg: stomatopod_web::digest::DigestMessage,
+    ) -> Result<(), String> {
+        self.sent.lock().unwrap().push(msg);
         Ok(())
     }
 }
@@ -43,7 +46,7 @@ impl stomatopod_web::digest::DigestSender for CapturingSender {
 struct TestCtx {
     state: Arc<AppState>,
     backend: Arc<EmbeddedBackend>,
-    digest_sink: CapturingSender,
+    digest_sink: CapturingNotifier,
     secret: String,
     _ingest_rx: tokio::sync::mpsc::Receiver<stomatopod_core::domain::event::Event>,
     _dir: tempfile::TempDir,
@@ -78,7 +81,7 @@ async fn setup_with_flush(flush_rows: usize, flush_interval_s: u64) -> TestCtx {
 
     let (ingest_tx, ingest_rx) = tokio::sync::mpsc::channel(256);
 
-    let digest_sink = CapturingSender::default();
+    let digest_sink = CapturingNotifier::default();
 
     let state = Arc::new(AppState {
         backend: backend.clone(),
@@ -89,7 +92,7 @@ async fn setup_with_flush(flush_rows: usize, flush_interval_s: u64) -> TestCtx {
         site_cache: Arc::new(DashMap::new()),
         api_key_cache: Arc::new(DashMap::new()),
         geo: Arc::new(GeoLookup::new(None)),
-        digest_sender: Arc::new(digest_sink.clone()),
+        digest_notifier: Arc::new(digest_sink.clone()),
         login_failures: Arc::new(DashMap::new()),
     });
 
@@ -995,28 +998,6 @@ async fn read_key_rejects_unknown_key() {
 }
 
 #[tokio::test]
-async fn read_key_cannot_create_share_link() {
-    let ctx = setup().await;
-    let org = make_org();
-    ctx.backend.meta.create_org(&org).await.unwrap();
-    let site = make_site(org.id);
-    ctx.backend.meta.create_site(&site).await.unwrap();
-    let (key, plaintext) =
-        stomatopod_core::domain::api_key::ApiKey::new_read(org.id, None, "agent".into());
-    ctx.backend.meta.create_api_key(&key).await.unwrap();
-
-    let (status, json) = send_json(
-        ctx.state.clone(),
-        "POST",
-        &format!("/api/v1/sites/{}/share-links", site.id),
-        &plaintext,
-        Some(serde_json::json!({"label": "nope"})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "got {json}");
-}
-
-#[tokio::test]
 async fn read_key_cannot_create_analytics_alert() {
     let ctx = setup().await;
     let org = make_org();
@@ -1581,132 +1562,7 @@ async fn api_campaigns_returns_utm_breakdowns() {
 }
 
 // ============================================================================
-// Share links
-// ============================================================================
-
-/// Build an unauthenticated GET against the public share surface.
-async fn public_get(state: Arc<AppState>, uri: &str) -> (StatusCode, serde_json::Value) {
-    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
-    let resp = make_app(state).oneshot(req).await.unwrap();
-    let status = resp.status();
-    let bytes = body_bytes(resp).await;
-    let json = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
-    (status, json)
-}
-
-#[tokio::test]
-async fn share_link_crud_and_public_access() {
-    let ctx = setup().await;
-    let (site, token) = site_and_token(&ctx).await;
-
-    // Create a link.
-    let (status, json) = send_json(
-        ctx.state.clone(),
-        "POST",
-        &format!("/api/v1/sites/{}/share-links", site.id),
-        &token,
-        Some(serde_json::json!({"label": "Client view"})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "create, got {json}");
-    let share_token = json["token"].as_str().unwrap().to_string();
-    let link_id = json["id"].as_str().unwrap().to_string();
-    assert!(json["url"].as_str().unwrap().ends_with(&share_token));
-
-    // List shows it.
-    let (status, json) = get_json(
-        ctx.state.clone(),
-        &format!("/api/v1/sites/{}/share-links", site.id),
-        &token,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["share_links"].as_array().unwrap().len(), 1);
-
-    // Public, unauthenticated access resolves and returns the pageviews schema.
-    let (status, json) = public_get(
-        ctx.state.clone(),
-        &format!("/share/{share_token}/api/pageviews"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "public pageviews, got {json}");
-    assert!(json.get("total_pageviews").is_some());
-
-    // The HTML shell renders with branding.
-    let req = Request::builder()
-        .uri(format!("/share/{share_token}"))
-        .body(Body::empty())
-        .unwrap();
-    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let html = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
-    assert!(html.contains("Powered by Stomatopod"));
-
-    // Public top-N mirror.
-    let (status, json) = public_get(
-        ctx.state.clone(),
-        &format!("/share/{share_token}/api/top/pages"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(json.get("rows").is_some());
-
-    // Unknown top dimension → 404.
-    let (status, _) = public_get(
-        ctx.state.clone(),
-        &format!("/share/{share_token}/api/top/secrets"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-
-    // Revoke → token no longer resolves (404, not 403 — don't leak existence).
-    let (status, _) = send_json(
-        ctx.state.clone(),
-        "DELETE",
-        &format!("/api/v1/sites/{}/share-links/{link_id}", site.id),
-        &token,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, _) = public_get(
-        ctx.state.clone(),
-        &format!("/share/{share_token}/api/pageviews"),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "revoked token must 404");
-}
-
-#[tokio::test]
-async fn expired_share_link_returns_gone() {
-    use stomatopod_core::domain::share_link::ShareLink;
-    let ctx = setup().await;
-    let (site, _token) = site_and_token(&ctx).await;
-
-    let link = ShareLink {
-        id: Ulid::new(),
-        site_id: site.id,
-        token: "expired-token".into(),
-        label: None,
-        expires_at: Some(Utc::now() - chrono::Duration::days(1)),
-        created_by: "u".into(),
-        created_at: Utc::now() - chrono::Duration::days(8),
-    };
-    ctx.backend.meta.create_share_link(&link).await.unwrap();
-
-    let (status, json) = public_get(ctx.state.clone(), "/share/expired-token/api/pageviews").await;
-    assert_eq!(status, StatusCode::GONE, "expired token, got {json}");
-}
-
-#[tokio::test]
-async fn unknown_share_token_is_not_found() {
-    let ctx = setup().await;
-    let (status, _) = public_get(ctx.state.clone(), "/share/does-not-exist/api/pageviews").await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-}
-
-// ============================================================================
-// Email digest
+// Analytics digest (channel delivery)
 // ============================================================================
 
 /// Create org + persisted user + site, returning the site and a session
@@ -1728,6 +1584,20 @@ async fn site_user_and_token(ctx: &TestCtx) -> (Site, stomatopod_core::domain::o
     };
     ctx.backend.meta.create_user(&user).await.unwrap();
     (site, user)
+}
+
+async fn add_test_channel(ctx: &TestCtx, site_id: Ulid) {
+    use stomatopod_core::domain::agent::{AlertChannel, AlertChannelKind};
+    let ch = AlertChannel {
+        id: Ulid::new(),
+        site_id,
+        kind: AlertChannelKind::Webhook,
+        url: "https://example.com/hooks/digest".into(),
+        secret: None,
+        created_at: Utc::now(),
+        last_error_at: None,
+    };
+    ctx.backend.meta.create_alert_channel(&ch).await.unwrap();
 }
 
 #[tokio::test]
@@ -1769,7 +1639,26 @@ async fn digest_subscription_crud_and_test_send() {
     assert_eq!(status, StatusCode::OK, "create sub, got {json}");
     assert_eq!(json["frequency"], "weekly");
 
-    // Test-send delivers one email to the user's address.
+    // Test-send without a channel fails.
+    let (status, json) = send_json(
+        ctx.state.clone(),
+        "POST",
+        &format!("/api/v1/sites/{}/digest-subscription/test", site.id),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        json["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("notification destination"),
+        "expected channel-required error, got {json}"
+    );
+
+    // With a channel, test-send delivers one digest message.
+    add_test_channel(&ctx, site.id).await;
     let (status, _) = send_json(
         ctx.state.clone(),
         "POST",
@@ -1781,9 +1670,9 @@ async fn digest_subscription_crud_and_test_send() {
     assert_eq!(status, StatusCode::OK);
     let sent = ctx.digest_sink.sent.lock().unwrap().clone();
     assert_eq!(sent.len(), 1, "one digest captured");
-    assert_eq!(sent[0].to, user.email);
+    assert_eq!(sent[0].site_id, site.id);
     assert!(sent[0].subject.contains(&site.domain));
-    assert!(sent[0].html.contains("Powered by Stomatopod"));
+    assert!(sent[0].text.contains("Dashboard:"));
 
     // Delete unsubscribes.
     let (status, _) = send_json(
@@ -1812,6 +1701,7 @@ async fn digest_scheduler_dispatches_weekly_to_subscribers() {
     };
     let ctx = setup().await;
     let (site, user) = site_user_and_token(&ctx).await;
+    add_test_channel(&ctx, site.id).await;
 
     let sub = DigestSubscription {
         id: Ulid::new(),
@@ -1828,33 +1718,32 @@ async fn digest_scheduler_dispatches_weekly_to_subscribers() {
         .await
         .unwrap();
 
-    let sink = CapturingSender::default();
+    let sink = CapturingNotifier::default();
     let meta: Arc<dyn MetaStore> = ctx.backend.clone();
     let backend: Arc<dyn StorageBackend> = ctx.backend.clone();
-    let sender: Arc<dyn stomatopod_web::digest::DigestSender> = Arc::new(sink.clone());
+    let notifier: Arc<dyn stomatopod_web::digest::DigestNotifier> = Arc::new(sink.clone());
 
     // Weekly cadence reaches the weekly subscriber.
     let n = stomatopod_web::digest::dispatch_cadence(
         &meta,
         &backend,
-        &sender,
+        &notifier,
         "http://localhost:8080",
-        &ctx.secret,
         DigestFrequency::Weekly,
     )
     .await;
     assert_eq!(n, 1, "one weekly digest dispatched");
     let sent = sink.sent.lock().unwrap().clone();
     assert_eq!(sent.len(), 1);
-    assert_eq!(sent[0].to, user.email);
+    assert_eq!(sent[0].site_id, site.id);
+    assert!(sent[0].subject.contains(&site.domain));
 
     // Monthly cadence skips a weekly-only subscriber.
     let n = stomatopod_web::digest::dispatch_cadence(
         &meta,
         &backend,
-        &sender,
+        &notifier,
         "http://localhost:8080",
-        &ctx.secret,
         DigestFrequency::Monthly,
     )
     .await;
@@ -1862,8 +1751,11 @@ async fn digest_scheduler_dispatches_weekly_to_subscribers() {
 }
 
 #[tokio::test]
-async fn digest_unsubscribe_token_disables_subscription() {
-    use stomatopod_core::domain::digest::{DigestFrequency, DigestSubscription};
+async fn digest_scheduler_skips_site_without_channels() {
+    use stomatopod_core::{
+        domain::digest::{DigestFrequency, DigestSubscription},
+        traits::{MetaStore, StorageBackend},
+    };
     let ctx = setup().await;
     let (site, user) = site_user_and_token(&ctx).await;
 
@@ -1871,7 +1763,7 @@ async fn digest_unsubscribe_token_disables_subscription() {
         id: Ulid::new(),
         user_id: user.id,
         site_id: site.id,
-        frequency: DigestFrequency::Both,
+        frequency: DigestFrequency::Weekly,
         enabled: true,
         bounce_count: 0,
         created_at: Utc::now(),
@@ -1882,31 +1774,18 @@ async fn digest_unsubscribe_token_disables_subscription() {
         .await
         .unwrap();
 
-    let token = stomatopod_web::digest::unsubscribe_token(&ctx.secret, sub.id);
-    let req = Request::builder()
-        .uri(format!("/digest/unsubscribe/{token}"))
-        .body(Body::empty())
-        .unwrap();
-    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let html = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
-    assert!(html.contains("Unsubscribed"));
-
-    // Subscription is now disabled.
-    let sub = ctx
-        .backend
-        .meta
-        .get_digest_subscription(user.id, site.id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(!sub.enabled);
-
-    // A garbage token is rejected.
-    let req = Request::builder()
-        .uri("/digest/unsubscribe/not-a-valid-token")
-        .body(Body::empty())
-        .unwrap();
-    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    // Production-like notifier that requires channels.
+    let notifier: Arc<dyn stomatopod_web::digest::DigestNotifier> =
+        Arc::new(stomatopod_web::digest::ChannelNotifier);
+    let meta: Arc<dyn MetaStore> = ctx.backend.clone();
+    let backend: Arc<dyn StorageBackend> = ctx.backend.clone();
+    let n = stomatopod_web::digest::dispatch_cadence(
+        &meta,
+        &backend,
+        &notifier,
+        "http://localhost:8080",
+        DigestFrequency::Weekly,
+    )
+    .await;
+    assert_eq!(n, 0, "no channels => no successful dispatch");
 }

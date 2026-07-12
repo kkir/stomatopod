@@ -150,22 +150,21 @@ async fn serve(cfg: Config) -> Result<()> {
         .await;
     });
 
-    // Email digest sender + hourly scheduler. The default LogSender keeps
-    // self-hosted deployments side-effect free until a provider is wired.
-    let digest_sender: Arc<dyn crate::digest::DigestSender> = Arc::new(crate::digest::LogSender);
+    // Digest notifier + hourly scheduler. Digests post to each site's
+    // configured Slack / Telegram / webhook channels.
+    let digest_notifier: Arc<dyn crate::digest::DigestNotifier> =
+        Arc::new(crate::digest::ChannelNotifier);
     {
         let meta_for_digest = meta.clone();
         let backend_for_digest = backend.clone();
-        let sender_for_digest = digest_sender.clone();
+        let notifier_for_digest = digest_notifier.clone();
         let base_url = cfg.public_base_url().to_string();
-        let secret = cfg.auth.secret_key.clone();
         tokio::spawn(async move {
             crate::digest::run_digest_scheduler(
                 meta_for_digest,
                 backend_for_digest,
-                sender_for_digest,
+                notifier_for_digest,
                 base_url,
-                secret,
                 std::time::Duration::from_secs(3600),
             )
             .await;
@@ -184,7 +183,7 @@ async fn serve(cfg: Config) -> Result<()> {
         site_cache: Arc::new(DashMap::new()),
         api_key_cache: Arc::new(DashMap::new()),
         geo,
-        digest_sender,
+        digest_notifier,
         login_failures: Arc::new(DashMap::new()),
     });
 

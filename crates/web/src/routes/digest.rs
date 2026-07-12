@@ -1,15 +1,15 @@
-//! Email digest subscription management + one-click unsubscribe.
+//! Digest subscription management.
 //!
 //! CRUD lives under `/api/v1/sites/:site/digest-subscription` and operates
-//! on the current user's subscription. A token-based unsubscribe endpoint
-//! (`/digest/unsubscribe/:token`) requires no login.
+//! on the current user's subscription. Digests are delivered through the
+//! site's configured notification channels (Slack, Telegram, webhook).
 
 use std::sync::Arc;
 
 use axum::{
     extract::{Extension, Path, State},
     http::StatusCode,
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
     Json,
 };
 use axum_extra::extract::cookie::CookieJar;
@@ -19,7 +19,7 @@ use ulid::Ulid;
 use stomatopod_core::domain::digest::{DigestFrequency, DigestSubscription};
 
 use crate::{
-    digest::{build_digest_email, verify_unsubscribe_token},
+    digest::build_digest_message,
     middleware::auth::{verify_session, Principal, SESSION_COOKIE},
     state::AppState,
 };
@@ -98,13 +98,16 @@ pub async fn get_subscription(
         None => return not_found(),
     };
     match state.meta.get_digest_subscription(user_id, site_id).await {
-        Ok(Some(sub)) => Json(subscription_json(&sub)).into_response(),
+        Ok(Some(sub)) => Json(serde_json::json!({
+            "subscription": subscription_json(&sub),
+        }))
+        .into_response(),
         Ok(None) => Json(serde_json::json!({ "subscription": null })).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
-/// PUT /api/v1/sites/:site/digest-subscription  — create or update
+/// PUT /api/v1/sites/:site/digest-subscription  - create or update
 pub async fn put_subscription(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -161,7 +164,7 @@ pub async fn put_subscription(
     }
 }
 
-/// DELETE /api/v1/sites/:site/digest-subscription  — unsubscribe
+/// DELETE /api/v1/sites/:site/digest-subscription  - unsubscribe
 pub async fn delete_subscription(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -186,7 +189,8 @@ pub async fn delete_subscription(
     }
 }
 
-/// POST /api/v1/sites/:site/digest-subscription/test  — send a digest now
+/// POST /api/v1/sites/:site/digest-subscription/test  - send a digest now
+/// through the site's notification channels.
 pub async fn send_test(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -218,17 +222,29 @@ pub async fn send_test(
     } else {
         DigestFrequency::Monthly
     };
-    let email = build_digest_email(
+    let channels = match state.meta.list_alert_channels(site_id).await {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    if channels.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "configure a notification destination (Slack, Telegram, or webhook) first"
+            })),
+        )
+            .into_response();
+    }
+    let msg = build_digest_message(
         &state.backend,
         &state.meta,
         state.config.public_base_url(),
-        &state.config.auth.secret_key,
-        &sub,
+        site_id,
         cadence,
     )
     .await;
-    match email {
-        Some(email) => match state.digest_sender.send(email).await {
+    match msg {
+        Some(msg) => match state.digest_notifier.send(&channels, msg).await {
             Ok(_) => Json(serde_json::json!({"status": "sent"})).into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -238,47 +254,8 @@ pub async fn send_test(
         },
         None => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "could not build digest (missing user/site)"})),
+            Json(serde_json::json!({"error": "could not build digest (missing site)"})),
         )
             .into_response(),
     }
-}
-
-/// GET /digest/unsubscribe/:token  — one-click, no auth required.
-pub async fn unsubscribe(
-    State(state): State<Arc<AppState>>,
-    Path(token): Path<String>,
-) -> Response {
-    let sub_id = match verify_unsubscribe_token(&state.config.auth.secret_key, &token) {
-        Some(id) => id,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Html(
-                    "<!doctype html><meta charset=utf-8><body><h1>Invalid link</h1></body>"
-                        .to_string(),
-                ),
-            )
-                .into_response()
-        }
-    };
-    // The token carries the subscription id; disable by setting enabled=false
-    // via a fresh upsert. We look it up across enabled subscriptions.
-    let subs = state
-        .meta
-        .list_enabled_digest_subscriptions()
-        .await
-        .unwrap_or_default();
-    if let Some(mut sub) = subs.into_iter().find(|s| s.id == sub_id) {
-        sub.enabled = false;
-        let _ = state.meta.upsert_digest_subscription(&sub).await;
-    }
-    Html(
-        "<!doctype html><meta charset=utf-8>\
-         <body style=\"font-family:system-ui;text-align:center;padding:64px\">\
-         <h1>Unsubscribed</h1><p>You will no longer receive these digests.</p>\
-         <p style=\"color:#999\">Powered by Stomatopod</p></body>"
-            .to_string(),
-    )
-    .into_response()
 }

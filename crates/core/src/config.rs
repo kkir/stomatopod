@@ -11,35 +11,10 @@ pub struct Config {
     pub geo: GeoConfig,
     pub auth: AuthConfig,
     pub limits: LimitsConfig,
-    pub email: EmailConfig,
-    /// Public base URL used to build share-link and digest URLs in emails
-    /// and the share UI, e.g. `https://analytics.example.com`. No trailing
-    /// slash. Defaults to `http://localhost:8080`.
+    /// Public base URL used to build dashboard links in digests and cookies,
+    /// e.g. `https://analytics.example.com`. No trailing slash. Defaults to
+    /// `http://localhost:8080`.
     pub base_url: String,
-}
-
-/// Email/transactional-send settings for digests. When `provider` is
-/// `none` (the default) digests are rendered and logged but not sent — the
-/// scheduler still runs, which keeps self-hosted deployments side-effect
-/// free until an operator wires up a provider.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
-pub struct EmailConfig {
-    /// `none`, `smtp`, `postmark`, or `resend`.
-    pub provider: String,
-    pub api_key: Option<String>,
-    /// From address, e.g. `analytics@yourdomain.com`.
-    pub from: String,
-}
-
-impl Default for EmailConfig {
-    fn default() -> Self {
-        Self {
-            provider: "none".into(),
-            api_key: None,
-            from: "analytics@localhost".into(),
-        }
-    }
 }
 
 impl Config {

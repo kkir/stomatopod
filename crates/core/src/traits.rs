@@ -8,7 +8,6 @@ use crate::{
         api_key::ApiKey,
         digest::DigestSubscription,
         org::{Funnel, Organization, User},
-        share_link::ShareLink,
         site::Site,
     },
     error::StoreError,
@@ -153,23 +152,7 @@ pub trait MetaStore: Send + Sync + 'static {
         alert_id: Ulid,
     ) -> Result<Option<AnalyticsAlertFire>, StoreError>;
 
-    // ---- Share links ----
-    async fn create_share_link(&self, link: &ShareLink) -> Result<(), StoreError>;
-    async fn list_share_links(&self, site_id: Ulid) -> Result<Vec<ShareLink>, StoreError>;
-    async fn get_share_link(&self, id: Ulid) -> Result<Option<ShareLink>, StoreError>;
-    /// Resolve a public token to its link. Powers unauthenticated `/share`
-    /// access; a missing row means a revoked or never-issued token.
-    async fn get_share_link_by_token(&self, token: &str) -> Result<Option<ShareLink>, StoreError>;
-    /// Update the mutable fields (label, expiry) of a link.
-    async fn update_share_link(
-        &self,
-        id: Ulid,
-        label: Option<String>,
-        expires_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<(), StoreError>;
-    async fn delete_share_link(&self, id: Ulid) -> Result<(), StoreError>;
-
-    // ---- Email digest subscriptions ----
+    // ---- Analytics digest subscriptions ----
     async fn upsert_digest_subscription(&self, sub: &DigestSubscription) -> Result<(), StoreError>;
     async fn get_digest_subscription(
         &self,

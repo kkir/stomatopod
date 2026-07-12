@@ -43,6 +43,22 @@ async function createSite(page: Page, name: string, domain: string) {
   return body.id as string;
 }
 
+/**
+ * Fill a Settings "NoAutofillInput" field. Those inputs stay `readonly`
+ * until focused (anti-password-manager), so a bare Playwright `fill` fails.
+ */
+async function fillNoAutofill(
+  page: Page,
+  placeholder: string,
+  value: string,
+) {
+  const input = page.getByPlaceholder(placeholder);
+  await expect(input).toBeVisible();
+  await input.click();
+  await expect(input).not.toHaveAttribute("readonly");
+  await input.fill(value);
+}
+
 // ---- Auth gating ----
 
 test("unauthenticated visit to /ui redirects to login", async ({ page }) => {
@@ -202,39 +218,53 @@ test("funnel builder creates a funnel", async ({ page }) => {
   await expect(page.getByText(funnelName)).toBeVisible({ timeout: 10_000 });
 });
 
-// ---- Alerts + channels (SPA interactivity, ported from legacy tier2) ----
+// ---- Notifications (settings) + alerts ----
+// Channels live under Site Settings; Alerts only pick among existing
+// destinations.
 
-test("an alert channel can be added and an alert created", async ({ page }) => {
+test("a notification destination can be added and an alert created", async ({
+  page,
+}) => {
   await login(page);
   const siteId = await createSite(page, "Alerts Co", "alerts.example");
 
-  await page.goto(`${UI}/sites/${siteId}/alerts`);
+  // Notification destinations: Settings → Notifications (Telegram / Slack / Webhook).
+  await page.goto(`${UI}/sites/${siteId}/settings`);
   await waitForSpa(page);
-  await expect(page.getByRole("heading", { name: "Channels" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Site Settings", level: 1 }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Notifications" }),
+  ).toBeVisible();
 
-  // The channel kind selector offers telegram (ported tier2 assertion).
-  const kinds = await page
-    .locator("select")
-    .first()
-    .locator("option")
-    .allInnerTexts();
-  expect(kinds.join(" ").toLowerCase()).toContain("telegram");
+  // Switch to the Webhook tab (Telegram is the default).
+  await page.getByRole("button", { name: "Webhook", exact: true }).click();
 
-  // Add a webhook channel. Host must resolve to a public address so the
-  // server's SSRF checks accept it (fake TLDs like .e2e.test fail DNS and
-  // are rejected as invalid destinations).
+  // Host must resolve to a public address so the server's SSRF checks accept
+  // it (fake TLDs like .e2e.test fail DNS and are rejected).
   const hookUrl = `https://example.com/hooks/${Date.now().toString(36)}`;
-  await page.getByPlaceholder("Webhook URL / chat id").fill(hookUrl);
-  await page.getByRole("button", { name: "Add channel" }).click();
-  // The URL shows both in the channel list and later in the alert form's
-  // channel <option>; the list entry is the first match.
+  await fillNoAutofill(
+    page,
+    "https://example.com/hooks/stomatopod",
+    hookUrl,
+  );
+  await page.getByRole("button", { name: "Add webhook" }).click();
   await expect(page.getByText(hookUrl).first()).toBeVisible({
     timeout: 10_000,
   });
 
-  // With a channel present, create a traffic-spike alert. Assert on the
-  // created row's config line ("threshold 200 · 60m"), which is unique to the
-  // alerts list (the kind label also appears as a hidden <option>).
+  // With a channel present, create a traffic-spike alert on the Alerts tab.
+  // PageHead is h1 "Alerts" and the card is also h2 "Alerts" — pick level 1.
+  await page.goto(`${UI}/sites/${siteId}/alerts`);
+  await waitForSpa(page);
+  await expect(
+    page.getByRole("heading", { name: "Alerts", level: 1 }),
+  ).toBeVisible();
+  // Channel should appear in the destination select once loaded.
+  await expect(
+    page.locator("select").filter({ hasText: /Webhook/ }).first(),
+  ).toBeVisible({ timeout: 10_000 });
   await page.getByPlaceholder("threshold").fill("200");
   await page.getByRole("button", { name: "Add alert" }).click();
   await expect(page.getByText(/threshold 200/)).toBeVisible({

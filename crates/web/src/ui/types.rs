@@ -261,35 +261,6 @@ pub struct CreateSiteKeyBody {
     pub org_wide: bool,
 }
 
-// ---- Share links: GET/POST /api/v1/sites/:site/share-links,
-// PATCH/DELETE .../:id (share_links::*) ----
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct ShareLink {
-    pub id: String,
-    pub token: String,
-    #[serde(default)]
-    pub label: Option<String>,
-    #[serde(default)]
-    pub expires_at: Option<String>,
-    #[serde(default)]
-    pub url: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
-pub struct ShareLinksList {
-    #[serde(default)]
-    pub share_links: Vec<ShareLink>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CreateShareLinkBody {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<String>,
-}
-
 // ---- Digest subscription: GET/PUT/DELETE
 // /api/v1/sites/:site/digest-subscription (digest::*) ----
 

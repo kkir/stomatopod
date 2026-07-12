@@ -1,17 +1,17 @@
-# Email Digest
+# Analytics Digest
 
 ## Problem
-Users only see analytics when they log in. There's no passive awareness of how a site is doing — no weekly summary arriving in their inbox.
+Users only see analytics when they log in. There's no passive awareness of how a site is doing - no weekly summary arriving on their notification channel.
 
 ## Goal
-Send opt-in weekly and/or monthly email digests summarizing key site metrics: pageviews, sessions, top pages, top referrers, and period-over-period change.
+Send opt-in weekly and/or monthly digests summarizing key site metrics: pageviews, sessions, top pages, top referrers, and period-over-period change. Delivery uses the site's configured notification medium (Slack, Telegram, or webhook) - the same channels as analytics alerts.
 
-## Email Content
+## Content
 
 ### Weekly digest (sent Monday morning)
-- Subject: "Your [domain] analytics — week of [date]"
+- Title: "Your [domain] analytics - last 7 days"
 - Last 7 days: total pageviews, sessions, bounce rate
-- vs prior 7 days: delta badges (+12% / -8%)
+- vs prior 7 days: delta (+12% / -8%)
 - Top 3 pages (with pageview counts)
 - Top 3 referrers
 - Top country
@@ -19,11 +19,10 @@ Send opt-in weekly and/or monthly email digests summarizing key site metrics: pa
 
 ### Monthly digest (sent 1st of month)
 - Same structure but for last 30 days
-- Additional: best day of the month, sparkline summary (text-based)
 
 ## Data Model
 
-New table: `digest_subscriptions`
+Table: `digest_subscriptions`
 ```sql
 CREATE TABLE digest_subscriptions (
     id          TEXT PRIMARY KEY,
@@ -41,41 +40,32 @@ Background job runs:
 - Weekly: every Monday at 08:00 user's timezone (fallback: UTC)
 - Monthly: 1st of month at 08:00
 
-Job fetches all enabled subscriptions, computes stats, renders email template, enqueues send.
+Job fetches enabled subscriptions, dedupes by site, computes stats, and
+dispatches a plain-text message to every alert channel on that site.
 
-## Email Template
-Plain HTML email (no heavy design framework). Structure:
-- Header: site domain + date range
-- Stats cards: 3 numbers in a row (pageviews / sessions / bounce rate) with delta
-- Top pages: simple table (5 rows max)
-- Top referrers: simple table (5 rows max)
-- Footer: unsubscribe link, "View full dashboard" CTA
+## Delivery
+Reuses alert channel sinks:
+- **Slack**: Block Kit header + mrkdwn section
+- **Telegram**: Bot API `sendMessage` (plain text)
+- **Webhook**: JSON `{ "type": "digest", "title", "text" }` with optional HMAC
+
+No separate email provider. If a site has no channels, the digest is skipped.
 
 ## API Changes
 ```
 GET    /api/v1/sites/{site}/digest-subscription    -- get current user's subscription
 PUT    /api/v1/sites/{site}/digest-subscription    -- create or update
 DELETE /api/v1/sites/{site}/digest-subscription    -- unsubscribe
+POST   /api/v1/sites/{site}/digest-subscription/test -- send now (requires a channel)
 ```
-
-One-click unsubscribe link in every email (token-based, no login required).
 
 ## UI
-- "Email digest" toggle in site settings
+- "Analytics digest" toggle in site settings
 - Frequency selector: Weekly / Monthly / Both
-- "Send test digest" button (triggers immediate send)
-
-## Email Sending
-Use SMTP or transactional email provider (Postmark / Resend). Config in `stomatopod.toml`:
-```toml
-[email]
-provider = "postmark"
-api_key = "..."
-from = "analytics@yourdomain.com"
-```
+- Copy clarifies delivery via notification destinations below
 
 ## Edge Cases
-- Site with zero traffic in the period: still send digest but note "No activity this week"
-- User with access to 5 sites: one email per site per frequency (not batched into one)
-- User changes timezone: apply on next digest cycle
-- Email bounces: disable subscription after 3 consecutive bounces, notify in UI
+- Site with zero traffic in the period: still send digest but note "No activity this period"
+- Multiple users subscribed for one site: one digest per site per cadence (deduped)
+- No channels configured: skip delivery; test-send returns 400
+- Channel delivery failures: increment bounce_count; disable subscription after 3

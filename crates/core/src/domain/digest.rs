@@ -2,7 +2,7 @@ use chrono::{DateTime, Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
-/// How often a user wants a site digest emailed to them.
+/// How often a user wants a site digest on their notification channels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DigestFrequency {
@@ -41,7 +41,8 @@ impl DigestFrequency {
     }
 }
 
-/// An opt-in subscription to periodic email digests for a site.
+/// An opt-in subscription to periodic analytics digests for a site.
+/// Digests are delivered via the site's configured notification channels.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DigestSubscription {
     pub id: Ulid,

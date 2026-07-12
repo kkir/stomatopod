@@ -13,7 +13,6 @@ use stomatopod_core::{
         api_key::{ApiKey, ApiKeyScope},
         digest::{DigestFrequency, DigestSubscription},
         org::{Funnel, Organization, Plan, User, UserRole},
-        share_link::ShareLink,
         site::Site,
     },
     error::StoreError,
@@ -139,18 +138,6 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
             payload     TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_alert_fires_alert ON analytics_alert_fires(alert_id, fired_at DESC);
-
-        CREATE TABLE IF NOT EXISTS share_links (
-            id          TEXT PRIMARY KEY,
-            site_id     TEXT NOT NULL REFERENCES sites(id),
-            token       TEXT UNIQUE NOT NULL,
-            label       TEXT,
-            expires_at  TEXT,
-            created_by  TEXT NOT NULL,
-            created_at  TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_share_links_site ON share_links(site_id);
-        CREATE INDEX IF NOT EXISTS idx_share_links_token ON share_links(token);
 
         CREATE TABLE IF NOT EXISTS digest_subscriptions (
             id           TEXT PRIMARY KEY,
@@ -320,22 +307,6 @@ fn row_to_alert_fire(row: &rusqlite::Row<'_>) -> rusqlite::Result<AnalyticsAlert
         alert_id: Ulid::from_string(&alert_id_str).unwrap_or_default(),
         fired_at: parse_utc(&fired_at_str),
         payload: serde_json::from_str(&payload_str).unwrap_or(serde_json::Value::Null),
-    })
-}
-
-fn row_to_share_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<ShareLink> {
-    let id_str: String = row.get(0)?;
-    let site_id_str: String = row.get(1)?;
-    let expires_at: Option<String> = row.get(4)?;
-    let created_at_str: String = row.get(6)?;
-    Ok(ShareLink {
-        id: Ulid::from_string(&id_str).unwrap_or_default(),
-        site_id: Ulid::from_string(&site_id_str).unwrap_or_default(),
-        token: row.get(2)?,
-        label: row.get(3)?,
-        expires_at: parse_utc_opt(expires_at),
-        created_by: row.get(5)?,
-        created_at: parse_utc(&created_at_str),
     })
 }
 
@@ -760,98 +731,7 @@ impl MetaStore for SqliteMeta {
         })
     }
 
-    // ---- Share links ----
-    async fn create_share_link(&self, link: &ShareLink) -> Result<(), StoreError> {
-        let link = link.clone();
-        db!(self.conn, |conn: &Connection| {
-            conn.execute(
-                "INSERT INTO share_links (id, site_id, token, label, expires_at, created_by, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    link.id.to_string(),
-                    link.site_id.to_string(),
-                    link.token,
-                    link.label,
-                    link.expires_at.map(|d| d.to_rfc3339()),
-                    link.created_by,
-                    link.created_at.to_rfc3339(),
-                ],
-            )
-            .map(|_| ())
-            .map_err(StoreError::db)
-        })
-    }
-
-    async fn list_share_links(&self, site_id: Ulid) -> Result<Vec<ShareLink>, StoreError> {
-        db!(self.conn, |conn: &Connection| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, site_id, token, label, expires_at, created_by, created_at
-                     FROM share_links WHERE site_id = ?1 ORDER BY created_at DESC",
-                )
-                .map_err(StoreError::db)?;
-            let rows = stmt
-                .query_map(params![site_id.to_string()], row_to_share_link)
-                .map_err(StoreError::db)?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(StoreError::db)
-        })
-    }
-
-    async fn get_share_link(&self, id: Ulid) -> Result<Option<ShareLink>, StoreError> {
-        db!(self.conn, |conn: &Connection| {
-            conn.query_row(
-                "SELECT id, site_id, token, label, expires_at, created_by, created_at
-                 FROM share_links WHERE id = ?1",
-                params![id.to_string()],
-                row_to_share_link,
-            )
-            .optional()
-            .map_err(StoreError::db)
-        })
-    }
-
-    async fn get_share_link_by_token(&self, token: &str) -> Result<Option<ShareLink>, StoreError> {
-        let token = token.to_string();
-        db!(self.conn, |conn: &Connection| {
-            conn.query_row(
-                "SELECT id, site_id, token, label, expires_at, created_by, created_at
-                 FROM share_links WHERE token = ?1",
-                params![token],
-                row_to_share_link,
-            )
-            .optional()
-            .map_err(StoreError::db)
-        })
-    }
-
-    async fn update_share_link(
-        &self,
-        id: Ulid,
-        label: Option<String>,
-        expires_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<(), StoreError> {
-        db!(self.conn, |conn: &Connection| {
-            conn.execute(
-                "UPDATE share_links SET label = ?2, expires_at = ?3 WHERE id = ?1",
-                params![id.to_string(), label, expires_at.map(|d| d.to_rfc3339()),],
-            )
-            .map(|_| ())
-            .map_err(StoreError::db)
-        })
-    }
-
-    async fn delete_share_link(&self, id: Ulid) -> Result<(), StoreError> {
-        db!(self.conn, |conn: &Connection| {
-            conn.execute(
-                "DELETE FROM share_links WHERE id = ?1",
-                params![id.to_string()],
-            )
-            .map(|_| ())
-            .map_err(StoreError::db)
-        })
-    }
-
-    // ---- Email digest subscriptions ----
+    // ---- Analytics digest subscriptions ----
     async fn upsert_digest_subscription(&self, sub: &DigestSubscription) -> Result<(), StoreError> {
         let sub = sub.clone();
         db!(self.conn, |conn: &Connection| {

@@ -115,7 +115,7 @@ url = "postgresql://user:pass@host:5432/stomatopod"
 - `STOMATOPOD_ADMIN_PASSWORD` — required on **first boot** (empty data dir);
   min 12 characters. Creates the single owner account. Optional
   `STOMATOPOD_ADMIN_EMAIL` (default `admin@localhost`).
-- `STOMATOPOD_BASE_URL` — public URL for share links and email digests
+- `STOMATOPOD_BASE_URL` — public URL for dashboard links in digests
   (e.g. `https://analytics.example.com`). Set this to an `https://` URL so the
   session cookie is marked `Secure`, or set `STOMATOPOD_AUTH__COOKIE_SECURE=true`.
 

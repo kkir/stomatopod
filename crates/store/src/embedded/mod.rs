@@ -327,47 +327,6 @@ impl MetaStore for EmbeddedBackend {
         self.meta.last_analytics_alert_fire(alert_id).await
     }
 
-    async fn create_share_link(
-        &self,
-        link: &stomatopod_core::domain::share_link::ShareLink,
-    ) -> Result<(), StoreError> {
-        self.meta.create_share_link(link).await
-    }
-
-    async fn list_share_links(
-        &self,
-        site_id: Ulid,
-    ) -> Result<Vec<stomatopod_core::domain::share_link::ShareLink>, StoreError> {
-        self.meta.list_share_links(site_id).await
-    }
-
-    async fn get_share_link(
-        &self,
-        id: Ulid,
-    ) -> Result<Option<stomatopod_core::domain::share_link::ShareLink>, StoreError> {
-        self.meta.get_share_link(id).await
-    }
-
-    async fn get_share_link_by_token(
-        &self,
-        token: &str,
-    ) -> Result<Option<stomatopod_core::domain::share_link::ShareLink>, StoreError> {
-        self.meta.get_share_link_by_token(token).await
-    }
-
-    async fn update_share_link(
-        &self,
-        id: Ulid,
-        label: Option<String>,
-        expires_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Result<(), StoreError> {
-        self.meta.update_share_link(id, label, expires_at).await
-    }
-
-    async fn delete_share_link(&self, id: Ulid) -> Result<(), StoreError> {
-        self.meta.delete_share_link(id).await
-    }
-
     async fn upsert_digest_subscription(
         &self,
         sub: &stomatopod_core::domain::digest::DigestSubscription,
