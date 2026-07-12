@@ -23,18 +23,8 @@ fn alert_kind_label(kind: &str) -> &'static str {
         .unwrap_or("Alert")
 }
 
-fn channel_label(kind: &str, url: &str) -> String {
-    let kind_label = match kind {
-        "telegram" => "Telegram",
-        "slack" => "Slack",
-        "webhook" => "Webhook",
-        other => other,
-    };
-    format!("{kind_label} · {url}")
-}
-
 /// Analytics alerts for one site. Notification destinations live under
-/// Settings (Telegram, Slack, webhooks).
+/// Settings (Telegram, Slack, webhooks); each fire goes to every channel.
 #[component]
 pub fn Alerts(site_id: String) -> Element {
     let site_name = use_site_name(site_id.clone());
@@ -68,28 +58,11 @@ fn AlertsCard(site_id: String) -> Element {
     let mut kind = use_signal(|| "traffic_spike".to_string());
     let mut threshold = use_signal(|| "100".to_string());
     let mut window = use_signal(|| "60".to_string());
-    let mut channel_id = use_signal(String::new);
 
-    let channel_options = match &*channels.read() {
-        Some(Ok(list)) => list
-            .channels
-            .iter()
-            .map(|c| (c.id.clone(), channel_label(&c.kind, &c.url)))
-            .collect::<Vec<_>>(),
-        _ => Vec::new(),
+    let has_channels = match &*channels.read() {
+        Some(Ok(list)) => !list.channels.is_empty(),
+        _ => false,
     };
-    // Effective selection: the user's pick, or the first channel until they
-    // choose. Derived (not written to the signal during render) to avoid a
-    // re-render loop.
-    let effective_channel = if channel_id().is_empty() {
-        channel_options
-            .first()
-            .map(|(v, _)| v.clone())
-            .unwrap_or_default()
-    } else {
-        channel_id()
-    };
-    let has_channels = !channel_options.is_empty();
     let settings_href = Route::SiteSettings {
         site_id: site_id.clone(),
     };
@@ -100,29 +73,36 @@ fn AlertsCard(site_id: String) -> Element {
                 div { class: "text-xs text-muted-1 mb-3",
                     "Add a notification destination under "
                     Link {
+                        to: settings_href.clone(),
+                        class: "text-teal-hi hover:underline",
+                        "Settings"
+                    }
+                    " (Telegram, Slack, or webhook) before creating an alert. Fires go to every channel."
+                }
+            } else {
+                div { class: "text-xs text-muted-1 mb-3",
+                    "When an alert fires it is sent to every notification destination under "
+                    Link {
                         to: settings_href,
                         class: "text-teal-hi hover:underline",
                         "Settings"
                     }
-                    " (Telegram, Slack, or webhook) before creating an alert."
+                    "."
                 }
             }
             form {
                 class: "flex flex-wrap items-end gap-2 mb-4",
                 onsubmit: {
                     let site_id = site_id.clone();
-                    let effective_channel = effective_channel.clone();
                     move |evt: FormEvent| {
                         evt.prevent_default();
-                        let chan = effective_channel.clone();
-                        if chan.is_empty() {
+                        if !has_channels {
                             return;
                         }
                         let body = CreateAlertBody {
                             alert_type: kind(),
                             threshold: threshold().trim().parse().unwrap_or(0.0),
                             window_minutes: window().trim().parse().unwrap_or(0),
-                            channel_id: chan,
                         };
                         let site_id = site_id.clone();
                         spawn(async move {
@@ -134,34 +114,35 @@ fn AlertsCard(site_id: String) -> Element {
                         });
                     }
                 },
-                select {
-                    class: CTRL_INPUT,
-                    value: "{kind}",
-                    onchange: move |e| kind.set(e.value()),
-                    for (val , label) in ALERT_KINDS {
-                        option { key: "{val}", value: "{val}", "{label}" }
+                label { class: "flex flex-col gap-1.5",
+                    span { class: "text-[0.72rem] tracking-[0.06em] uppercase text-muted-1 font-semibold", "Type" }
+                    select {
+                        class: CTRL_INPUT,
+                        value: "{kind}",
+                        onchange: move |e| kind.set(e.value()),
+                        for (val , label) in ALERT_KINDS {
+                            option { key: "{val}", value: "{val}", "{label}" }
+                        }
                     }
                 }
-                input {
-                    class: CTRL_INPUT,
-                    r#type: "number",
-                    value: "{threshold}",
-                    placeholder: "threshold",
-                    oninput: move |e| threshold.set(e.value()),
+                label { class: "flex flex-col gap-1.5",
+                    span { class: "text-[0.72rem] tracking-[0.06em] uppercase text-muted-1 font-semibold", "Threshold" }
+                    input {
+                        class: CTRL_INPUT,
+                        r#type: "number",
+                        value: "{threshold}",
+                        placeholder: "100",
+                        oninput: move |e| threshold.set(e.value()),
+                    }
                 }
-                input {
-                    class: CTRL_INPUT,
-                    r#type: "number",
-                    value: "{window}",
-                    placeholder: "window (min)",
-                    oninput: move |e| window.set(e.value()),
-                }
-                select {
-                    class: CTRL_INPUT,
-                    value: "{effective_channel}",
-                    onchange: move |e| channel_id.set(e.value()),
-                    for (val , label) in channel_options.clone() {
-                        option { key: "{val}", value: "{val}", "{label}" }
+                label { class: "flex flex-col gap-1.5",
+                    span { class: "text-[0.72rem] tracking-[0.06em] uppercase text-muted-1 font-semibold", "Window (min)" }
+                    input {
+                        class: CTRL_INPUT,
+                        r#type: "number",
+                        value: "{window}",
+                        placeholder: "60",
+                        oninput: move |e| window.set(e.value()),
                     }
                 }
                 button {

@@ -151,6 +151,8 @@ pub struct AnalyticsAlert {
     pub kind: String,
     #[serde(default)]
     pub config: AnalyticsAlertConfig,
+    /// Legacy field; fires go to every notification channel on the site.
+    #[serde(default)]
     pub channel_id: String,
     pub enabled: bool,
 }
@@ -167,7 +169,6 @@ pub struct CreateAlertBody {
     pub alert_type: String,
     pub threshold: f64,
     pub window_minutes: u32,
-    pub channel_id: String,
 }
 
 #[derive(Debug, Serialize)]

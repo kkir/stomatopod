@@ -1016,7 +1016,6 @@ async fn read_key_cannot_create_analytics_alert() {
         Some(serde_json::json!({
             "type": "traffic_spike",
             "threshold": 100.0,
-            "channel_id": Ulid::new().to_string()
         })),
     )
     .await;
@@ -1322,14 +1321,14 @@ async fn export_endpoints_serve_csv_and_json() {
 }
 
 #[tokio::test]
-async fn analytics_alert_requires_valid_channel_then_round_trips() {
+async fn analytics_alert_requires_channel_then_round_trips() {
     use stomatopod_core::domain::agent::{AlertChannel, AlertChannelKind};
 
     let ctx = setup().await;
     let (site, token) = site_and_token(&ctx).await;
 
-    // Without a real channel, creation is rejected.
-    let (status, _) = send_json(
+    // Without any notification destination, creation is rejected.
+    let (status, json) = send_json(
         ctx.state.clone(),
         "POST",
         &format!("/api/v1/sites/{}/analytics-alerts", site.id),
@@ -1338,13 +1337,12 @@ async fn analytics_alert_requires_valid_channel_then_round_trips() {
             "type": "traffic_spike",
             "threshold": 200.0,
             "window_minutes": 60,
-            "channel_id": Ulid::new().to_string(),
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::BAD_REQUEST, "got {json}");
 
-    // Register a channel, then creation succeeds.
+    // Register a channel, then creation succeeds without a channel_id body field.
     let channel = AlertChannel {
         id: Ulid::new(),
         site_id: site.id,
@@ -1369,7 +1367,6 @@ async fn analytics_alert_requires_valid_channel_then_round_trips() {
             "type": "traffic_spike",
             "threshold": 200.0,
             "window_minutes": 60,
-            "channel_id": channel.id.to_string(),
         })),
     )
     .await;

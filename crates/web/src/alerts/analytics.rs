@@ -1,9 +1,10 @@
 //! Analytics alert evaluation.
 //!
-//! Reuses the AI-firewall alert sinks (webhook/Slack): a triggered analytics
-//! condition is turned into an [`Incident`] with an `AnalyticsAlert` trigger
-//! and dispatched to the alert's configured channel. A background loop polls
-//! enabled alerts on a fixed interval and enforces a per-alert cooldown.
+//! Reuses the AI-firewall alert sinks (webhook/Slack/Telegram): a triggered
+//! analytics condition is turned into an [`Incident`] with an `AnalyticsAlert`
+//! trigger and fanned out to every notification channel on the site. A
+//! background loop polls enabled alerts on a fixed interval and enforces a
+//! per-alert cooldown.
 
 use std::{sync::Arc, time::Duration};
 
@@ -152,7 +153,8 @@ async fn in_cooldown(meta: &Arc<dyn MetaStore>, alert_id: Ulid, now: DateTime<Ut
 }
 
 /// Evaluate one alert end-to-end: measure, cooldown-check, record the fire,
-/// and dispatch to its channel. Returns true if it fired.
+/// and dispatch to every notification channel on the site. Returns true if
+/// it fired.
 #[allow(clippy::too_many_arguments)]
 pub async fn process_alert(
     alert: &AnalyticsAlert,
@@ -185,9 +187,9 @@ pub async fn process_alert(
         warn!("failed to record analytics alert fire: {e}");
     }
 
-    // Dispatch to the alert's specific channel (best effort).
+    // Fan out to every destination configured for the site (best effort).
     if let Ok(channels) = meta.list_alert_channels(alert.site_id).await {
-        if let Some(ch) = channels.into_iter().find(|c| c.id == alert.channel_id) {
+        for ch in channels {
             let sink: &dyn AlertSink = match ch.kind {
                 AlertChannelKind::Webhook => webhook,
                 AlertChannelKind::Slack => slack,

@@ -235,13 +235,12 @@ fn describe() -> serde_json::Value {
             },
             {
                 "name": "alerts create",
-                "description": "Create an analytics alert (requires a write-capable key).",
+                "description": "Create an analytics alert (requires a write-capable key). Fires go to every notification channel on the site.",
                 "args": [
                     { "name": "--site", "required": true },
                     { "name": "--type", "required": true, "note": "e.g. traffic_spike, traffic_drop, new_referrer_spike." },
                     { "name": "--threshold", "required": true },
-                    { "name": "--window", "default": "60", "note": "Window in minutes." },
-                    { "name": "--channel", "required": true, "note": "Alert channel id." }
+                    { "name": "--window", "default": "60", "note": "Window in minutes." }
                 ]
             },
             {

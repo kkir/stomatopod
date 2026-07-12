@@ -265,7 +265,7 @@ test("a notification destination can be added and an alert created", async ({
   await expect(
     page.locator("select").filter({ hasText: /Webhook/ }).first(),
   ).toBeVisible({ timeout: 10_000 });
-  await page.getByPlaceholder("threshold").fill("200");
+  await page.getByLabel("Threshold").fill("200");
   await page.getByRole("button", { name: "Add alert" }).click();
   await expect(page.getByText(/threshold 200/)).toBeVisible({
     timeout: 10_000,

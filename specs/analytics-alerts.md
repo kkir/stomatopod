@@ -25,7 +25,7 @@ CREATE TABLE analytics_alerts (
     site_id     TEXT NOT NULL REFERENCES sites(id),
     type        TEXT NOT NULL,     -- traffic_spike | traffic_drop | new_referrer_spike
     config      JSONB NOT NULL,    -- type-specific params (threshold, window_minutes)
-    channel_id  TEXT NOT NULL REFERENCES alert_channels(id),  -- reuse existing
+    channel_id  TEXT NOT NULL REFERENCES alert_channels(id),  -- legacy FK; fires fan out to all site channels
     enabled     BOOLEAN NOT NULL DEFAULT TRUE,
     created_at  TIMESTAMPTZ NOT NULL
 );
@@ -48,11 +48,11 @@ Background worker (similar to AI firewall incident checker) runs every minute:
 1. Fetch enabled analytics alerts
 2. For each: run the relevant aggregate query against recent data
 3. Compare to threshold
-4. If triggered and cooldown elapsed: insert fire record + dispatch via existing alert dispatcher
+4. If triggered and cooldown elapsed: insert fire record + dispatch to every notification channel on the site
 
 ## API Changes
 ```
-POST   /api/v1/sites/{site}/analytics-alerts        -- create
+POST   /api/v1/sites/{site}/analytics-alerts        -- create (no channel_id; site must have ≥1 destination)
 GET    /api/v1/sites/{site}/analytics-alerts        -- list
 DELETE /api/v1/sites/{site}/analytics-alerts/{id}   -- delete
 PATCH  /api/v1/sites/{site}/analytics-alerts/{id}   -- enable/disable
@@ -61,16 +61,16 @@ PATCH  /api/v1/sites/{site}/analytics-alerts/{id}   -- enable/disable
 ## UI
 - New "Alerts" tab in site settings (not on main dashboard)
 - List alerts with status, last fired time
-- Create form: type selector → config fields (dynamic per type) → channel picker
+- Create form: type selector → config fields (dynamic per type); destinations managed under Settings
 
 ## CLI Changes
 ```
 spq alerts list --site <id>
-spq alerts create --site <id> --type traffic_spike --threshold 200 --window 60 --channel <channel_id>
+spq alerts create --site <id> --type traffic_spike --threshold 200 --window 60
 spq alerts delete --site <id> --alert <id>
 ```
 
 ## Edge Cases
 - Baseline for traffic_spike/drop: rolling 7-day same-hour average
 - New sites (< 7 days): disable spike/drop alerts or use absolute threshold only
-- Alert channel must belong to same site (enforce in API)
+- Site must have at least one notification channel before create (API rejects otherwise)
