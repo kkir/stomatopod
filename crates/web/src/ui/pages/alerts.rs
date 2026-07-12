@@ -7,9 +7,7 @@ use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::tabs::{SiteTab, SiteTabs};
 use crate::ui::pages::{use_site_name, BTN_GHOST, BTN_PRIMARY, CTRL_INPUT};
 use crate::ui::routes::Route;
-use crate::ui::types::{
-    AlertsList, ChannelsList, CreateAlertBody, PatchAlertBody,
-};
+use crate::ui::types::{AlertsList, ChannelsList, CreateAlertBody, PatchAlertBody};
 
 const ALERT_KINDS: [(&str, &str); 3] = [
     ("traffic_spike", "Traffic spike"),
