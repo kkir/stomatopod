@@ -743,8 +743,47 @@ impl MetaStore for PostgresBackend {
     }
 
     async fn delete_site(&self, id: Ulid) -> Result<(), StoreError> {
+        let id_str = id.to_string();
+        // Child tables reference sites (and analytics_alert_fires refs
+        // analytics_alerts). Clear them before the site row itself.
+        // create_site inserts default analytics_alerts, so a bare DELETE
+        // on sites always fails with a foreign key constraint.
+        sqlx::query(
+            "DELETE FROM analytics_alert_fires WHERE alert_id IN (
+                 SELECT id FROM analytics_alerts WHERE site_id = $1
+             )",
+        )
+        .bind(&id_str)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        sqlx::query("DELETE FROM analytics_alerts WHERE site_id = $1")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        sqlx::query("DELETE FROM funnels WHERE site_id = $1")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        sqlx::query("DELETE FROM alert_channels WHERE site_id = $1")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        sqlx::query("DELETE FROM digest_subscriptions WHERE site_id = $1")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        sqlx::query("DELETE FROM api_keys WHERE site_id = $1")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
         sqlx::query("DELETE FROM sites WHERE id = $1")
-            .bind(id.to_string())
+            .bind(&id_str)
             .execute(&self.pool)
             .await
             .map_err(StoreError::db)?;

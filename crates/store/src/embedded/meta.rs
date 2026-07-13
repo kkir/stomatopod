@@ -554,8 +554,39 @@ impl MetaStore for SqliteMeta {
     }
 
     async fn delete_site(&self, id: Ulid) -> Result<(), StoreError> {
+        let id_str = id.to_string();
         db!(self.conn, |conn: &Connection| {
-            conn.execute("DELETE FROM sites WHERE id = ?1", params![id.to_string()])
+            // Child tables reference sites (and analytics_alert_fires refs
+            // analytics_alerts). Clear them before the site row itself.
+            // create_site inserts default analytics_alerts, so a bare DELETE
+            // on sites always fails with a foreign key constraint.
+            conn.execute(
+                "DELETE FROM analytics_alert_fires WHERE alert_id IN (
+                     SELECT id FROM analytics_alerts WHERE site_id = ?1
+                 )",
+                params![id_str],
+            )
+            .map_err(StoreError::db)?;
+            conn.execute(
+                "DELETE FROM analytics_alerts WHERE site_id = ?1",
+                params![id_str],
+            )
+            .map_err(StoreError::db)?;
+            conn.execute("DELETE FROM funnels WHERE site_id = ?1", params![id_str])
+                .map_err(StoreError::db)?;
+            conn.execute(
+                "DELETE FROM alert_channels WHERE site_id = ?1",
+                params![id_str],
+            )
+            .map_err(StoreError::db)?;
+            conn.execute(
+                "DELETE FROM digest_subscriptions WHERE site_id = ?1",
+                params![id_str],
+            )
+            .map_err(StoreError::db)?;
+            conn.execute("DELETE FROM api_keys WHERE site_id = ?1", params![id_str])
+                .map_err(StoreError::db)?;
+            conn.execute("DELETE FROM sites WHERE id = ?1", params![id_str])
                 .map(|_| ())
                 .map_err(StoreError::db)
         })
