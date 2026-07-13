@@ -1016,7 +1016,6 @@ async fn read_key_cannot_create_analytics_alert() {
         Some(serde_json::json!({
             "type": "traffic_spike",
             "threshold": 100.0,
-            "channel_id": Ulid::new().to_string()
         })),
     )
     .await;
@@ -1093,10 +1092,10 @@ async fn llms_txt_is_public_markdown() {
     assert!(body.contains("/api/v1/ingest"));
 }
 
-/// Install snippet must show both data-site and data-api so copy-paste works
-/// cross-origin (page origin != analytics host).
+/// Install snippet needs data-site + absolute tracker.js src; data-api is
+/// optional (derived from script origin when omitted).
 #[tokio::test]
-async fn llms_txt_install_snippet_includes_data_api() {
+async fn llms_txt_install_snippet_includes_data_site() {
     let ctx = setup().await;
     let req = Request::builder()
         .uri("/llms.txt")
@@ -1106,21 +1105,27 @@ async fn llms_txt_install_snippet_includes_data_api() {
     let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
 
     assert!(
-        body.contains("data-api="),
-        "docs install snippet must include data-api"
-    );
-    assert!(
         body.contains("data-site="),
         "docs install snippet must include data-site"
     );
     assert!(
-        body.contains("data-api=\"https://your-host/api/v1/event\"")
-            || body.contains("data-api='https://your-host/api/v1/event'"),
-        "docs should show a full absolute data-api URL in the install example"
+        body.contains("src=\"https://your-host/tracker.js\"")
+            || body.contains("src='https://your-host/tracker.js'"),
+        "docs should show an absolute tracker.js src in the install example"
     );
     assert!(
         body.contains("/tracker.js"),
         "docs should reference /tracker.js"
+    );
+    // Default example should not force data-api; document override separately.
+    let install_example = body
+        .split("```html")
+        .nth(1)
+        .and_then(|s| s.split("```").next())
+        .unwrap_or("");
+    assert!(
+        !install_example.contains("data-api"),
+        "default install example should omit data-api (derived from script src)"
     );
 }
 
@@ -1316,14 +1321,63 @@ async fn export_endpoints_serve_csv_and_json() {
 }
 
 #[tokio::test]
-async fn analytics_alert_requires_valid_channel_then_round_trips() {
+async fn create_site_seeds_default_analytics_alerts() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let user = stomatopod_core::domain::org::User {
+        id: Ulid::new(),
+        org_id: org.id,
+        email: format!("owner-{}@example.com", Ulid::new()),
+        password_hash: "x".into(),
+        role: stomatopod_core::domain::org::UserRole::Owner,
+        created_at: Utc::now(),
+    };
+    ctx.backend.meta.create_user(&user).await.unwrap();
+    let token = sign_session(&ctx.secret, &user.id.to_string(), 3600);
+
+    let (status, json) = send_json(
+        ctx.state.clone(),
+        "POST",
+        "/api/v1/sites",
+        &token,
+        Some(serde_json::json!({
+            "domain": "seeded-alerts.example",
+            "name": "Seeded Alerts",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "got {json}");
+    let site_id = json["id"].as_str().unwrap();
+
+    let (_, list) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{site_id}/analytics-alerts"),
+        &token,
+    )
+    .await;
+    let alerts = list["alerts"].as_array().unwrap();
+    assert_eq!(
+        alerts.len(),
+        3,
+        "expected starter spike/drop/referrer rules"
+    );
+    let kinds: std::collections::HashSet<_> =
+        alerts.iter().filter_map(|a| a["kind"].as_str()).collect();
+    assert!(kinds.contains("traffic_spike"));
+    assert!(kinds.contains("traffic_drop"));
+    assert!(kinds.contains("new_referrer_spike"));
+}
+
+#[tokio::test]
+async fn analytics_alert_requires_channel_then_round_trips() {
     use stomatopod_core::domain::agent::{AlertChannel, AlertChannelKind};
 
     let ctx = setup().await;
     let (site, token) = site_and_token(&ctx).await;
 
-    // Without a real channel, creation is rejected.
-    let (status, _) = send_json(
+    // Without any notification destination, creation is rejected.
+    let (status, json) = send_json(
         ctx.state.clone(),
         "POST",
         &format!("/api/v1/sites/{}/analytics-alerts", site.id),
@@ -1332,13 +1386,12 @@ async fn analytics_alert_requires_valid_channel_then_round_trips() {
             "type": "traffic_spike",
             "threshold": 200.0,
             "window_minutes": 60,
-            "channel_id": Ulid::new().to_string(),
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::BAD_REQUEST, "got {json}");
 
-    // Register a channel, then creation succeeds.
+    // Register a channel, then creation succeeds without a channel_id body field.
     let channel = AlertChannel {
         id: Ulid::new(),
         site_id: site.id,
@@ -1363,21 +1416,21 @@ async fn analytics_alert_requires_valid_channel_then_round_trips() {
             "type": "traffic_spike",
             "threshold": 200.0,
             "window_minutes": 60,
-            "channel_id": channel.id.to_string(),
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "got {json}");
     let alert_id = json["id"].as_str().unwrap().to_string();
 
-    // List, disable, delete.
+    // List, disable, delete. create_site seeds three starter rules, so the
+    // manual create is a fourth row.
     let (_, json) = get_json(
         ctx.state.clone(),
         &format!("/api/v1/sites/{}/analytics-alerts", site.id),
         &token,
     )
     .await;
-    assert_eq!(json["alerts"].as_array().unwrap().len(), 1);
+    assert_eq!(json["alerts"].as_array().unwrap().len(), 4);
 
     let (status, _) = send_json(
         ctx.state.clone(),

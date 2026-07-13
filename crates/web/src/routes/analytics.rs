@@ -696,7 +696,10 @@ pub struct CreateAlertBody {
     pub threshold: f64,
     #[serde(default)]
     pub window_minutes: u32,
-    pub channel_id: String,
+    /// Ignored. Alerts fan out to every notification channel on the site.
+    /// Kept optional for older clients that still send a channel id.
+    #[serde(default)]
+    pub channel_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -753,26 +756,21 @@ pub async fn create_analytics_alert(
                 .into_response()
         }
     };
-    let channel_id = match Ulid::from_string(&body.channel_id) {
-        Ok(id) => id,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "invalid channel id"})),
-            )
-                .into_response()
-        }
-    };
-    // The alert channel must belong to the same site.
+    // Alerts notify every destination on the site. Require at least one so
+    // create fails early with a clear error rather than silent no-ops.
+    // `channel_id` is legacy (placeholder); the fire path fans out to all
+    // channels regardless.
     let channels = state
         .meta
         .list_alert_channels(site_id)
         .await
         .unwrap_or_default();
-    if !channels.iter().any(|c| c.id == channel_id) {
+    if channels.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "channel does not belong to this site"})),
+            Json(serde_json::json!({
+                "error": "add a notification destination under Settings before creating an alert"
+            })),
         )
             .into_response();
     }
@@ -788,7 +786,7 @@ pub async fn create_analytics_alert(
                 body.window_minutes
             },
         },
-        channel_id,
+        channel_id: stomatopod_core::domain::analytics_alert::unassigned_channel_id(),
         enabled: true,
         created_at: chrono::Utc::now(),
     };

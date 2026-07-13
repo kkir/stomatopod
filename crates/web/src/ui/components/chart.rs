@@ -295,14 +295,14 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
             }
             if let Some((_, p, prev)) = &hover_info {
                 div {
-                    class: "pointer-events-none absolute top-10 left-1/2 -translate-x-1/2 px-3 py-2 rounded-lg bg-surface-2 border border-border-2 text-[11.5px] font-semibold text-text-1 shadow-sm tabular-nums",
+                    class: "pointer-events-none absolute top-10 left-1/2 -translate-x-1/2 max-w-[calc(100%-0.5rem)] px-2.5 sm:px-3 py-2 rounded-lg bg-surface-2 border border-border-2 text-[11px] sm:text-[11.5px] font-semibold text-text-1 shadow-sm tabular-nums",
                     div { class: "text-center text-muted-1 mb-1", "{p.label}" }
-                    div { class: "flex gap-3.5 justify-center",
+                    div { class: "flex flex-wrap gap-x-3 gap-y-0.5 justify-center",
                         span { class: "text-teal-hi", "{p.pageviews} pageviews" }
                         span { class: "text-indigo-300", "{p.sessions} sessions" }
                     }
                     if let Some((ppv, psess)) = prev {
-                        div { class: "flex gap-3.5 justify-center mt-1 text-muted-1 font-medium",
+                        div { class: "flex flex-wrap gap-x-3 gap-y-0.5 justify-center mt-1 text-muted-1 font-medium",
                             span { "{ppv} pageviews" }
                             span { "{psess} sessions" }
                         }

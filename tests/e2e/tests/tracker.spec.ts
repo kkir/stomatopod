@@ -320,15 +320,16 @@ test("data-exclude disables tracking entirely", async ({ page }) => {
   expect(events).toHaveLength(0);
 });
 
-test("install snippet shape documents data-api (served tracker is usable with it)", async ({
+test("install snippet shape documents data-site and absolute tracker src", async ({
   request,
 }) => {
-  // Contract: docs (llms.txt) show data-api in the install snippet so operators
-  // do not ship a page-relative /api/v1/event by accident.
+  // Contract: docs (llms.txt) show data-site + absolute /tracker.js src.
+  // data-api is optional (tracker derives {script origin}/api/v1/event).
   const docs = await request.get("/llms.txt");
   expect(docs.status()).toBe(200);
   const body = await docs.text();
-  expect(body).toContain("data-api=");
   expect(body).toContain("data-site=");
-  expect(body).toMatch(/data-api="https:\/\/your-host\/api\/v1\/event"/);
+  expect(body).toMatch(/src="https:\/\/your-host\/tracker\.js"/);
+  const htmlBlock = body.split("```html")[1]?.split("```")[0] ?? "";
+  expect(htmlBlock).not.toContain("data-api");
 });

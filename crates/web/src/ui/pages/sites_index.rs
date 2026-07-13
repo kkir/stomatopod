@@ -8,7 +8,7 @@ use crate::ui::components::form::Field;
 use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::stat::{DeltaDir, DeltaInfo};
-use crate::ui::pages::BTN_PRIMARY;
+use crate::ui::pages::{invalidate_sites_cache, remember_sites, BTN_PRIMARY};
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
 use crate::ui::series::fill_time_buckets;
@@ -206,7 +206,13 @@ pub fn SitesIndex() -> Element {
 
     let sites = use_resource(move || {
         refresh();
-        async move { api::get_json::<SitesList>("/api/v1/sites").await }
+        async move {
+            let result = api::get_json::<SitesList>("/api/v1/sites").await;
+            if let Ok(ref list) = result {
+                remember_sites(list.clone());
+            }
+            result
+        }
     });
 
     let onsubmit = move |evt: FormEvent| {
@@ -222,6 +228,9 @@ pub fn SitesIndex() -> Element {
                     name.set(String::new());
                     show_form.set(false);
                     error.set(None);
+                    // New site is not in the shared list yet; drop it so
+                    // overview fetches a fresh list instead of an incomplete one.
+                    invalidate_sites_cache();
                     refresh.set(refresh() + 1);
                     navigator().push(Route::SiteOverview {
                         site_id: created.id,
@@ -272,7 +281,7 @@ pub fn SitesIndex() -> Element {
 
         if show_form() {
             Card { title: "Add a new site".to_string(),
-                form { class: "grid grid-cols-[1fr_1fr_auto] gap-3 items-end mb-4", onsubmit,
+                form { class: "grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-stretch sm:items-end mb-4", onsubmit,
                     Field { label: "Domain",
                         input {
                             class: "w-full bg-black/32 border border-border-2 text-text-1 rounded-[10px] px-3 py-2 text-[13px] shadow-inner-hi focus:outline-none focus:border-teal/55",

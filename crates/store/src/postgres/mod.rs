@@ -19,7 +19,9 @@ use stomatopod_core::{
     config::PostgresConfig,
     domain::{
         agent::{AlertChannel, AlertChannelKind},
-        analytics_alert::{AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind},
+        analytics_alert::{
+            default_analytics_alerts, AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind,
+        },
         api_key::{ApiKey, ApiKeyScope},
         digest::{DigestFrequency, DigestSubscription},
         event::Event,
@@ -665,6 +667,10 @@ impl MetaStore for PostgresBackend {
         .execute(&self.pool)
         .await
         .map_err(StoreError::db)?;
+        // Real starter rows so the Alerts UI can list/disable/delete them.
+        for alert in default_analytics_alerts(site.id) {
+            self.create_analytics_alert(&alert).await?;
+        }
         Ok(())
     }
 
@@ -737,8 +743,47 @@ impl MetaStore for PostgresBackend {
     }
 
     async fn delete_site(&self, id: Ulid) -> Result<(), StoreError> {
+        let id_str = id.to_string();
+        // Child tables reference sites (and analytics_alert_fires refs
+        // analytics_alerts). Clear them before the site row itself.
+        // create_site inserts default analytics_alerts, so a bare DELETE
+        // on sites always fails with a foreign key constraint.
+        sqlx::query(
+            "DELETE FROM analytics_alert_fires WHERE alert_id IN (
+                 SELECT id FROM analytics_alerts WHERE site_id = $1
+             )",
+        )
+        .bind(&id_str)
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::db)?;
+        sqlx::query("DELETE FROM analytics_alerts WHERE site_id = $1")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        sqlx::query("DELETE FROM funnels WHERE site_id = $1")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        sqlx::query("DELETE FROM alert_channels WHERE site_id = $1")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        sqlx::query("DELETE FROM digest_subscriptions WHERE site_id = $1")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        sqlx::query("DELETE FROM api_keys WHERE site_id = $1")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
         sqlx::query("DELETE FROM sites WHERE id = $1")
-            .bind(id.to_string())
+            .bind(&id_str)
             .execute(&self.pool)
             .await
             .map_err(StoreError::db)?;
@@ -1425,7 +1470,7 @@ mod ddl {
             site_id     TEXT NOT NULL REFERENCES sites(id),
             type        TEXT NOT NULL,
             config      TEXT NOT NULL,
-            channel_id  TEXT NOT NULL REFERENCES alert_channels(id),
+            channel_id  TEXT NOT NULL,
             enabled     BOOLEAN NOT NULL DEFAULT TRUE,
             created_at  TIMESTAMPTZ NOT NULL
         )

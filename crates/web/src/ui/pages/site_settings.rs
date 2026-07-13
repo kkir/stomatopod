@@ -8,11 +8,13 @@ use crate::ui::components::form::Switch;
 use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::tabs::{SiteTab, SiteTabs, TabbedCard};
-use crate::ui::pages::{BTN_GHOST, BTN_PRIMARY, CTRL_INPUT};
+use crate::ui::pages::{
+    invalidate_sites_cache, site_from_resource, use_sites_list, BTN_GHOST, BTN_PRIMARY, CTRL_INPUT,
+};
 use crate::ui::routes::Route;
 use crate::ui::types::{
     AlertChannel, ChannelTestResult, ChannelsList, CreateChannelBody, DigestSubscriptionResponse,
-    PutSubscriptionBody, SiteSummary, SitesList,
+    PutSubscriptionBody, SiteSummary,
 };
 
 /// General settings (name/domain) via PATCH /api/v1/sites/:site.
@@ -256,7 +258,7 @@ fn ChannelList(
                                     class: "flex items-center justify-between gap-3 py-2 border-t border-border-1",
                                     div { class: "min-w-0",
                                         div {
-                                            class: "text-text-1 text-[13px] font-medium font-mono max-w-[320px] overflow-hidden text-ellipsis whitespace-nowrap",
+                                            class: "text-text-1 text-[13px] font-medium font-mono max-w-full overflow-hidden text-ellipsis whitespace-nowrap",
                                             "{ch.url}"
                                         }
                                         if ch.last_error_at.is_some() {
@@ -665,19 +667,10 @@ fn NotificationDestinations(site_id: String) -> Element {
 /// Per-site settings: general, digest, notification destinations, danger zone.
 #[component]
 pub fn SiteSettings(site_id: String) -> Element {
-    let sites = use_resource(move || async move { get_json::<SitesList>("/api/v1/sites").await });
-    let site_name = {
-        let guard = sites.read();
-        match guard.as_ref() {
-            Some(Ok(list)) => list
-                .sites
-                .iter()
-                .find(|s| s.id == site_id)
-                .map(|s| s.name.clone())
-                .unwrap_or_else(|| site_id.clone()),
-            _ => site_id.clone(),
-        }
-    };
+    let sites = use_sites_list();
+    let site_name = site_from_resource(&sites, &site_id)
+        .map(|s| s.name)
+        .unwrap_or_else(|| site_id.clone());
 
     rsx! {
         PageHead { title: "Site Settings", subtitle: "{site_name}" }
@@ -718,6 +711,7 @@ pub fn SiteSettings(site_id: String) -> Element {
                                                         .await
                                                         .is_ok()
                                                     {
+                                                        invalidate_sites_cache();
                                                         navigator().push(Route::SitesIndex {});
                                                     }
                                                 });

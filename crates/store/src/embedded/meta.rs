@@ -9,7 +9,9 @@ use ulid::Ulid;
 use stomatopod_core::{
     domain::{
         agent::{AlertChannel, AlertChannelKind},
-        analytics_alert::{AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind},
+        analytics_alert::{
+            default_analytics_alerts, AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind,
+        },
         api_key::{ApiKey, ApiKeyScope},
         digest::{DigestFrequency, DigestSubscription},
         org::{Funnel, Organization, Plan, User, UserRole},
@@ -124,7 +126,10 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
             site_id     TEXT NOT NULL REFERENCES sites(id),
             type        TEXT NOT NULL,
             config      TEXT NOT NULL,
-            channel_id  TEXT NOT NULL REFERENCES alert_channels(id),
+            -- Legacy column; fires fan out to all site channels. Nullable FK
+            -- intentionally omitted so default alerts can exist before any
+            -- notification destination is configured (nil ULID placeholder).
+            channel_id  TEXT NOT NULL,
             enabled     INTEGER NOT NULL DEFAULT 1,
             created_at  TEXT NOT NULL
         );
@@ -153,6 +158,107 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
 
         INSERT OR IGNORE INTO schema_version (id, version, applied_at)
         VALUES (1, 1, datetime('now'));
+        "#,
+    )?;
+    // Older installs created analytics_alerts.channel_id with a FK to
+    // alert_channels. Drop that so starter alerts can use a nil placeholder.
+    drop_analytics_alert_channel_fk(conn)?;
+    // v2: persist tasteful default alert rows for sites that have none.
+    // One-shot only (schema_version bump) so deleting them later sticks.
+    let version: i64 = conn.query_row(
+        "SELECT version FROM schema_version WHERE id = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    if version < 2 {
+        seed_default_alerts_for_empty_sites(conn)?;
+        conn.execute(
+            "UPDATE schema_version SET version = 2, applied_at = datetime('now') WHERE id = 1",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+/// Insert the starter anomaly rules for every site that has zero alerts.
+fn seed_default_alerts_for_empty_sites(conn: &Connection) -> anyhow::Result<()> {
+    let mut stmt = conn.prepare(
+        "SELECT s.id FROM sites s
+         WHERE NOT EXISTS (
+             SELECT 1 FROM analytics_alerts a WHERE a.site_id = s.id
+         )",
+    )?;
+    let site_ids: Vec<String> = stmt
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+    for site_id in site_ids {
+        let Ok(id) = Ulid::from_string(&site_id) else {
+            continue;
+        };
+        insert_default_alerts(conn, id).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    }
+    Ok(())
+}
+
+/// Write the three starter rules as real rows the user can disable or delete.
+fn insert_default_alerts(conn: &Connection, site_id: Ulid) -> Result<(), StoreError> {
+    for alert in default_analytics_alerts(site_id) {
+        let config = serde_json::to_string(&alert.config)
+            .map_err(|e| StoreError::Serialization(e.to_string()))?;
+        conn.execute(
+            "INSERT INTO analytics_alerts (id, site_id, type, config, channel_id, enabled, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                alert.id.to_string(),
+                alert.site_id.to_string(),
+                alert.kind.as_str(),
+                config,
+                alert.channel_id.to_string(),
+                alert.enabled as i32,
+                alert.created_at.to_rfc3339(),
+            ],
+        )
+        .map_err(StoreError::db)?;
+    }
+    Ok(())
+}
+
+/// Rebuild `analytics_alerts` without a FK on `channel_id` when one exists.
+fn drop_analytics_alert_channel_fk(conn: &Connection) -> anyhow::Result<()> {
+    let has_channel_fk = {
+        let mut stmt = conn.prepare("PRAGMA foreign_key_list(analytics_alerts)")?;
+        let tables: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(2))?
+            .collect::<Result<Vec<_>, _>>()?;
+        tables.iter().any(|t| t == "alert_channels")
+    };
+    if !has_channel_fk {
+        return Ok(());
+    }
+    conn.execute_batch(
+        r#"
+        PRAGMA foreign_keys=OFF;
+        BEGIN;
+        CREATE TABLE analytics_alerts_new (
+            id          TEXT PRIMARY KEY,
+            site_id     TEXT NOT NULL REFERENCES sites(id),
+            type        TEXT NOT NULL,
+            config      TEXT NOT NULL,
+            channel_id  TEXT NOT NULL,
+            enabled     INTEGER NOT NULL DEFAULT 1,
+            created_at  TEXT NOT NULL
+        );
+        INSERT INTO analytics_alerts_new
+            (id, site_id, type, config, channel_id, enabled, created_at)
+            SELECT id, site_id, type, config, channel_id, enabled, created_at
+            FROM analytics_alerts;
+        DROP TABLE analytics_alerts;
+        ALTER TABLE analytics_alerts_new RENAME TO analytics_alerts;
+        CREATE INDEX IF NOT EXISTS idx_analytics_alerts_site ON analytics_alerts(site_id);
+        CREATE INDEX IF NOT EXISTS idx_analytics_alerts_enabled ON analytics_alerts(enabled);
+        COMMIT;
+        PRAGMA foreign_keys=ON;
         "#,
     )?;
     Ok(())
@@ -361,8 +467,10 @@ impl MetaStore for SqliteMeta {
                     site.is_active as i32,
                 ],
             )
-            .map(|_| ())
-            .map_err(StoreError::db)
+            .map_err(StoreError::db)?;
+            // Real rows in analytics_alerts so the Alerts UI lists them and
+            // users can disable or delete any they do not want.
+            insert_default_alerts(conn, site.id)
         })
     }
 
@@ -446,8 +554,39 @@ impl MetaStore for SqliteMeta {
     }
 
     async fn delete_site(&self, id: Ulid) -> Result<(), StoreError> {
+        let id_str = id.to_string();
         db!(self.conn, |conn: &Connection| {
-            conn.execute("DELETE FROM sites WHERE id = ?1", params![id.to_string()])
+            // Child tables reference sites (and analytics_alert_fires refs
+            // analytics_alerts). Clear them before the site row itself.
+            // create_site inserts default analytics_alerts, so a bare DELETE
+            // on sites always fails with a foreign key constraint.
+            conn.execute(
+                "DELETE FROM analytics_alert_fires WHERE alert_id IN (
+                     SELECT id FROM analytics_alerts WHERE site_id = ?1
+                 )",
+                params![id_str],
+            )
+            .map_err(StoreError::db)?;
+            conn.execute(
+                "DELETE FROM analytics_alerts WHERE site_id = ?1",
+                params![id_str],
+            )
+            .map_err(StoreError::db)?;
+            conn.execute("DELETE FROM funnels WHERE site_id = ?1", params![id_str])
+                .map_err(StoreError::db)?;
+            conn.execute(
+                "DELETE FROM alert_channels WHERE site_id = ?1",
+                params![id_str],
+            )
+            .map_err(StoreError::db)?;
+            conn.execute(
+                "DELETE FROM digest_subscriptions WHERE site_id = ?1",
+                params![id_str],
+            )
+            .map_err(StoreError::db)?;
+            conn.execute("DELETE FROM api_keys WHERE site_id = ?1", params![id_str])
+                .map_err(StoreError::db)?;
+            conn.execute("DELETE FROM sites WHERE id = ?1", params![id_str])
                 .map(|_| ())
                 .map_err(StoreError::db)
         })

@@ -12,7 +12,8 @@ pub enum AlertsCommand {
         #[arg(long)]
         site: String,
     },
-    /// Create an alert (requires a write-capable key).
+    /// Create an alert (requires a write-capable key). Fires go to every
+    /// notification channel configured for the site.
     Create {
         #[arg(long)]
         site: String,
@@ -25,9 +26,6 @@ pub enum AlertsCommand {
         /// Evaluation window in minutes.
         #[arg(long, default_value = "60")]
         window: u32,
-        /// Alert channel id to notify.
-        #[arg(long)]
-        channel: String,
     },
     /// Delete an alert by id.
     Delete {
@@ -56,13 +54,11 @@ pub fn build(cmd: &AlertsCommand) -> anyhow::Result<Req> {
             alert_type,
             threshold,
             window,
-            channel,
         } => {
             let body = serde_json::json!({
                 "type": alert_type,
                 "threshold": threshold,
                 "window_minutes": window,
-                "channel_id": channel,
             });
             Req::Post(format!("/api/v1/sites/{site}/analytics-alerts"), body)
         }
@@ -135,15 +131,13 @@ mod tests {
             "200",
             "--window",
             "60",
-            "--channel",
-            "ch1",
         ]) {
             Req::Post(path, body) => {
                 assert_eq!(path, "/api/v1/sites/s/analytics-alerts");
                 assert_eq!(body["type"], "traffic_spike");
                 assert_eq!(body["threshold"], 200.0);
                 assert_eq!(body["window_minutes"], 60);
-                assert_eq!(body["channel_id"], "ch1");
+                assert!(body.get("channel_id").is_none());
             }
             other => panic!("expected POST, got {other:?}"),
         }

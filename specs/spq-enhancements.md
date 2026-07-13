@@ -46,7 +46,7 @@ Replaces `--range` preset when specified.
 ### Alerts
 ```
 spq alerts list    --site <id>
-spq alerts create  --site <id> --type traffic_spike --threshold 200 --window 60 --channel <channel_id>
+spq alerts create  --site <id> --type traffic_spike --threshold 200 --window 60
 spq alerts delete  --site <id> --alert <id>
 spq alerts toggle  --site <id> --alert <id> --enabled true|false
 ```

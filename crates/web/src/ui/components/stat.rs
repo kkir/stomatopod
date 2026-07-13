@@ -29,7 +29,7 @@ pub fn StatTile(
     rsx! {
         div { class: "min-w-0",
             div { class: "text-muted-1 text-[11px] uppercase tracking-[0.14em] font-semibold", "{label}" }
-            div { class: "text-grad-value font-display text-[36px] sm:text-[40px] font-bold tracking-tight tabular-nums mt-1.5 leading-none", "{value}" }
+            div { class: "text-grad-value font-display text-[28px] sm:text-[40px] font-bold tracking-tight tabular-nums mt-1.5 leading-none break-all", "{value}" }
             if let Some(d) = delta {
                 div {
                     class: match d.dir {

@@ -98,6 +98,7 @@ pub async fn create_site_api(
         return bad_request("no organization found");
     };
     let site = build_site(org.id, domain, name, body.timezone);
+    // create_site also inserts the three starter analytics_alerts rows.
     match state.meta.create_site(&site).await {
         Ok(_) => (StatusCode::CREATED, Json(site_json(&site))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),

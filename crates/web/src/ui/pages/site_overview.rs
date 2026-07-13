@@ -11,8 +11,8 @@ use crate::ui::components::stat::{DeltaDir, DeltaInfo, StatTile};
 use crate::ui::components::table::{BreakdownRow, BreakdownTable, EntryExitRow, EntryExitTable};
 use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs, TabbedCard};
 use crate::ui::pages::{
-    active_filters, site_api_url, site_csv_url, BTN_GHOST, BTN_PRIMARY, BTN_TAB_ACTION,
-    BTN_TAB_ACTION_ON, CTRL_INPUT,
+    active_filters, site_api_url, site_csv_url, use_site_summary, BTN_GHOST, BTN_PRIMARY,
+    BTN_TAB_ACTION, BTN_TAB_ACTION_ON, CTRL_INPUT,
 };
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
@@ -20,7 +20,7 @@ use crate::ui::series::{fill_time_buckets, range_from_query};
 use crate::ui::timefmt::{
     browser_timezone, format_ts, label_style_for_buckets, timezone_short_label,
 };
-use crate::ui::types::{EntryPages, ExitPages, PageviewsResult, SitesList, TopList};
+use crate::ui::types::{EntryPages, ExitPages, PageviewsResult, TopList};
 
 /// Whether to hoist the prominent "Start collecting analytics" card.
 /// Hidden when filters are active so a zero filtered view is not mistaken
@@ -228,23 +228,16 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
     let refresh_tick = use_signal(|| 0u32);
     let tick = refresh_tick();
 
-    let site = use_resource(use_reactive!(|site_id, tick| async move {
-        let _ = tick;
-        get_json::<SitesList>("/api/v1/sites")
-            .await
-            .ok()
-            .and_then(|l| l.sites.into_iter().find(|s| s.id == site_id))
-    }));
-    let (site_name, site_domain, public_key) = {
-        let guard = site.read();
-        match guard.as_ref().and_then(|o| o.as_ref()) {
-            Some(s) => (
-                Some(s.name.clone()),
-                Some(s.domain.clone()),
-                Some(s.public_key.clone()),
-            ),
-            None => (None, None, None),
-        }
+    // Shared sites list / cache so the page title does not flash the raw id
+    // (or the generic "Overview" placeholder) when switching tabs.
+    let site = use_site_summary(site_id.clone());
+    let (site_name, site_domain, public_key) = match site.as_ref() {
+        Some(s) => (
+            Some(s.name.clone()),
+            Some(s.domain.clone()),
+            Some(s.public_key.clone()),
+        ),
+        None => (None, None, None),
     };
     let head_title = site_name.clone().unwrap_or_else(|| "Overview".to_string());
     // Chart labels use the browser's local zone (no site-level timezone UI).
@@ -464,7 +457,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                 let tz_hint = tz_label.clone();
                 rsx! {
                     Card {
-                        div { class: "grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8 mb-7",
+                        div { class: "grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 md:gap-8 mb-5 sm:mb-7",
                             StatTile {
                                 label: "Pageviews",
                                 value: format!("{}", d.total_pageviews),

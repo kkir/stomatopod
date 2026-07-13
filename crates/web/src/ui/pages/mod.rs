@@ -39,28 +39,72 @@ pub(crate) const CTRL_INPUT: &str = "bg-black/32 border border-border-2 text-tex
 /// Compact control matching range-tab height (page-head toolbar).
 pub(crate) const CTRL_TOOLBAR: &str = "h-9 inline-flex items-center bg-surface-2/80 border border-border-1 text-text-1 rounded-[11px] px-3.5 text-[12.5px] font-semibold shadow-inner-hi focus:outline-none focus:border-teal/55 cursor-pointer hover:text-text-1 appearance-none";
 
-use crate::ui::api::get_json;
+use crate::ui::api::{get_json, ApiError};
 use crate::ui::components::pill::FilterPill;
 use crate::ui::query::{humanize_filter, DashQuery};
 use crate::ui::routes::Route;
-use crate::ui::types::SitesList;
+use crate::ui::types::{SiteSummary, SitesList};
+
+/// Last successful org site list. Survives route remounts so per-site tab
+/// switches can keep showing the resolved name while a fresh fetch is pending
+/// (without this, headers flash the raw ULID every navigation).
+static SITES_CACHE: GlobalSignal<Option<SitesList>> = Signal::global(|| None);
+
+fn site_from_list(list: &SitesList, site_id: &str) -> Option<SiteSummary> {
+    list.sites.iter().find(|s| s.id == site_id).cloned()
+}
+
+/// Store a successful sites list for later mounts (and drop it after mutations).
+pub(crate) fn remember_sites(list: SitesList) {
+    *SITES_CACHE.write() = Some(list);
+}
+
+/// Clear the shared list after create/delete so the next fetch is authoritative.
+pub(crate) fn invalidate_sites_cache() {
+    *SITES_CACHE.write() = None;
+}
+
+/// Shared fetch of `/api/v1/sites`. On success updates [`SITES_CACHE`].
+pub(crate) fn use_sites_list() -> Resource<Result<SitesList, ApiError>> {
+    use_resource(move || async move {
+        let result = get_json::<SitesList>("/api/v1/sites").await;
+        if let Ok(ref list) = result {
+            remember_sites(list.clone());
+        }
+        result
+    })
+}
+
+/// Resolve a site from an in-flight list resource, falling back to the shared
+/// cache while the resource is still pending.
+pub(crate) fn site_from_resource(
+    sites: &Resource<Result<SitesList, ApiError>>,
+    site_id: &str,
+) -> Option<SiteSummary> {
+    if let Some(Ok(list)) = sites.read().as_ref() {
+        return site_from_list(list, site_id);
+    }
+    SITES_CACHE
+        .read()
+        .as_ref()
+        .and_then(|list| site_from_list(list, site_id))
+}
 
 /// Resolves a site's display name from the org site list, for per-site page
-/// headers (there is no single-site GET endpoint). Falls back to the raw id
-/// while the list loads or if the site isn't found, so a header never renders
-/// blank. Call at the top of a component like any other hook.
+/// headers (there is no single-site GET endpoint). Prefers an in-flight
+/// fetch, then the shared cache, then the raw id so a header never renders
+/// blank and tab switches do not flash the ULID. Call at the top of a
+/// component like any other hook.
 pub(crate) fn use_site_name(site_id: String) -> String {
-    let sites = use_resource(move || async move { get_json::<SitesList>("/api/v1/sites").await });
-    let guard = sites.read();
-    match guard.as_ref() {
-        Some(Ok(list)) => list
-            .sites
-            .iter()
-            .find(|s| s.id == site_id)
-            .map(|s| s.name.clone())
-            .unwrap_or(site_id),
-        _ => site_id,
-    }
+    use_site_summary(site_id.clone())
+        .map(|s| s.name)
+        .unwrap_or(site_id)
+}
+
+/// Resolves a full [`SiteSummary`] from the shared sites list / cache.
+pub(crate) fn use_site_summary(site_id: String) -> Option<SiteSummary> {
+    let sites = use_sites_list();
+    site_from_resource(&sites, &site_id)
 }
 
 /// Builds `/api/v1/sites/{site_id}/{endpoint}[?qs]` for a site-scoped GET,
