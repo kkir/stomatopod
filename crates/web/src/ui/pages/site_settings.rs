@@ -258,7 +258,7 @@ fn ChannelList(
                                     class: "flex items-center justify-between gap-3 py-2 border-t border-border-1",
                                     div { class: "min-w-0",
                                         div {
-                                            class: "text-text-1 text-[13px] font-medium font-mono max-w-[320px] overflow-hidden text-ellipsis whitespace-nowrap",
+                                            class: "text-text-1 text-[13px] font-medium font-mono max-w-full overflow-hidden text-ellipsis whitespace-nowrap",
                                             "{ch.url}"
                                         }
                                         if ch.last_error_at.is_some() {

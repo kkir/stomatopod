@@ -457,7 +457,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                 let tz_hint = tz_label.clone();
                 rsx! {
                     Card {
-                        div { class: "grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8 mb-7",
+                        div { class: "grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 md:gap-8 mb-5 sm:mb-7",
                             StatTile {
                                 label: "Pageviews",
                                 value: format!("{}", d.total_pageviews),

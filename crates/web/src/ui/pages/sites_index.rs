@@ -281,7 +281,7 @@ pub fn SitesIndex() -> Element {
 
         if show_form() {
             Card { title: "Add a new site".to_string(),
-                form { class: "grid grid-cols-[1fr_1fr_auto] gap-3 items-end mb-4", onsubmit,
+                form { class: "grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-stretch sm:items-end mb-4", onsubmit,
                     Field { label: "Domain",
                         input {
                             class: "w-full bg-black/32 border border-border-2 text-text-1 rounded-[10px] px-3 py-2 text-[13px] shadow-inner-hi focus:outline-none focus:border-teal/55",

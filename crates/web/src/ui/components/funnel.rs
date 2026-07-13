@@ -199,18 +199,20 @@ pub fn FunnelBuilder(on_submit: EventHandler<(String, Vec<FunnelStepDraft>)>) ->
 #[component]
 pub fn FunnelBars(steps: Vec<FunnelStepResult>) -> Element {
     rsx! {
-        div { class: "flex items-end gap-4 min-h-[220px] pt-4",
-            for (i , step) in steps.iter().enumerate() {
-                div { key: "{i}", class: "flex-1 flex flex-col items-center justify-end gap-1.5",
-                    div { class: "text-teal-hi text-[13px] font-semibold tabular-nums",
-                        "{(step.conversion_rate * 100.0):.0}%"
+        div { class: "overflow-x-auto -mx-1 px-1",
+            div { class: "flex items-end gap-3 sm:gap-4 min-h-[200px] sm:min-h-[220px] pt-4 min-w-[min(100%,18rem)]",
+                for (i , step) in steps.iter().enumerate() {
+                    div { key: "{i}", class: "flex-1 min-w-[3.5rem] flex flex-col items-center justify-end gap-1.5",
+                        div { class: "text-teal-hi text-[12px] sm:text-[13px] font-semibold tabular-nums",
+                            "{(step.conversion_rate * 100.0):.0}%"
+                        }
+                        div {
+                            class: "w-full max-w-[80px] rounded-t-md bg-grad-bar min-h-[3px]",
+                            style: "height: {(step.conversion_rate * 180.0) as i64}px",
+                        }
+                        div { class: "text-text-1 text-[12px] sm:text-[13px] font-medium text-center break-words max-w-full", "{step.name}" }
+                        div { class: "text-muted-1 text-xs tabular-nums", "{step.sessions}" }
                     }
-                    div {
-                        class: "w-full max-w-[80px] rounded-t-md bg-grad-bar min-h-[3px]",
-                        style: "height: {(step.conversion_rate * 180.0) as i64}px",
-                    }
-                    div { class: "text-text-1 text-[13px] font-medium text-center", "{step.name}" }
-                    div { class: "text-muted-1 text-xs tabular-nums", "{step.sessions}" }
                 }
             }
         }

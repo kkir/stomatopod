@@ -64,6 +64,15 @@
     }
 }
 
+/* Hide scrollbars on horizontal tab strips while keeping scroll. */
+@utility scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    &::-webkit-scrollbar {
+        display: none;
+    }
+}
+
 /* Kept as plain CSS (not expressible as utilities). A gentle two-tone pulse
    for the loading Skeleton. The former moving shimmer reset its
    background-position hard from 100% back to -100% each cycle, which read as a
