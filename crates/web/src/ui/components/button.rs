@@ -6,7 +6,7 @@ pub enum ButtonVariant {
     Danger,
 }
 
-/// Port of `.btn` + `.btn-primary`/`.btn-danger` (dashboard.css Buttons
+/// Port of `.btn` + `.btn-primary`/`.btn-danger` (legacy dashboard stylesheet Buttons
 /// section). Ghost-styled controls use the raw `BTN_GHOST` class instead
 /// (they need `type="submit"` or are `<a>` links, which this component
 /// cannot express).

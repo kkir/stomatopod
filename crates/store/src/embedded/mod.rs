@@ -391,7 +391,7 @@ impl MetaStore for EmbeddedBackend {
 
     async fn create_alert_channel(
         &self,
-        channel: &stomatopod_core::domain::agent::AlertChannel,
+        channel: &stomatopod_core::domain::alert_channel::AlertChannel,
     ) -> Result<(), StoreError> {
         self.meta.create_alert_channel(channel).await
     }
@@ -399,7 +399,7 @@ impl MetaStore for EmbeddedBackend {
     async fn list_alert_channels(
         &self,
         site_id: Ulid,
-    ) -> Result<Vec<stomatopod_core::domain::agent::AlertChannel>, StoreError> {
+    ) -> Result<Vec<stomatopod_core::domain::alert_channel::AlertChannel>, StoreError> {
         self.meta.list_alert_channels(site_id).await
     }
 

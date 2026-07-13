@@ -11,9 +11,9 @@ use std::{sync::Arc, time::Duration};
 use chrono::{DateTime, Utc};
 use stomatopod_core::{
     domain::{
-        agent::AlertChannelKind,
+        alert_channel::AlertChannelKind,
         analytics_alert::{AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind},
-        incident::{Incident, IncidentStatus, IncidentTrigger},
+        incident::{Incident, IncidentTrigger},
     },
     query::pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},
     traits::{MetaStore, StorageBackend},
@@ -129,15 +129,13 @@ fn alert_incident(alert: &AnalyticsAlert, sig: AlertSignal, now: DateTime<Utc>) 
     Incident {
         id: Ulid::new(),
         site_id: alert.site_id,
-        agent_id: "analytics".into(),
+        source: "analytics".into(),
         trigger: IncidentTrigger::AnalyticsAlert {
             alert_type: alert.kind.as_str().into(),
             value: sig.value,
             threshold: sig.threshold,
         },
-        status: IncidentStatus::Open,
         opened_at: now,
-        closed_at: None,
     }
 }
 

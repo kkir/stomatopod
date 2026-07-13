@@ -151,9 +151,6 @@ pub struct AnalyticsAlert {
     pub kind: String,
     #[serde(default)]
     pub config: AnalyticsAlertConfig,
-    /// Legacy field; fires go to every notification channel on the site.
-    #[serde(default)]
-    pub channel_id: String,
     pub enabled: bool,
 }
 

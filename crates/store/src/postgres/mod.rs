@@ -18,7 +18,7 @@ use ulid::Ulid;
 use stomatopod_core::{
     config::PostgresConfig,
     domain::{
-        agent::{AlertChannel, AlertChannelKind},
+        alert_channel::{AlertChannel, AlertChannelKind},
         analytics_alert::{
             default_analytics_alerts, AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind,
         },
@@ -916,14 +916,13 @@ impl MetaStore for PostgresBackend {
         let config = serde_json::to_string(&alert.config)
             .map_err(|e| StoreError::Serialization(e.to_string()))?;
         sqlx::query(
-            "INSERT INTO analytics_alerts (id, site_id, type, config, channel_id, enabled, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            "INSERT INTO analytics_alerts (id, site_id, type, config, enabled, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(alert.id.to_string())
         .bind(alert.site_id.to_string())
         .bind(alert.kind.as_str())
         .bind(config)
-        .bind(alert.channel_id.to_string())
         .bind(alert.enabled)
         .bind(alert.created_at)
         .execute(&self.pool)
@@ -934,7 +933,7 @@ impl MetaStore for PostgresBackend {
 
     async fn get_analytics_alert(&self, id: Ulid) -> Result<Option<AnalyticsAlert>, StoreError> {
         let row = sqlx::query(
-            "SELECT id, site_id, type, config, channel_id, enabled, created_at \
+            "SELECT id, site_id, type, config, enabled, created_at \
              FROM analytics_alerts WHERE id = $1",
         )
         .bind(id.to_string())
@@ -949,7 +948,7 @@ impl MetaStore for PostgresBackend {
         site_id: Ulid,
     ) -> Result<Vec<AnalyticsAlert>, StoreError> {
         let rows = sqlx::query(
-            "SELECT id, site_id, type, config, channel_id, enabled, created_at \
+            "SELECT id, site_id, type, config, enabled, created_at \
              FROM analytics_alerts WHERE site_id = $1 ORDER BY created_at DESC",
         )
         .bind(site_id.to_string())
@@ -961,7 +960,7 @@ impl MetaStore for PostgresBackend {
 
     async fn list_enabled_analytics_alerts(&self) -> Result<Vec<AnalyticsAlert>, StoreError> {
         let rows = sqlx::query(
-            "SELECT id, site_id, type, config, channel_id, enabled, created_at \
+            "SELECT id, site_id, type, config, enabled, created_at \
              FROM analytics_alerts WHERE enabled = TRUE ORDER BY created_at ASC",
         )
         .fetch_all(&self.pool)
@@ -1272,13 +1271,11 @@ fn row_to_analytics_alert(row: sqlx::postgres::PgRow) -> Result<AnalyticsAlert, 
     let site_id: String = row.try_get("site_id").map_err(StoreError::db)?;
     let type_str: String = row.try_get("type").map_err(StoreError::db)?;
     let config_str: String = row.try_get("config").map_err(StoreError::db)?;
-    let channel_id: String = row.try_get("channel_id").map_err(StoreError::db)?;
     Ok(AnalyticsAlert {
         id: parse_ulid(&id),
         site_id: parse_ulid(&site_id),
         kind: AnalyticsAlertKind::from_str(&type_str).unwrap_or(AnalyticsAlertKind::TrafficSpike),
         config: serde_json::from_str(&config_str).unwrap_or_default(),
-        channel_id: parse_ulid(&channel_id),
         enabled: row.try_get("enabled").map_err(StoreError::db)?,
         created_at: row.try_get("created_at").map_err(StoreError::db)?,
     })
@@ -1470,7 +1467,6 @@ mod ddl {
             site_id     TEXT NOT NULL REFERENCES sites(id),
             type        TEXT NOT NULL,
             config      TEXT NOT NULL,
-            channel_id  TEXT NOT NULL,
             enabled     BOOLEAN NOT NULL DEFAULT TRUE,
             created_at  TIMESTAMPTZ NOT NULL
         )

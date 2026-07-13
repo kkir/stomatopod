@@ -8,7 +8,7 @@ use ulid::Ulid;
 
 use stomatopod_core::{
     domain::{
-        agent::{AlertChannel, AlertChannelKind},
+        alert_channel::{AlertChannel, AlertChannelKind},
         analytics_alert::{
             default_analytics_alerts, AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind,
         },
@@ -126,10 +126,6 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
             site_id     TEXT NOT NULL REFERENCES sites(id),
             type        TEXT NOT NULL,
             config      TEXT NOT NULL,
-            -- Legacy column; fires fan out to all site channels. Nullable FK
-            -- intentionally omitted so default alerts can exist before any
-            -- notification destination is configured (nil ULID placeholder).
-            channel_id  TEXT NOT NULL,
             enabled     INTEGER NOT NULL DEFAULT 1,
             created_at  TEXT NOT NULL
         );
@@ -160,9 +156,6 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
         VALUES (1, 1, datetime('now'));
         "#,
     )?;
-    // Older installs created analytics_alerts.channel_id with a FK to
-    // alert_channels. Drop that so starter alerts can use a nil placeholder.
-    drop_analytics_alert_channel_fk(conn)?;
     // v2: persist tasteful default alert rows for sites that have none.
     // One-shot only (schema_version bump) so deleting them later sticks.
     let version: i64 = conn.query_row(
@@ -174,6 +167,20 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
         seed_default_alerts_for_empty_sites(conn)?;
         conn.execute(
             "UPDATE schema_version SET version = 2, applied_at = datetime('now') WHERE id = 1",
+            [],
+        )?;
+    }
+    // v3: drop legacy analytics_alerts.channel_id (fires fan out to all
+    // site channels; the column was always a nil placeholder).
+    let version: i64 = conn.query_row(
+        "SELECT version FROM schema_version WHERE id = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    if version < 3 {
+        drop_analytics_alert_channel_id(conn)?;
+        conn.execute(
+            "UPDATE schema_version SET version = 3, applied_at = datetime('now') WHERE id = 1",
             [],
         )?;
     }
@@ -207,14 +214,13 @@ fn insert_default_alerts(conn: &Connection, site_id: Ulid) -> Result<(), StoreEr
         let config = serde_json::to_string(&alert.config)
             .map_err(|e| StoreError::Serialization(e.to_string()))?;
         conn.execute(
-            "INSERT INTO analytics_alerts (id, site_id, type, config, channel_id, enabled, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO analytics_alerts (id, site_id, type, config, enabled, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 alert.id.to_string(),
                 alert.site_id.to_string(),
                 alert.kind.as_str(),
                 config,
-                alert.channel_id.to_string(),
                 alert.enabled as i32,
                 alert.created_at.to_rfc3339(),
             ],
@@ -224,16 +230,16 @@ fn insert_default_alerts(conn: &Connection, site_id: Ulid) -> Result<(), StoreEr
     Ok(())
 }
 
-/// Rebuild `analytics_alerts` without a FK on `channel_id` when one exists.
-fn drop_analytics_alert_channel_fk(conn: &Connection) -> anyhow::Result<()> {
-    let has_channel_fk = {
-        let mut stmt = conn.prepare("PRAGMA foreign_key_list(analytics_alerts)")?;
-        let tables: Vec<String> = stmt
-            .query_map([], |row| row.get::<_, String>(2))?
+/// Rebuild `analytics_alerts` without the legacy `channel_id` column.
+fn drop_analytics_alert_channel_id(conn: &Connection) -> anyhow::Result<()> {
+    let has_channel_id = {
+        let mut stmt = conn.prepare("PRAGMA table_info(analytics_alerts)")?;
+        let cols: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
             .collect::<Result<Vec<_>, _>>()?;
-        tables.iter().any(|t| t == "alert_channels")
+        cols.iter().any(|c| c == "channel_id")
     };
-    if !has_channel_fk {
+    if !has_channel_id {
         return Ok(());
     }
     conn.execute_batch(
@@ -245,13 +251,12 @@ fn drop_analytics_alert_channel_fk(conn: &Connection) -> anyhow::Result<()> {
             site_id     TEXT NOT NULL REFERENCES sites(id),
             type        TEXT NOT NULL,
             config      TEXT NOT NULL,
-            channel_id  TEXT NOT NULL,
             enabled     INTEGER NOT NULL DEFAULT 1,
             created_at  TEXT NOT NULL
         );
         INSERT INTO analytics_alerts_new
-            (id, site_id, type, config, channel_id, enabled, created_at)
-            SELECT id, site_id, type, config, channel_id, enabled, created_at
+            (id, site_id, type, config, enabled, created_at)
+            SELECT id, site_id, type, config, enabled, created_at
             FROM analytics_alerts;
         DROP TABLE analytics_alerts;
         ALTER TABLE analytics_alerts_new RENAME TO analytics_alerts;
@@ -389,15 +394,13 @@ fn row_to_analytics_alert(row: &rusqlite::Row<'_>) -> rusqlite::Result<Analytics
     let site_id_str: String = row.get(1)?;
     let type_str: String = row.get(2)?;
     let config_str: String = row.get(3)?;
-    let channel_id_str: String = row.get(4)?;
-    let enabled: i32 = row.get(5)?;
-    let created_at_str: String = row.get(6)?;
+    let enabled: i32 = row.get(4)?;
+    let created_at_str: String = row.get(5)?;
     Ok(AnalyticsAlert {
         id: Ulid::from_string(&id_str).unwrap_or_default(),
         site_id: Ulid::from_string(&site_id_str).unwrap_or_default(),
         kind: AnalyticsAlertKind::from_str(&type_str).unwrap_or(AnalyticsAlertKind::TrafficSpike),
         config: serde_json::from_str(&config_str).unwrap_or_default(),
-        channel_id: Ulid::from_string(&channel_id_str).unwrap_or_default(),
         enabled: enabled != 0,
         created_at: parse_utc(&created_at_str),
     })
@@ -746,14 +749,13 @@ impl MetaStore for SqliteMeta {
             let config = serde_json::to_string(&alert.config)
                 .map_err(|e| StoreError::Serialization(e.to_string()))?;
             conn.execute(
-                "INSERT INTO analytics_alerts (id, site_id, type, config, channel_id, enabled, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO analytics_alerts (id, site_id, type, config, enabled, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     alert.id.to_string(),
                     alert.site_id.to_string(),
                     alert.kind.as_str(),
                     config,
-                    alert.channel_id.to_string(),
                     alert.enabled as i32,
                     alert.created_at.to_rfc3339(),
                 ],
@@ -766,7 +768,7 @@ impl MetaStore for SqliteMeta {
     async fn get_analytics_alert(&self, id: Ulid) -> Result<Option<AnalyticsAlert>, StoreError> {
         db!(self.conn, |conn: &Connection| {
             conn.query_row(
-                "SELECT id, site_id, type, config, channel_id, enabled, created_at
+                "SELECT id, site_id, type, config, enabled, created_at
                  FROM analytics_alerts WHERE id = ?1",
                 params![id.to_string()],
                 row_to_analytics_alert,
@@ -783,7 +785,7 @@ impl MetaStore for SqliteMeta {
         db!(self.conn, |conn: &Connection| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, site_id, type, config, channel_id, enabled, created_at
+                    "SELECT id, site_id, type, config, enabled, created_at
                      FROM analytics_alerts WHERE site_id = ?1 ORDER BY created_at DESC",
                 )
                 .map_err(StoreError::db)?;
@@ -798,7 +800,7 @@ impl MetaStore for SqliteMeta {
         db!(self.conn, |conn: &Connection| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, site_id, type, config, channel_id, enabled, created_at
+                    "SELECT id, site_id, type, config, enabled, created_at
                      FROM analytics_alerts WHERE enabled = 1 ORDER BY created_at ASC",
                 )
                 .map_err(StoreError::db)?;

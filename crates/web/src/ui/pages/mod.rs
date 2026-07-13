@@ -26,7 +26,7 @@ pub use sites_index::SitesIndex;
 
 use dioxus::prelude::*;
 
-/// Shared control styles, ported from the legacy dashboard.css buttons and
+/// Shared control styles, ported from the legacy legacy dashboard stylesheet buttons and
 /// form controls. Used across the insight/management pages so the raw
 /// `button`/`a`/`input` elements (which the `Button` component can't cover,
 /// e.g. `type="submit"` or `<a>` links) stay visually consistent.

@@ -52,7 +52,6 @@ pub struct AnalyticsAlert {
     pub site_id: Ulid,
     pub kind: AnalyticsAlertKind,
     pub config: AnalyticsAlertConfig,
-    pub channel_id: Ulid,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
 }
@@ -67,22 +66,14 @@ pub struct AnalyticsAlertFire {
     pub payload: serde_json::Value,
 }
 
-/// Placeholder `channel_id` for alerts that fan out to every site destination
-/// (the column is legacy; delivery no longer keys off a single channel).
-pub fn unassigned_channel_id() -> Ulid {
-    Ulid::nil()
-}
-
 /// Tasteful starter rules for a new site. Enabled so they start working as
-/// soon as a notification destination is configured; no channel is required
-/// to store them (`channel_id` is the nil ULID placeholder).
+/// soon as a notification destination is configured.
 ///
 /// Thresholds are percent points as used by the evaluator:
 /// - spike/drop: percent change vs the previous window baseline
 /// - referrer spike: share of traffic from a single referrer
 pub fn default_analytics_alerts(site_id: Ulid) -> Vec<AnalyticsAlert> {
     let now = Utc::now();
-    let channel_id = unassigned_channel_id();
     // Stagger created_at so list order (DESC) is stable and readable.
     let mk = |kind: AnalyticsAlertKind, threshold: f64, window_minutes: u32, secs_ago: i64| {
         AnalyticsAlert {
@@ -93,13 +84,12 @@ pub fn default_analytics_alerts(site_id: Ulid) -> Vec<AnalyticsAlert> {
                 threshold,
                 window_minutes,
             },
-            channel_id,
             enabled: true,
             created_at: now - chrono::Duration::seconds(secs_ago),
         }
     };
     vec![
-        // 2× traffic vs the prior window over an hour - catches launches,
+        // 2x traffic vs the prior window over an hour - catches launches,
         // outages recovering, and sudden campaign traffic.
         mk(AnalyticsAlertKind::TrafficSpike, 100.0, 60, 0),
         // ~half the usual volume - outages, broken deploy, tracking loss.
@@ -120,9 +110,6 @@ mod tests {
         let alerts = default_analytics_alerts(site);
         assert_eq!(alerts.len(), 3);
         assert!(alerts.iter().all(|a| a.site_id == site && a.enabled));
-        assert!(alerts
-            .iter()
-            .all(|a| a.channel_id == unassigned_channel_id()));
         let kinds: Vec<_> = alerts.iter().map(|a| a.kind).collect();
         assert!(kinds.contains(&AnalyticsAlertKind::TrafficSpike));
         assert!(kinds.contains(&AnalyticsAlertKind::TrafficDrop));

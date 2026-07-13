@@ -5,7 +5,7 @@ use crate::ui::routes::Route;
 
 const RANGES: [&str; 4] = ["7d", "30d", "90d", "12m"];
 
-/// The 7d/30d/90d/12m pills, port of `.range-tabs` (dashboard.css Range
+/// The 7d/30d/90d/12m pills, port of `.range-tabs` (legacy dashboard stylesheet Range
 /// tabs section). Navigates by swapping `range` on the current route
 /// while preserving filters/compare.
 #[component]

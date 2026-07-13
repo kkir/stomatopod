@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-/// Base panel container, port of `.card` (dashboard.css Cards section).
+/// Base panel container, port of `.card` (legacy dashboard stylesheet Cards section).
 /// The iridescent hairline ring is dropped (a `::before` border trick,
 /// not worth reproducing in utilities); the border + shadow read is kept.
 #[component]

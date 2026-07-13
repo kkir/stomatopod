@@ -47,8 +47,6 @@ pub enum Mode {
 pub struct ListenConfig {
     pub host: String,
     pub port: u16,
-    pub tls_cert: Option<PathBuf>,
-    pub tls_key: Option<PathBuf>,
 }
 
 impl Default for ListenConfig {
@@ -56,8 +54,6 @@ impl Default for ListenConfig {
         Self {
             host: "0.0.0.0".into(),
             port: 8080,
-            tls_cert: None,
-            tls_key: None,
         }
     }
 }

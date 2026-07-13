@@ -16,7 +16,7 @@ pub struct DeltaInfo {
     pub pct: f64,
 }
 
-/// A single headline number, port of `.stat` (dashboard.css Stats
+/// A single headline number, port of `.stat` (legacy dashboard stylesheet Stats
 /// section). Used for the site-overview hero and any global summary
 /// cards.
 #[component]

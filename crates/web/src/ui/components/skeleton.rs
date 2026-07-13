@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 /// Shimmering placeholder bars shown while a `use_resource` is `None`,
-/// port of `.skeleton` (dashboard.css Skeleton section).
+/// port of `.skeleton` (legacy dashboard stylesheet Skeleton section).
 #[component]
 pub fn Skeleton(lines: usize) -> Element {
     rsx! {

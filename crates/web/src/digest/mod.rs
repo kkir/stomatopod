@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use stomatopod_core::{
     domain::{
-        agent::AlertChannel,
+        alert_channel::AlertChannel,
         digest::{due_cadences, DigestFrequency, DigestSubscription},
     },
     query::pageviews::{Granularity, PageviewsQuery, TimeRange, TopListField},

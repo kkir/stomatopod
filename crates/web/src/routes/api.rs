@@ -306,19 +306,69 @@ pub async fn docs_api() -> impl IntoResponse {
     Json(serde_json::json!({ "html": body, "toc": toc }))
 }
 
-static DASHBOARD_CSS: &str = include_str!("../../../../assets/dashboard.css");
-
-/// Shared dashboard stylesheet. Short max-age (vs the tracker's immutable
-/// day) so a binary upgrade doesn't leave browsers on stale styles for long.
+/// Shared app stylesheet (compiled Tailwind used by both the login page and
+/// the Dioxus SPA). Resolves the hashed file under `DIOXUS_PUBLIC_PATH` /
+/// sibling release layout. Short max-age so a rebuild is picked up quickly.
 pub async fn dashboard_css() -> impl IntoResponse {
+    let body = resolve_shared_css().unwrap_or_default();
     (
         StatusCode::OK,
         [
             (header::CONTENT_TYPE, "text/css; charset=utf-8"),
             (header::CACHE_CONTROL, "public, max-age=600"),
         ],
-        DASHBOARD_CSS,
+        body,
     )
+}
+
+/// Locate the newest `tailwind*.css` under the Dioxus public assets directory.
+fn resolve_shared_css() -> Option<String> {
+    let candidates = shared_css_search_dirs();
+    let mut best: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
+    for dir in candidates {
+        let assets = dir.join("assets");
+        let Ok(entries) = std::fs::read_dir(&assets) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !(name.starts_with("tailwind") && name.ends_with(".css")) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            let modified = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            match &best {
+                Some((t, _)) if *t >= modified => {}
+                _ => best = Some((modified, path)),
+            }
+        }
+    }
+    best.and_then(|(_, path)| std::fs::read_to_string(path).ok())
+}
+
+fn shared_css_search_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(p) = std::env::var("DIOXUS_PUBLIC_PATH") {
+        dirs.push(std::path::PathBuf::from(p));
+    }
+    // `dx build --release` places assets next to the server binary.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            dirs.push(parent.join("public"));
+            dirs.push(parent.to_path_buf());
+        }
+    }
+    // Dev fallback when running from the workspace root without env set.
+    dirs.push(std::path::PathBuf::from(
+        "target/dx/stomatopod/debug/web/public",
+    ));
+    dirs.push(std::path::PathBuf::from(
+        "target/dx/stomatopod/release/web/public",
+    ));
+    dirs
 }
 
 #[cfg(test)]

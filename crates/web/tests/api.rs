@@ -35,7 +35,7 @@ struct CapturingNotifier {
 impl stomatopod_web::digest::DigestNotifier for CapturingNotifier {
     async fn send(
         &self,
-        _channels: &[stomatopod_core::domain::agent::AlertChannel],
+        _channels: &[stomatopod_core::domain::alert_channel::AlertChannel],
         msg: stomatopod_web::digest::DigestMessage,
     ) -> Result<(), String> {
         self.sent.lock().unwrap().push(msg);
@@ -352,8 +352,8 @@ async fn ingest_bot_user_agent_returns_no_content() {
 async fn webhook_alert_delivered_to_mock_sink() {
     use std::sync::Mutex;
     use stomatopod_core::domain::{
-        agent::{AlertChannel, AlertChannelKind},
-        incident::{Incident, IncidentStatus, IncidentTrigger},
+        alert_channel::{AlertChannel, AlertChannelKind},
+        incident::{Incident, IncidentTrigger},
     };
     use stomatopod_web::alerts::sinks::{AlertSink, WebhookSink};
 
@@ -395,15 +395,13 @@ async fn webhook_alert_delivered_to_mock_sink() {
     let incident = Incident {
         id: Ulid::new(),
         site_id: site.id,
-        agent_id: "analytics".into(),
+        source: "analytics".into(),
         trigger: IncidentTrigger::AnalyticsAlert {
             alert_type: "traffic_spike".into(),
             value: 200.0,
             threshold: 100.0,
         },
-        status: IncidentStatus::Open,
         opened_at: Utc::now(),
-        closed_at: None,
     };
 
     let sink = WebhookSink::new(reqwest::Client::new());
@@ -1371,7 +1369,7 @@ async fn create_site_seeds_default_analytics_alerts() {
 
 #[tokio::test]
 async fn analytics_alert_requires_channel_then_round_trips() {
-    use stomatopod_core::domain::agent::{AlertChannel, AlertChannelKind};
+    use stomatopod_core::domain::alert_channel::{AlertChannel, AlertChannelKind};
 
     let ctx = setup().await;
     let (site, token) = site_and_token(&ctx).await;
@@ -1483,7 +1481,7 @@ fn analytics_alert_decide_logic() {
 async fn analytics_alert_fires_records_and_respects_cooldown() {
     use std::sync::Mutex;
     use stomatopod_core::domain::{
-        agent::{AlertChannel, AlertChannelKind},
+        alert_channel::{AlertChannel, AlertChannelKind},
         analytics_alert::{AnalyticsAlert, AnalyticsAlertConfig, AnalyticsAlertKind},
     };
     use stomatopod_web::alerts::{
@@ -1542,7 +1540,6 @@ async fn analytics_alert_fires_records_and_respects_cooldown() {
             threshold: -1.0,
             window_minutes: 60,
         },
-        channel_id: channel.id,
         enabled: true,
         created_at: Utc::now(),
     };
@@ -1640,7 +1637,7 @@ async fn site_user_and_token(ctx: &TestCtx) -> (Site, stomatopod_core::domain::o
 }
 
 async fn add_test_channel(ctx: &TestCtx, site_id: Ulid) {
-    use stomatopod_core::domain::agent::{AlertChannel, AlertChannelKind};
+    use stomatopod_core::domain::alert_channel::{AlertChannel, AlertChannelKind};
     let ch = AlertChannel {
         id: Ulid::new(),
         site_id,
