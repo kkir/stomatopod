@@ -18,7 +18,10 @@ use clap::{Parser, Subcommand};
 use client::ApiClient;
 
 #[derive(Parser)]
-#[command(name = "stoma", about = "Stomatopod query CLI for humans and LLM agents")]
+#[command(
+    name = "stoma",
+    about = "Stomatopod query CLI for humans and LLM agents"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

@@ -77,6 +77,10 @@ pub fn Events(site_id: String, q: DashQuery) -> Element {
                     csv_href,
                     on_filter: Some(EventHandler::new(move |value: String| {
                         let mut nq = q.clone();
+                        // Replace any existing event_name filter instead of
+                        // stacking (which can zero out results).
+                        nq.filters
+                            .retain(|f| !f.starts_with("event_name:"));
                         nq.filters.push(format!("event_name:eq:{value}"));
                         navigator().push(route.with_query(nq));
                     })),

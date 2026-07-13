@@ -182,8 +182,10 @@ impl StorageBackend for PostgresBackend {
             });
         }
 
-        // Session-level bounce + avg duration over the full range. A bounce is
-        // a session with exactly one pageview (same as entry-page bounce).
+        // Session-level bounce + avg duration + true unique session count over
+        // the full range. A bounce is a session with exactly one pageview
+        // (same as entry-page bounce). total_sessions uses this unique count
+        // so overview tiles agree with bounce rate.
         if result.total_pageviews > 0 {
             let (filter_sql, filter_vals) = pg_filter_clause(&q.filters, 4);
             let summary_sql = format!(
@@ -225,6 +227,7 @@ impl StorageBackend for PostgresBackend {
                     0.0
                 };
                 result.avg_duration_secs = avg.max(0.0);
+                result.total_sessions = sessions;
             }
         }
 
@@ -570,12 +573,28 @@ impl StorageBackend for PostgresBackend {
     }
 
     async fn prune_events_before(&self, cutoff: chrono::DateTime<Utc>) -> Result<u64, StoreError> {
-        let result = sqlx::query("DELETE FROM events WHERE timestamp < $1")
+        // Batch deletes to avoid long locks / WAL spikes on large tables when
+        // retention is first enabled.
+        const BATCH: i64 = 5_000;
+        let mut total = 0u64;
+        loop {
+            let result = sqlx::query(
+                "DELETE FROM events WHERE ctid IN (\
+                    SELECT ctid FROM events WHERE timestamp < $1 LIMIT $2\
+                 )",
+            )
             .bind(cutoff)
+            .bind(BATCH)
             .execute(&self.pool)
             .await
             .map_err(StoreError::db)?;
-        Ok(result.rows_affected())
+            let n = result.rows_affected();
+            total = total.saturating_add(n);
+            if n < BATCH as u64 {
+                break;
+            }
+        }
+        Ok(total)
     }
 
     async fn query_top_sparklines(
@@ -588,13 +607,15 @@ impl StorageBackend for PostgresBackend {
     ) -> Result<TopSparklines, StoreError> {
         let (filter_sql, filter_vals) = pg_filter_clause(filters, 4);
         let col = field.column();
+        let kind = field.event_kind();
+        let null_label = field.null_label();
         let sql = format!(
-            "SELECT COALESCE({col}, 'Direct / None') AS value, \
+            "SELECT COALESCE({col}, '{null_label}') AS value, \
                     to_char(date_trunc('day', timestamp), 'YYYY-MM-DD') AS day, \
                     COUNT(*)::BIGINT AS c \
              FROM events \
              WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
-               AND kind = 'pageview' {filter_sql} \
+               AND kind = '{kind}' {filter_sql} \
              GROUP BY 1, 2"
         );
         let mut q = sqlx::query(&sql)

@@ -66,6 +66,11 @@ pub fn InstallCard(public_key: String, domain: String, prominent: bool) -> Eleme
                             spawn(async move {
                                 if copy_text(&snippet).await {
                                     copied.set(true);
+                                    #[cfg(target_arch = "wasm32")]
+                                    {
+                                        gloo_timers::future::TimeoutFuture::new(2000).await;
+                                        copied.set(false);
+                                    }
                                 }
                             });
                         }

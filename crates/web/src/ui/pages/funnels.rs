@@ -6,7 +6,7 @@ use crate::ui::components::funnel::FunnelBuilder;
 use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs};
-use crate::ui::pages::{active_filters, use_site_name, BTN_GHOST};
+use crate::ui::pages::{active_filters, confirm_delete, use_site_name, BTN_GHOST};
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
 use crate::ui::types::{CreateFunnelBody, FunnelsList};
@@ -83,6 +83,9 @@ pub fn Funnels(site_id: String, q: DashQuery) -> Element {
                                                     let funnel_id = f.id.clone();
                                                     let mut refresh = refresh;
                                                     move |_| {
+                                                        if !confirm_delete("Delete this funnel?") {
+                                                            return;
+                                                        }
                                                         let site_id = site_id.clone();
                                                         let funnel_id = funnel_id.clone();
                                                         spawn(async move {

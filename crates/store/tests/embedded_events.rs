@@ -725,6 +725,10 @@ async fn pageviews_report_bounce_rate_and_avg_duration() {
 
     // 5 pageviews across 3 sessions; only session B is a single-pageview bounce.
     assert_eq!(pv.total_pageviews, 5);
+    assert_eq!(
+        pv.total_sessions, 3,
+        "total_sessions should be unique sessions, not sum of per-bucket counts"
+    );
     assert!(
         (pv.bounce_rate - (1.0 / 3.0 * 100.0)).abs() < 0.01,
         "1 of 3 sessions bounced, got {}",

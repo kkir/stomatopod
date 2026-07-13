@@ -588,6 +588,7 @@ async fn api_top_pages_json_includes_optional_spark() {
     let ctx = setup().await;
     let (site, token) = site_and_token(&ctx).await;
 
+    // Without spark=1, JSON is the plain TopList shape (no spark field required).
     let (status, json) = get_json(
         ctx.state.clone(),
         &format!("/api/v1/sites/{}/top-pages?range=7d", site.id),
@@ -596,7 +597,17 @@ async fn api_top_pages_json_includes_optional_spark() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let rows = json["rows"].as_array().expect("rows array");
-    // Empty site: still a list. When rows exist they may carry `spark`.
+    assert!(rows.is_empty() || rows[0].get("value").is_some());
+
+    // With spark=1, response still succeeds (empty site has no spark series).
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/top-pages?range=7d&spark=1", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let rows = json["rows"].as_array().expect("rows array");
     assert!(rows.is_empty() || rows[0].get("value").is_some());
 }
 
@@ -1191,6 +1202,8 @@ async fn health_and_ready_are_public() {
 
 #[tokio::test]
 async fn change_password_requires_session_and_correct_current() {
+    use stomatopod_web::middleware::auth::sign_session_bound;
+
     let ctx = setup().await;
     let org = make_org();
     ctx.backend.meta.create_org(&org).await.unwrap();
@@ -1200,12 +1213,12 @@ async fn change_password_requires_session_and_correct_current() {
         id: Ulid::new(),
         org_id: org.id,
         email: "owner@example.com".into(),
-        password_hash: hash,
+        password_hash: hash.clone(),
         role: UserRole::Owner,
         created_at: Utc::now(),
     };
     ctx.backend.meta.create_user(&user).await.unwrap();
-    let token = sign_session(&ctx.secret, &user.id.to_string(), 3600);
+    let token = sign_session_bound(&ctx.secret, &user.id.to_string(), 3600, &hash);
 
     let body = serde_json::json!({
         "current_password": "wrong-password",
@@ -1243,6 +1256,34 @@ async fn change_password_requires_session_and_correct_current() {
         .unwrap()
         .expect("user");
     assert_ne!(updated.password_hash, user.password_hash);
+
+    // Old password-bound token must be rejected after rotation.
+    let req = Request::builder()
+        .uri("/api/v1/me")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "password change should invalidate prior sessions"
+    );
+
+    // A token bound to the new hash still works.
+    let new_token = sign_session_bound(
+        &ctx.secret,
+        &user.id.to_string(),
+        3600,
+        &updated.password_hash,
+    );
+    let req = Request::builder()
+        .uri("/api/v1/me")
+        .header("authorization", format!("Bearer {new_token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
 }
 
 #[tokio::test]

@@ -16,7 +16,7 @@ use tracing::warn;
 use ulid::Ulid;
 
 use crate::{
-    middleware::auth::{verify_session, Principal, SESSION_COOKIE},
+    middleware::auth::{sign_session_bound, verify_session, Principal, SESSION_COOKIE},
     state::{ApiKeyCacheEntry, AppState},
 };
 
@@ -230,11 +230,16 @@ pub async fn ready(State(state): State<Arc<AppState>>) -> Response {
             Json(serde_json::json!({ "status": "ready" })),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({ "status": "not_ready", "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => {
+            // Unauthenticated probe — log details server-side, never leak
+            // storage/driver strings to clients.
+            tracing::warn!("readiness check failed: {e}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "status": "not_ready" })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -268,6 +273,11 @@ pub async fn change_password(
         password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
         Argon2, PasswordHash, PasswordVerifier,
     };
+    use axum_extra::extract::cookie::{Cookie, SameSite};
+    use cookie::time::Duration as CookieDuration;
+
+    /// Cap before Argon2 so huge bodies cannot be used as a CPU DoS.
+    const MAX_PASSWORD_BYTES: usize = 128;
 
     if matches!(principal, Principal::ApiKey { .. }) {
         return (
@@ -290,6 +300,17 @@ pub async fn change_password(
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({
                 "error": "new password must be at least 12 characters"
+            })),
+        )
+            .into_response();
+    }
+    if body.new_password.len() > MAX_PASSWORD_BYTES
+        || body.current_password.len() > MAX_PASSWORD_BYTES
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "password must be at most 128 characters"
             })),
         )
             .into_response();
@@ -329,10 +350,32 @@ pub async fn change_password(
                 .into_response()
         }
     };
-    match state.meta.update_user_password(user_id, &hash).await {
-        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    if let Err(e) = state.meta.update_user_password(user_id, &hash).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
+
+    // Re-issue a session bound to the new hash so this client stays logged
+    // in; tokens signed with the old hash fail middleware checks.
+    let ttl_secs = state.config.auth.session_ttl_s;
+    let session_value = sign_session_bound(
+        &state.config.auth.secret_key,
+        &user_id.to_string(),
+        ttl_secs,
+        &hash,
+    );
+    let cookie_ttl = i64::try_from(ttl_secs).unwrap_or(i64::MAX);
+    let secure = state
+        .config
+        .auth
+        .effective_cookie_secure(state.config.public_base_url());
+    let cookie = Cookie::build((SESSION_COOKIE, session_value))
+        .path("/")
+        .http_only(true)
+        .secure(secure)
+        .same_site(SameSite::Lax)
+        .max_age(CookieDuration::seconds(cookie_ttl))
+        .build();
+    (jar.add(cookie), Json(serde_json::json!({ "ok": true }))).into_response()
 }
 
 /// `GET /api/v1/me` — session probe so the SPA can confirm it is logged in

@@ -153,6 +153,9 @@ pub struct AnalyticsParams {
     pub filter: Vec<String>,
     /// `csv` triggers a CSV download; anything else (or absent) is JSON.
     pub format: Option<String>,
+    /// When `1`/`true`/`on`, attach per-row sparklines on JSON top-lists.
+    /// Omitted by default so CLI/API clients avoid the extra query.
+    pub spark: Option<String>,
 }
 
 impl AnalyticsParams {
@@ -172,6 +175,9 @@ impl AnalyticsParams {
     fn wants_csv(&self) -> bool {
         matches!(self.format.as_deref(), Some("csv"))
     }
+    fn wants_spark(&self) -> bool {
+        matches!(self.spark.as_deref(), Some("1") | Some("true") | Some("on"))
+    }
 }
 
 #[derive(Deserialize, Default, utoipa::IntoParams, utoipa::ToSchema)]
@@ -188,6 +194,14 @@ pub struct EventsParams {
     /// is treated like `name=` when `name` is absent.
     #[serde(default)]
     pub filter: Vec<String>,
+    /// When `1`/`true`/`on`, attach per-row sparklines on JSON responses.
+    pub spark: Option<String>,
+}
+
+impl EventsParams {
+    fn wants_spark(&self) -> bool {
+        matches!(self.spark.as_deref(), Some("1") | Some("true") | Some("on"))
+    }
 }
 
 fn default_range() -> String {
@@ -420,8 +434,8 @@ async fn top_list_response(
                     ));
                 }
                 csv_response(&format!("{}.csv", field_filename(field)), csv)
-            } else {
-                // Attach per-row sparklines for the dashboard Trend column.
+            } else if params.wants_spark() {
+                // Opt-in sparklines for the dashboard Trend column.
                 // Failure is non-fatal: rows still return without `spark`.
                 let spark_by_value: std::collections::HashMap<String, Vec<f64>> = match state
                     .backend
@@ -450,6 +464,8 @@ async fn top_list_response(
                     })
                     .collect();
                 Json(serde_json::json!({ "rows": rows })).into_response()
+            } else {
+                Json(serde_json::to_value(result).unwrap()).into_response()
             }
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -657,7 +673,7 @@ pub async fn events(
         Ok(id) => id,
         Err(resp) => return resp,
     };
-    let mut event_name = params.name.filter(|s| !s.is_empty());
+    let mut event_name = params.name.clone().filter(|s| !s.is_empty());
     let mut filters = Vec::new();
     for f in parse_filters(&params.filter) {
         // Click-to-filter on the Events page emits event_name:eq:…; treat it
@@ -671,6 +687,7 @@ pub async fn events(
             filters.push(f);
         }
     }
+    let wants_spark = params.wants_spark();
     let q = EventQuery {
         site_id,
         range: resolve_range(
@@ -683,7 +700,45 @@ pub async fn events(
         limit: params.limit.unwrap_or(20),
     };
     match state.backend.query_custom_events(&q).await {
-        Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),
+        Ok(result) => {
+            if !wants_spark {
+                return Json(serde_json::to_value(result).unwrap()).into_response();
+            }
+            // Opt-in sparklines for the Events dashboard Trend column.
+            let spark_by_value: std::collections::HashMap<String, Vec<f64>> = match state
+                .backend
+                .query_top_sparklines(
+                    site_id,
+                    TopListField::EventName,
+                    &q.range,
+                    q.limit,
+                    &q.filters,
+                )
+                .await
+            {
+                Ok(s) => s
+                    .rows
+                    .into_iter()
+                    .map(|r| (r.value, r.points.into_iter().map(|p| p as f64).collect()))
+                    .collect(),
+                Err(_) => std::collections::HashMap::new(),
+            };
+            let rows: Vec<serde_json::Value> = result
+                .rows
+                .into_iter()
+                .map(|r| {
+                    let spark = spark_by_value.get(&r.value).cloned();
+                    serde_json::json!({
+                        "value": r.value,
+                        "pageviews": r.pageviews,
+                        "sessions": r.sessions,
+                        "pct": r.pct,
+                        "spark": spark,
+                    })
+                })
+                .collect();
+            Json(serde_json::json!({ "rows": rows })).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -952,6 +1007,7 @@ fn field_filename(field: TopListField) -> &'static str {
         TopListField::UtmCampaign => "utm-campaign",
         TopListField::UtmTerm => "utm-term",
         TopListField::UtmContent => "utm-content",
+        TopListField::EventName => "events",
     }
 }
 

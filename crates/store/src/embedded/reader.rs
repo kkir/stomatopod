@@ -136,15 +136,23 @@ impl EmbeddedReader {
                 touched_sites.push(site_id);
             }
         }
+        // Re-register each site independently so one empty/failed site does
+        // not leave other pruned sites on a stale ListingTable view.
         for site_id in touched_sites {
-            self.reregister_site(&site_id)
-                .await
-                .map_err(StoreError::db)?;
+            if let Err(e) = self.reregister_site(&site_id).await {
+                tracing::warn!(
+                    site_id = %site_id,
+                    error = %e,
+                    "re-register after prune failed; site left unregistered"
+                );
+            }
         }
         Ok(removed)
     }
 
     /// Drop and re-register a site's ListingTable after partition changes.
+    /// Empty post-prune dirs stay unregistered so queries return empty results
+    /// instead of infer_schema errors.
     async fn reregister_site(&self, site_id: &str) -> Result<()> {
         let name = table_name(site_id);
         let _ = self.ctx.deregister_table(&name);
@@ -152,9 +160,36 @@ impl EmbeddedReader {
         self.register_site(site_id).await
     }
 
+    /// True when `dir` contains at least one `.parquet` file (recursive).
+    async fn dir_has_parquet(dir: &std::path::Path) -> Result<bool> {
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(cur) = stack.pop() {
+            let mut entries = match tokio::fs::read_dir(&cur).await {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            while let Some(entry) = entries.next_entry().await? {
+                let ft = entry.file_type().await?;
+                if ft.is_dir() {
+                    stack.push(entry.path());
+                } else if ft.is_file()
+                    && entry.path().extension().and_then(|e| e.to_str()) == Some("parquet")
+                {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     async fn register_site(&self, site_id: &str) -> Result<()> {
         let site_dir = self.data_dir.join(site_id);
         if !site_dir.exists() {
+            return Ok(());
+        }
+        // No remaining partitions: leave the site unregistered. Callers that
+        // need a table treat "not registered" as empty results.
+        if !Self::dir_has_parquet(&site_dir).await? {
             return Ok(());
         }
         let site_dir = site_dir.canonicalize()?;
@@ -255,27 +290,29 @@ impl EmbeddedReader {
             }
         }
 
-        // Session-level bounce rate and average duration over the full range
-        // (not per-bucket). A bounce is a session with exactly one pageview,
-        // matching entry-page bounce semantics.
+        // Session-level bounce rate, average duration, and true unique
+        // session count over the full range (not per-bucket). A bounce is a
+        // session with exactly one pageview, matching entry-page bounce
+        // semantics. total_sessions uses this unique count so tiles agree.
         if result.total_pageviews > 0 {
-            let (bounce_rate, avg_duration_secs) =
+            let (bounce_rate, avg_duration_secs, total_sessions) =
                 self.session_summary(&site_id, start, end, &filters).await?;
             result.bounce_rate = bounce_rate;
             result.avg_duration_secs = avg_duration_secs;
+            result.total_sessions = total_sessions;
         }
 
         Ok(result)
     }
 
-    /// Aggregate bounce rate and mean session duration for pageviews in range.
+    /// Aggregate bounce rate, mean session duration, and unique session count.
     async fn session_summary(
         &self,
         site_id: &str,
         start: i64,
         end: i64,
         filters: &str,
-    ) -> Result<(f64, f64), StoreError> {
+    ) -> Result<(f64, f64, u64), StoreError> {
         let table = table_name(site_id);
         // Duration uses epoch seconds so DataFusion can AVG without depending
         // on interval arithmetic. Single-pageview sessions contribute 0s.
@@ -304,7 +341,7 @@ impl EmbeddedReader {
         );
         let batches = self.run(&sql).await?;
         let Some(batch) = batches.first() else {
-            return Ok((0.0, 0.0));
+            return Ok((0.0, 0.0, 0));
         };
         let sessions = i64_col(batch, "sessions")
             .map(|c| c.value(0) as u64)
@@ -326,7 +363,7 @@ impl EmbeddedReader {
         } else {
             0.0
         };
-        Ok((bounce_rate, avg_duration))
+        Ok((bounce_rate, avg_duration, sessions))
     }
 
     pub async fn query_top_list(
@@ -824,17 +861,19 @@ impl EmbeddedReader {
         let start = range.start.timestamp_micros();
         let end = range.end.timestamp_micros();
         let col = field.column();
+        let kind = field.event_kind();
+        let null_label = field.null_label();
         let filter_sql = datafusion_filter_clause(filters);
         let sql = format!(
             r#"
-            SELECT COALESCE(CAST({col} AS VARCHAR), 'Direct / None') AS value,
+            SELECT COALESCE(CAST({col} AS VARCHAR), '{null_label}') AS value,
                    date_trunc('day', "timestamp") AS bucket,
                    CAST(COUNT(*) AS BIGINT) AS c
             FROM {table}
             WHERE site_id = '{site}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
-              AND kind = 'pageview'
+              AND kind = '{kind}'
               {filter_sql}
             GROUP BY 1, 2
             "#
