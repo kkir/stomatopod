@@ -187,7 +187,78 @@ impl EmbeddedReader {
             }
         }
 
+        // Session-level bounce rate and average duration over the full range
+        // (not per-bucket). A bounce is a session with exactly one pageview,
+        // matching entry-page bounce semantics.
+        if result.total_pageviews > 0 {
+            let (bounce_rate, avg_duration_secs) =
+                self.session_summary(&site_id, start, end, &filters).await?;
+            result.bounce_rate = bounce_rate;
+            result.avg_duration_secs = avg_duration_secs;
+        }
+
         Ok(result)
+    }
+
+    /// Aggregate bounce rate and mean session duration for pageviews in range.
+    async fn session_summary(
+        &self,
+        site_id: &str,
+        start: i64,
+        end: i64,
+        filters: &str,
+    ) -> Result<(f64, f64), StoreError> {
+        let table = table_name(site_id);
+        // Duration uses epoch seconds so DataFusion can AVG without depending
+        // on interval arithmetic. Single-pageview sessions contribute 0s.
+        let sql = format!(
+            r#"
+            WITH sessions AS (
+                SELECT
+                    session_id,
+                    COUNT(*) AS pv_count,
+                    date_part('epoch', MIN("timestamp")) AS started_s,
+                    date_part('epoch', MAX("timestamp")) AS ended_s
+                FROM {table}
+                WHERE site_id = '{site_id}'
+                  AND "timestamp" >= to_timestamp_micros({start})
+                  AND "timestamp" <= to_timestamp_micros({end})
+                  AND CAST(kind AS VARCHAR) = 'pageview'
+                  {filters}
+                GROUP BY session_id
+            )
+            SELECT
+                CAST(COUNT(*) AS BIGINT) AS sessions,
+                CAST(SUM(CASE WHEN pv_count = 1 THEN 1 ELSE 0 END) AS BIGINT) AS bounces,
+                CAST(AVG(ended_s - started_s) AS DOUBLE) AS avg_duration_secs
+            FROM sessions
+            "#
+        );
+        let batches = self.run(&sql).await?;
+        let Some(batch) = batches.first() else {
+            return Ok((0.0, 0.0));
+        };
+        let sessions = i64_col(batch, "sessions")
+            .map(|c| c.value(0) as u64)
+            .unwrap_or(0);
+        let bounces = i64_col(batch, "bounces")
+            .map(|c| c.value(0) as u64)
+            .unwrap_or(0);
+        let avg_duration = f64_col(batch, "avg_duration_secs")
+            .map(|c| {
+                if c.is_valid(0) {
+                    c.value(0).max(0.0)
+                } else {
+                    0.0
+                }
+            })
+            .unwrap_or(0.0);
+        let bounce_rate = if sessions > 0 {
+            bounces as f64 / sessions as f64 * 100.0
+        } else {
+            0.0
+        };
+        Ok((bounce_rate, avg_duration))
     }
 
     pub async fn query_top_list(
@@ -806,6 +877,11 @@ fn str_col<'a>(b: &'a RecordBatch, name: &str) -> Option<&'a StringArray> {
 fn i64_col<'a>(b: &'a RecordBatch, name: &str) -> Option<&'a Int64Array> {
     b.column_by_name(name)
         .and_then(|c| c.as_any().downcast_ref::<Int64Array>())
+}
+
+fn f64_col<'a>(b: &'a RecordBatch, name: &str) -> Option<&'a arrow::array::Float64Array> {
+    b.column_by_name(name)
+        .and_then(|c| c.as_any().downcast_ref::<arrow::array::Float64Array>())
 }
 
 fn fixedbin_col<'a>(b: &'a RecordBatch, name: &str) -> Option<&'a FixedSizeBinaryArray> {

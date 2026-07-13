@@ -667,6 +667,37 @@ async fn seed_sessions(backend: &EmbeddedBackend) -> (Ulid, TimeRange) {
 }
 
 #[tokio::test]
+async fn pageviews_report_bounce_rate_and_avg_duration() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let (site_id, range) = seed_sessions(&backend).await;
+
+    let pv = backend
+        .query_pageviews(&PageviewsQuery {
+            site_id,
+            range: range.clone(),
+            granularity: Granularity::Day,
+            filters: vec![],
+        })
+        .await
+        .unwrap();
+
+    // 5 pageviews across 3 sessions; only session B is a single-pageview bounce.
+    assert_eq!(pv.total_pageviews, 5);
+    assert!(
+        (pv.bounce_rate - (1.0 / 3.0 * 100.0)).abs() < 0.01,
+        "1 of 3 sessions bounced, got {}",
+        pv.bounce_rate
+    );
+    // Session A spans 10s, B 0s, C 5s → mean 5s.
+    assert!(
+        (pv.avg_duration_secs - 5.0).abs() < 0.01,
+        "expected ~5s avg duration, got {}",
+        pv.avg_duration_secs
+    );
+}
+
+#[tokio::test]
 async fn entry_pages_report_counts_sessions_and_bounces() {
     let dir = tempfile::tempdir().unwrap();
     let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();

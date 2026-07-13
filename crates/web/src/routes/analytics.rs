@@ -750,6 +750,54 @@ pub async fn create_funnel(
     }
 }
 
+/// DELETE /api/v1/sites/:site/funnels/:funnel_id  — remove a funnel definition.
+/// Same auth as create: dashboard session or a read key in scope for the site.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/sites/{site}/funnels/{funnel_id}",
+    tag = "funnels",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        ("funnel_id" = String, Path, description = "Funnel ULID")
+    ),
+    responses(
+        (status = 204, description = "Funnel deleted"),
+        (status = 400, description = "Invalid funnel id", body = ErrorBody),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site or funnel", body = ErrorBody)
+    )
+)]
+pub async fn delete_funnel(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path((site, funnel_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let funnel_ulid = match Ulid::from_string(&funnel_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid funnel id"})),
+            )
+                .into_response()
+        }
+    };
+    match state.meta.get_funnel(funnel_ulid).await {
+        Ok(Some(f)) if f.site_id == site_id => {}
+        Ok(_) => return not_found(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+    match state.meta.delete_funnel(funnel_ulid).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 /// GET /api/v1/sites/:site/funnels/:funnel_id  — run a funnel query
 #[utoipa::path(
     get,
@@ -1311,6 +1359,102 @@ pub async fn campaigns(
         }
     }
     Json(serde_json::Value::Object(out)).into_response()
+}
+
+/// Query params for the single-dimension UTM breakdown used by `spq query utm`.
+/// Fields are inlined (not flattened from `AnalyticsParams`) so `axum_extra`
+/// Query collection of repeated `filter=` keys works reliably.
+#[derive(Deserialize, Default)]
+pub struct UtmParams {
+    pub range: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub filter: Vec<String>,
+    /// One of: `source`, `medium`, `campaign`, `term`, `content`
+    /// (or full `utm_*` tokens).
+    pub dimension: Option<String>,
+    /// Restrict to a single utm_source value.
+    pub utm_source: Option<String>,
+    /// Restrict to a single utm_medium value.
+    pub utm_medium: Option<String>,
+}
+
+fn utm_field_from_dimension(dim: &str) -> Option<TopListField> {
+    match dim {
+        "source" | "utm_source" => Some(TopListField::UtmSource),
+        "medium" | "utm_medium" => Some(TopListField::UtmMedium),
+        "campaign" | "utm_campaign" => Some(TopListField::UtmCampaign),
+        "term" | "utm_term" => Some(TopListField::UtmTerm),
+        "content" | "utm_content" => Some(TopListField::UtmContent),
+        _ => None,
+    }
+}
+
+/// GET /api/v1/sites/:site/utm — single UTM dimension top-list.
+///
+/// Powers `spq query utm`. Prefer `/campaigns` when you want every UTM
+/// dimension in one response.
+pub async fn utm(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<UtmParams>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let Some(dim) = params.dimension.as_deref().filter(|s| !s.is_empty()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "dimension is required (source|medium|campaign|term|content)"
+            })),
+        )
+            .into_response();
+    };
+    let Some(field) = utm_field_from_dimension(dim) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "unknown dimension; use source|medium|campaign|term|content"
+            })),
+        )
+            .into_response();
+    };
+    let mut filters = parse_filters(&params.filter);
+    if let Some(src) = params.utm_source.as_deref().filter(|s| !s.is_empty()) {
+        filters.push(Filter {
+            field: stomatopod_core::query::pageviews::FilterField::UtmSource,
+            op: stomatopod_core::query::pageviews::FilterOp::Eq,
+            value: src.to_string(),
+        });
+    }
+    if let Some(med) = params.utm_medium.as_deref().filter(|s| !s.is_empty()) {
+        filters.push(Filter {
+            field: stomatopod_core::query::pageviews::FilterField::UtmMedium,
+            op: stomatopod_core::query::pageviews::FilterOp::Eq,
+            value: med.to_string(),
+        });
+    }
+    // Cap again after appending the convenience filters.
+    filters.truncate(10);
+    let range = resolve_range(
+        params.range.as_deref(),
+        params.from.as_deref(),
+        params.to.as_deref(),
+    );
+    let limit = params.limit.unwrap_or(20);
+    match state
+        .backend
+        .query_top_list(site_id, field, &range, limit, &filters)
+        .await
+    {
+        Ok(tl) => Json(serde_json::to_value(tl).unwrap()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
 }
 
 // ---------------------------------------------------------------------------

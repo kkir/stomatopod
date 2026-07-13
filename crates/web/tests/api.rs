@@ -583,6 +583,83 @@ async fn api_top_os_and_regions_routes_return_rows() {
 }
 
 #[tokio::test]
+async fn api_utm_dimension_route_returns_rows() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!(
+            "/api/v1/sites/{}/utm?range=30d&dimension=source&limit=20",
+            site.id
+        ),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "utm route should resolve: {json}");
+    assert!(
+        json.get("rows").map(|r| r.is_array()).unwrap_or(false),
+        "utm response should carry a rows array, got {json}"
+    );
+
+    let (status, _) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/utm?range=30d", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "dimension is required");
+}
+
+#[tokio::test]
+async fn api_funnel_delete_removes_definition() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    let create_body = serde_json::json!({
+        "name": "Signup",
+        "steps": [
+            {"name": "Landing", "event_name": "pageview", "filters": []},
+            {"name": "Signup", "event_name": "signup", "filters": []}
+        ]
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/sites/{}/funnels", site.id))
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(create_body.to_string()))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let created: serde_json::Value =
+        serde_json::from_slice(&body_bytes(resp).await).expect("create body");
+    let funnel_id = created["id"].as_str().expect("funnel id");
+
+    let req = Request::builder()
+        .method("DELETE")
+        .uri(format!("/api/v1/sites/{}/funnels/{funnel_id}", site.id))
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/funnels", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let funnels = json["funnels"].as_array().expect("funnels array");
+    assert!(
+        funnels.iter().all(|f| f["id"].as_str() != Some(funnel_id)),
+        "deleted funnel should not appear in list: {json}"
+    );
+}
+
+#[tokio::test]
 async fn api_pageviews_compare_attaches_comparison_block() {
     let ctx = setup().await;
     let (site, token) = site_and_token(&ctx).await;

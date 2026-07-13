@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::ui::api::get_json;
+use crate::ui::api::{delete, get_json};
 use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::funnel::FunnelBars;
 use crate::ui::components::layout::PageHead;
@@ -53,7 +53,7 @@ pub fn FunnelDetail(site_id: String, funnel_id: String, q: DashQuery) -> Element
             }}
         }
 
-        div { class: "mt-4",
+        div { class: "mt-4 flex flex-wrap items-center gap-2",
             Link {
                 to: Route::Funnels {
                     site_id: site_id.clone(),
@@ -64,6 +64,35 @@ pub fn FunnelDetail(site_id: String, funnel_id: String, q: DashQuery) -> Element
                 },
                 class: BTN_GHOST,
                 "← All funnels"
+            }
+            button {
+                r#type: "button",
+                class: BTN_GHOST,
+                onclick: {
+                    let site_id = site_id.clone();
+                    let funnel_id = funnel_id.clone();
+                    let range = range.clone();
+                    move |_| {
+                        let site_id = site_id.clone();
+                        let funnel_id = funnel_id.clone();
+                        let range = range.clone();
+                        spawn(async move {
+                            let path = format!(
+                                "/api/v1/sites/{site_id}/funnels/{funnel_id}"
+                            );
+                            if delete(&path).await.is_ok() {
+                                navigator().push(Route::Funnels {
+                                    site_id,
+                                    q: DashQuery {
+                                        range: Some(range),
+                                        ..Default::default()
+                                    },
+                                });
+                            }
+                        });
+                    }
+                },
+                "Delete funnel"
             }
         }
     }

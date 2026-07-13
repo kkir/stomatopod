@@ -52,6 +52,7 @@ use crate::routes::{
         crate::routes::analytics::events,
         crate::routes::analytics::list_funnels,
         crate::routes::analytics::create_funnel,
+        crate::routes::analytics::delete_funnel,
         crate::routes::analytics::funnel_result,
         openapi_json,
     ),
@@ -105,9 +106,7 @@ impl Modify for SecurityAddon {
                 HttpBuilder::new()
                     .scheme(HttpAuthScheme::Bearer)
                     .bearer_format("sk_live_…")
-                    .description(Some(
-                        "Ingest-scoped API key (sk_live_…) bound to a site.",
-                    ))
+                    .description(Some("Ingest-scoped API key (sk_live_…) bound to a site."))
                     .build(),
             ),
         );

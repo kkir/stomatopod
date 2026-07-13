@@ -114,6 +114,8 @@ Common filters (repeatable `filter=field:op:value`): fields `url`, `referrer`,
 | `GET /api/v1/sites/:site/export/sessions`      | Export sessions.                     |
 | `GET /api/v1/sites/:site/funnels`              | Funnels defined for the site.        |
 | `GET /api/v1/sites/:site/funnels/:funnel_id`   | Funnel conversion result.            |
+| `DELETE /api/v1/sites/:site/funnels/:funnel_id`| Delete a funnel definition.          |
+| `GET /api/v1/sites/:site/utm`                  | Single UTM dimension top-list (`dimension=source|medium|campaign|term|content`). |
 | `GET /openapi.json`                            | OpenAPI 3 contract (public).         |
 
 Example:

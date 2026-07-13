@@ -102,13 +102,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 .delete(analytics::delete_analytics_alert),
         )
         .route("/api/v1/sites/{site}/campaigns", get(analytics::campaigns))
+        .route("/api/v1/sites/{site}/utm", get(analytics::utm))
         .route(
             "/api/v1/sites/{site}/funnels",
             get(analytics::list_funnels).post(analytics::create_funnel),
         )
         .route(
             "/api/v1/sites/{site}/funnels/{funnel_id}",
-            get(analytics::funnel_result),
+            get(analytics::funnel_result).delete(analytics::delete_funnel),
         )
         // ---- API keys (CRUD): global + per-site ----
         .route(

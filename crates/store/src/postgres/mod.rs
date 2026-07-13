@@ -181,6 +181,53 @@ impl StorageBackend for PostgresBackend {
                 sessions: sess,
             });
         }
+
+        // Session-level bounce + avg duration over the full range. A bounce is
+        // a session with exactly one pageview (same as entry-page bounce).
+        if result.total_pageviews > 0 {
+            let (filter_sql, filter_vals) = pg_filter_clause(&q.filters, 4);
+            let summary_sql = format!(
+                "WITH sessions AS (\
+                    SELECT session_id, COUNT(*) AS pv_count, \
+                           MIN(timestamp) AS started, MAX(timestamp) AS ended \
+                    FROM events \
+                    WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
+                      AND kind = 'pageview' {filter_sql} \
+                    GROUP BY session_id) \
+                 SELECT COUNT(*)::BIGINT AS sessions, \
+                        SUM(CASE WHEN pv_count = 1 THEN 1 ELSE 0 END)::BIGINT AS bounces, \
+                        COALESCE(AVG(EXTRACT(EPOCH FROM (ended - started))), 0)::FLOAT8 \
+                            AS avg_duration_secs \
+                 FROM sessions"
+            );
+            let mut summary = sqlx::query(&summary_sql)
+                .bind(q.site_id.to_string())
+                .bind(q.range.start)
+                .bind(q.range.end);
+            for val in &filter_vals {
+                summary = summary.bind(val.clone());
+            }
+            if let Some(row) = summary
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(StoreError::query)?
+            {
+                let sessions: i64 = row.try_get("sessions").map_err(StoreError::query)?;
+                let bounces: i64 = row.try_get("bounces").map_err(StoreError::query)?;
+                let avg: f64 = row
+                    .try_get("avg_duration_secs")
+                    .map_err(StoreError::query)?;
+                let sessions = sessions.max(0) as u64;
+                let bounces = bounces.max(0) as u64;
+                result.bounce_rate = if sessions > 0 {
+                    bounces as f64 / sessions as f64 * 100.0
+                } else {
+                    0.0
+                };
+                result.avg_duration_secs = avg.max(0.0);
+            }
+        }
+
         Ok(result)
     }
 
