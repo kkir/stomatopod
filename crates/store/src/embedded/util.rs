@@ -6,7 +6,7 @@ use ulid::Ulid;
 ///
 /// This is in the per-record Arrow build hot path; replacing the
 /// `Ulid::to_string()` calls with this shaved a measurable allocation per
-/// event/span — see `crates/store/benches/record_batch.rs`.
+/// event - see `crates/store/benches/record_batch.rs`.
 pub fn ulid_to_str(u: Ulid, buf: &mut [u8; 26]) -> &str {
     const ALPHA: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     let n: u128 = u.0;

@@ -3,7 +3,7 @@ use ulid::Ulid;
 
 use crate::{
     domain::{
-        agent::AlertChannel,
+        alert_channel::AlertChannel,
         analytics_alert::{AnalyticsAlert, AnalyticsAlertFire},
         api_key::ApiKey,
         digest::DigestSubscription,

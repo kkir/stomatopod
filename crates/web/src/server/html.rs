@@ -1,10 +1,6 @@
-//! Server-rendered HTML for the login screen. These used to be minijinja
-//! templates; they are now plain Rust string builders (the same approach
-//! `routes::digest` uses for its public pages), so the crate carries no
-//! template engine.
-//!
-//! The main dashboard is the Dioxus app and is server-rendered by
-//! `dioxus-server`; nothing here overlaps with it.
+//! Server-rendered HTML for the login screen. Plain Rust string builders
+//! (no template engine). Styles come from the same compiled Tailwind
+//! bundle as the Dioxus SPA, served at `/app.css`.
 
 /// Minimal HTML escape for interpolated text (element content and double-quoted
 /// attribute values). Covers the five characters that matter in those
@@ -25,7 +21,7 @@ pub fn escape(s: &str) -> String {
 }
 
 /// Shared `<head>` contents: charset/viewport, theme color, the Space Grotesk
-/// webfont, and the dashboard stylesheet served at `/app.css`.
+/// webfont, and the shared Tailwind stylesheet at `/app.css`.
 fn head(title: &str) -> String {
     // `r##"…"##` so the `"#04080b"` colour literal's `"#` doesn't close the
     // raw string early.
@@ -42,11 +38,10 @@ fn head(title: &str) -> String {
     )
 }
 
-/// The login screen. Port of the former `login.jinja`; `error` renders the
-/// invalid-credentials notice when present.
+/// The login screen. `error` renders the invalid-credentials notice when present.
 pub fn login_page(error: Option<&str>) -> String {
     let error_html = match error {
-        Some(msg) => format!(r#"<p class="form-error">{}</p>"#, escape(msg)),
+        Some(msg) => format!(r#"<p class="auth-error">{}</p>"#, escape(msg)),
         None => String::new(),
     };
     format!(
@@ -55,23 +50,23 @@ pub fn login_page(error: Option<&str>) -> String {
   <head>
     {head}
   </head>
-  <body class="auth">
-    <form method="post" action="/login" class="card auth-card">
-      <div class="logo">
-        <span class="logo-mark" aria-hidden="true"></span> Stomatopod
+  <body class="auth-page">
+    <form method="post" action="/login" class="auth-card">
+      <div class="auth-logo">
+        <span class="auth-logo-mark" aria-hidden="true"></span> Stomatopod
       </div>
       <h1>Sign in</h1>
-      <p class="auth-subtitle">Welcome back. Your data hasn't moved.</p>
+      <p class="auth-subtitle">Welcome back. Your data hasn&apos;t moved.</p>
       {error_html}
-      <div class="field">
+      <div class="auth-field">
         <label for="email">Email</label>
         <input id="email" type="email" name="email" required autofocus autocomplete="email" />
       </div>
-      <div class="field">
+      <div class="auth-field">
         <label for="password">Password</label>
         <input id="password" type="password" name="password" required autocomplete="current-password" />
       </div>
-      <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+      <button type="submit" class="auth-submit">Sign in</button>
       <div class="auth-foot">Self-hosted, AGPL-3.0.</div>
     </form>
   </body>

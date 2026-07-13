@@ -1,7 +1,4 @@
-//! Alert-channel management JSON API. (The Tier-2 dashboard *pages* that used
-//! to live here - real-time, goals, analytics alerts, campaigns, retention,
-//! paths, compare - moved to the Dioxus SPA in the `/app` cutover; only the
-//! channel CRUD + test-fire endpoints the SPA calls remain.)
+//! Alert-channel management JSON API (CRUD + test-fire for the SPA).
 
 use axum::{
     extract::{Extension, Path, State},
@@ -15,8 +12,8 @@ use std::sync::Arc;
 use ulid::Ulid;
 
 use stomatopod_core::domain::{
-    agent::{AlertChannel, AlertChannelKind},
-    incident::{Incident, IncidentStatus, IncidentTrigger},
+    alert_channel::{AlertChannel, AlertChannelKind},
+    incident::{Incident, IncidentTrigger},
 };
 
 use crate::{
@@ -34,15 +31,13 @@ async fn dispatch_test_notification(site_id: Ulid, channel: &AlertChannel) -> Re
     let incident = Incident {
         id: Ulid::new(),
         site_id,
-        agent_id: "test".into(),
+        source: "test".into(),
         trigger: IncidentTrigger::AnalyticsAlert {
             alert_type: "test_notification".into(),
             value: 0.0,
             threshold: 0.0,
         },
-        status: IncidentStatus::Open,
         opened_at: Utc::now(),
-        closed_at: None,
     };
     let client = alert_http_client();
     let webhook = WebhookSink::new(client.clone());

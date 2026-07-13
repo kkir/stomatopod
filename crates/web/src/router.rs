@@ -26,9 +26,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/tracker.js", get(api::tracker_js))
         .layer(ingest_cors());
 
-    // Public assets the login page needs before auth. The dashboard root `/`
-    // is no longer a redirect: it is now served by the Dioxus SSR fallback
-    // (behind `require_auth`, which redirects to `/login` when unauthenticated).
+    // Public assets the login page needs before auth. `/app.css` is the same
+    // compiled Tailwind bundle the Dioxus SPA uses. The dashboard root `/`
+    // is served by the Dioxus SSR fallback (behind `require_auth`).
     let public_assets = Router::new()
         .route("/app.css", get(api::dashboard_css))
         .route("/llms.txt", get(api::llms_txt));

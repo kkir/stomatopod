@@ -2,7 +2,7 @@
 @source "./src/**/*.rs";
 
 @theme {
-    /* Transcribed from assets/dashboard.css :root (lines 17-83). */
+    /* Transcribed from the former dashboard stylesheet :root (lines 17-83). */
 
     /* Abyss */
     --color-bg: #04080b;
@@ -208,4 +208,236 @@
 
 @utility refresh-dot-blip {
     animation: refresh-blip 0.75s ease-out 1;
+}
+
+/* ---- Login page (server-rendered HTML, same design tokens as the SPA) ----
+   Classes live here so Tailwind content scanning of .rs files is not required. */
+
+@keyframes auth-aurora-drift {
+    from {
+        transform: translate3d(-3%, -2%, 0) rotate(-2deg);
+    }
+    to {
+        transform: translate3d(3%, 2%, 0) rotate(2deg);
+    }
+}
+
+body.auth-page {
+    display: flex;
+    min-height: 100vh;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    color: var(--color-text-1);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    background-color: var(--color-bg);
+    background-image:
+        radial-gradient(60% 70% at 20% 16%, rgba(45, 212, 191, 0.22) 0%, transparent 60%),
+        radial-gradient(55% 60% at 80% 80%, rgba(232, 121, 249, 0.13) 0%, transparent 65%),
+        radial-gradient(45% 55% at 55% 110%, rgba(129, 140, 248, 0.16) 0%, transparent 65%),
+        linear-gradient(165deg, #04080b 0%, #071119 55%, #0a1626 100%);
+}
+
+body.auth-page::after {
+    content: "";
+    position: fixed;
+    inset: -20%;
+    z-index: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(34% 28% at 36% 38%, rgba(45, 212, 191, 0.1), transparent 70%),
+        radial-gradient(30% 26% at 64% 60%, rgba(129, 140, 248, 0.09), transparent 70%);
+    filter: blur(40px);
+    animation: auth-aurora-drift 24s ease-in-out infinite alternate;
+}
+
+.auth-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.625rem;
+    margin-bottom: var(--spacing-f4);
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 16px;
+    letter-spacing: -0.01em;
+    color: var(--color-text-1);
+}
+
+.auth-logo-mark {
+    position: relative;
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+}
+
+.auth-logo-mark::before,
+.auth-logo-mark::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: rotate(45deg);
+    border-radius: 3.5px;
+}
+
+.auth-logo-mark::before {
+    background: conic-gradient(
+        from 210deg,
+        var(--color-teal-hi),
+        var(--color-cyan),
+        var(--color-violet),
+        var(--color-magenta),
+        var(--color-teal-hi)
+    );
+    box-shadow:
+        0 2px 8px rgba(45, 212, 191, 0.55),
+        0 0 18px rgba(129, 140, 248, 0.35);
+}
+
+.auth-logo-mark::after {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.6), transparent 55%);
+    mix-blend-mode: overlay;
+}
+
+.auth-card {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 23.6rem;
+    padding: 2.4375rem 2.125rem 2.125rem;
+    border-radius: 1.375rem;
+    background: var(--color-surface-1);
+    border: 1px solid var(--color-border-2);
+    box-shadow:
+        var(--shadow-inner-hi),
+        0 1px 2px rgba(0, 0, 0, 0.4),
+        0 18px 40px rgba(0, 0, 0, 0.5),
+        0 36px 80px rgba(45, 212, 191, 0.1);
+    backdrop-filter: blur(16px) saturate(150%);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
+}
+
+.auth-card::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+        135deg,
+        rgba(94, 234, 212, 0.5),
+        rgba(34, 211, 238, 0.2) 30%,
+        transparent 55%,
+        rgba(129, 140, 248, 0.25) 80%,
+        rgba(232, 121, 249, 0.35) 100%
+    );
+    opacity: 0.7;
+    -webkit-mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+    mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+}
+
+.auth-card h1 {
+    font-size: 1.5rem;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+    margin: 0 0 0.25rem;
+    color: var(--color-text-1);
+}
+
+.auth-subtitle {
+    color: var(--color-muted-1);
+    font-size: 0.875rem;
+    margin: 0 0 var(--spacing-f4);
+}
+
+.auth-field {
+    margin-bottom: 1.125rem;
+}
+
+.auth-field label {
+    display: block;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted-1);
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
+.auth-field input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: var(--font-ui);
+    color: var(--color-text-1);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border-2);
+    border-radius: var(--radius-sm);
+}
+
+.auth-field input:focus {
+    outline: none;
+    border-color: var(--color-teal);
+    box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.18);
+}
+
+.auth-error {
+    color: var(--color-red);
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: rgba(251, 113, 133, 0.08);
+    border: 1px solid rgba(251, 113, 133, 0.22);
+    margin: 0 0 1rem;
+}
+
+.auth-submit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 11px 15px;
+    border: 0;
+    border-radius: 10px;
+    cursor: pointer;
+    font-family: var(--font-ui);
+    font-size: 14px;
+    font-weight: 600;
+    color: #032621;
+    background: linear-gradient(180deg, #46e3cd 0%, var(--color-teal) 45%, #14b8a6 100%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.4),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.15),
+        var(--shadow-glow);
+}
+
+.auth-submit:hover {
+    transform: translateY(-1px);
+}
+
+.auth-foot {
+    margin-top: 1.25rem;
+    text-align: center;
+    font-size: 12px;
+    color: var(--color-muted-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.auth-page::after {
+        animation: none;
+    }
+    .auth-submit:hover {
+        transform: none;
+    }
 }

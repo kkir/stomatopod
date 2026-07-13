@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde_json::json;
 use stomatopod_core::domain::{
-    agent::{AlertChannel, AlertChannelKind},
+    alert_channel::{AlertChannel, AlertChannelKind},
     incident::{Incident, IncidentTrigger},
 };
 
@@ -84,10 +84,10 @@ impl AlertSink for SlackSink {
                 {
                     "type": "section",
                     "fields": [
-                        {"type": "mrkdwn", "text": format!("*Agent:* `{}`", incident.agent_id)},
+                        {"type": "mrkdwn", "text": format!("*Source:* `{}`", incident.source)},
                         {"type": "mrkdwn", "text": format!("*Trigger:* {trigger_line}")},
                         {"type": "mrkdwn", "text": format!("*Opened:* {}", incident.opened_at.to_rfc3339())},
-                        {"type": "mrkdwn", "text": format!("*Status:* {}", incident.status.as_str())}
+                        {"type": "mrkdwn", "text": "*Status:* open"}
                     ]
                 }
             ]
@@ -120,14 +120,13 @@ impl AlertSink for TelegramSink {
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("telegram channel missing bot token"))?;
         let chat_id = &channel.url;
-        // Plain text — no `parse_mode`. Trigger/agent strings can contain
+        // Plain text - no `parse_mode`. Trigger/source strings can contain
         // Markdown metacharacters (e.g. `_` in event names), which the
         // Telegram entity parser rejects with a 400.
         let text = format!(
-            "Stomatopod alert\nAgent: {}\nTrigger: {}\nStatus: {}",
-            incident.agent_id,
+            "Stomatopod alert\nSource: {}\nTrigger: {}\nStatus: open",
+            incident.source,
             format_trigger(&incident.trigger),
-            incident.status.as_str()
         );
         let api = format!("https://api.telegram.org/bot{token}/sendMessage");
         let body = json!({ "chat_id": chat_id, "text": text });
@@ -235,10 +234,11 @@ pub fn incident_payload(incident: &Incident) -> serde_json::Value {
     json!({
         "id": incident.id.to_string(),
         "site_id": incident.site_id.to_string(),
-        "agent_id": incident.agent_id,
+        // Wire key kept as `agent_id` for existing webhook consumers.
+        "agent_id": incident.source,
         "trigger": format_trigger(&incident.trigger),
         "trigger_kind": incident.trigger.kind_str(),
-        "status": incident.status.as_str(),
+        "status": "open",
         "opened_at": incident.opened_at.to_rfc3339(),
     })
 }
@@ -264,22 +264,19 @@ fn sign_blake3(key: &[u8], body: &[u8]) -> String {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use stomatopod_core::domain::incident::IncidentStatus;
     use ulid::Ulid;
 
     fn mock_incident() -> Incident {
         Incident {
             id: Ulid::new(),
             site_id: Ulid::new(),
-            agent_id: "analytics".into(),
+            source: "analytics".into(),
             trigger: IncidentTrigger::AnalyticsAlert {
                 alert_type: "traffic_spike".into(),
                 value: 200.0,
                 threshold: 100.0,
             },
-            status: IncidentStatus::Open,
             opened_at: Utc::now(),
-            closed_at: None,
         }
     }
 

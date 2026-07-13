@@ -3,16 +3,13 @@ use dioxus::prelude::*;
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ButtonVariant {
     Primary,
-    /// Part of the button API; most in-page ghost buttons use the raw
-    /// `BTN_GHOST` class instead (they need `type="submit"` or are `<a>`
-    /// links, which this component can't express).
-    #[allow(dead_code)]
-    Ghost,
     Danger,
 }
 
-/// Port of `.btn` + `.btn-primary`/`.btn-ghost`/`.btn-danger` (dashboard.css
-/// Buttons section).
+/// Port of `.btn` + `.btn-primary`/`.btn-danger` (legacy dashboard stylesheet Buttons
+/// section). Ghost-styled controls use the raw `BTN_GHOST` class instead
+/// (they need `type="submit"` or are `<a>` links, which this component
+/// cannot express).
 #[component]
 pub fn Button(
     variant: ButtonVariant,
@@ -21,7 +18,6 @@ pub fn Button(
 ) -> Element {
     let variant_class = match variant {
         ButtonVariant::Primary => "bg-grad-btn text-[#032621] shadow-glow hover:-translate-y-px",
-        ButtonVariant::Ghost => "bg-text-1/3 text-text-2 border border-border-2 shadow-inner-hi hover:text-text-1 hover:border-border-3",
         ButtonVariant::Danger => "bg-red text-white shadow-sm hover:-translate-y-px",
     };
     rsx! {

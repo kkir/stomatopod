@@ -9,19 +9,16 @@ pub struct Incident {
     pub id: Ulid,
     pub site_id: Ulid,
     /// Free-form source label (e.g. `"analytics"`, `"test"`).
-    pub agent_id: String,
+    /// Wire JSON for webhooks still uses the key `agent_id` for compatibility.
+    pub source: String,
     pub trigger: IncidentTrigger,
-    pub status: IncidentStatus,
     pub opened_at: DateTime<Utc>,
-    pub closed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum IncidentTrigger {
-    /// An analytics alert condition fired (traffic spike/drop, goal
-    /// threshold, referrer spike). `alert_type` is the alert kind token,
-    /// `value` the observed metric, `threshold` the configured trigger.
+    /// An analytics alert condition fired (traffic spike/drop, referrer spike).
     AnalyticsAlert {
         alert_type: String,
         value: f64,
@@ -33,24 +30,6 @@ impl IncidentTrigger {
     pub fn kind_str(&self) -> &'static str {
         match self {
             IncidentTrigger::AnalyticsAlert { .. } => "analytics_alert",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum IncidentStatus {
-    Open,
-    Acknowledged,
-    Resolved,
-}
-
-impl IncidentStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            IncidentStatus::Open => "open",
-            IncidentStatus::Acknowledged => "acknowledged",
-            IncidentStatus::Resolved => "resolved",
         }
     }
 }

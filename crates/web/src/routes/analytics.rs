@@ -699,6 +699,7 @@ pub struct CreateAlertBody {
     /// Ignored. Alerts fan out to every notification channel on the site.
     /// Kept optional for older clients that still send a channel id.
     #[serde(default)]
+    #[allow(dead_code)]
     pub channel_id: Option<String>,
 }
 
@@ -758,8 +759,6 @@ pub async fn create_analytics_alert(
     };
     // Alerts notify every destination on the site. Require at least one so
     // create fails early with a clear error rather than silent no-ops.
-    // `channel_id` is legacy (placeholder); the fire path fans out to all
-    // channels regardless.
     let channels = state
         .meta
         .list_alert_channels(site_id)
@@ -786,7 +785,6 @@ pub async fn create_analytics_alert(
                 body.window_minutes
             },
         },
-        channel_id: stomatopod_core::domain::analytics_alert::unassigned_channel_id(),
         enabled: true,
         created_at: chrono::Utc::now(),
     };
