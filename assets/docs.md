@@ -3,12 +3,15 @@
 Stomatopod is a privacy-friendly, cookieless web analytics product. It ingests
 pageviews and custom events, and exposes analytics over a JSON API and a CLI.
 
-This document is the canonical usage guide. It is published in two forms:
+This document is the canonical usage guide. It is published in three forms:
 
 - **Humans:** rendered at `/docs` in the dashboard.
 - **Machines / LLM agents:** served as Markdown at `/llms.txt`.
+- **Typed clients / codegen:** OpenAPI 3 at `/openapi.json` (derived from the Rust API types).
 
-Both are generated from the same source, so they never drift.
+The human and Markdown forms share this source. The OpenAPI document is generated
+from the same handlers and request types so path and schema details stay aligned
+with the running server.
 
 ## Concepts
 
@@ -87,15 +90,31 @@ Common query parameters:
 - `limit` — max rows for top-N endpoints (default `20`).
 - `:site` — a site ULID **or** its domain.
 
+Common filters (repeatable `filter=field:op:value`): fields `url`, `referrer`,
+`country`, `region`, `browser`, `os`, `device_type`, `utm_source`, `utm_medium`,
+`utm_campaign`, `utm_term`, `utm_content`, `event_name`; ops `eq`, `not_eq`,
+`contains`, `starts_with`. Custom windows: `from`/`to` as `YYYY-MM-DD`.
+
 | Method & path                                  | Returns                              |
 |------------------------------------------------|--------------------------------------|
 | `GET /api/v1/sites`                            | Sites visible to the key.            |
 | `GET /api/v1/sites/:site/pageviews`            | Pageview/session timeseries.         |
 | `GET /api/v1/sites/:site/top-pages`            | Top pages by traffic.                |
 | `GET /api/v1/sites/:site/top-referrers`        | Top referrers.                       |
+| `GET /api/v1/sites/:site/top-os`               | Top operating systems.               |
+| `GET /api/v1/sites/:site/top-regions`          | Top regions.                         |
+| `GET /api/v1/sites/:site/top-countries`        | Top countries.                       |
+| `GET /api/v1/sites/:site/top-browsers`         | Top browsers.                        |
+| `GET /api/v1/sites/:site/top-devices`          | Top device types.                    |
+| `GET /api/v1/sites/:site/top-entry-pages`      | Top entry (landing) pages.           |
+| `GET /api/v1/sites/:site/top-exit-pages`       | Top exit pages.                      |
 | `GET /api/v1/sites/:site/events`               | Custom event breakdown (`name=`).    |
+| `GET /api/v1/sites/:site/campaigns`            | UTM campaign breakdown.              |
+| `GET /api/v1/sites/:site/export/events`        | Export events.                       |
+| `GET /api/v1/sites/:site/export/sessions`      | Export sessions.                     |
 | `GET /api/v1/sites/:site/funnels`              | Funnels defined for the site.        |
 | `GET /api/v1/sites/:site/funnels/:funnel_id`   | Funnel conversion result.            |
+| `GET /openapi.json`                            | OpenAPI 3 contract (public).         |
 
 Example:
 

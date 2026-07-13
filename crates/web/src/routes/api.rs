@@ -20,7 +20,70 @@ use crate::{
     state::{ApiKeyCacheEntry, AppState},
 };
 
+/// Browser beacon body (mirrors `IngestPayload` field names for OpenAPI).
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct BrowserIngestBody {
+    /// Site public key.
+    pub k: String,
+    /// Event name (`pageview` or custom).
+    pub n: String,
+    /// Full page URL.
+    pub u: String,
+    /// Referrer URL.
+    pub r: Option<String>,
+    /// Screen width.
+    pub w: Option<u16>,
+    /// Screen height.
+    pub h: Option<u16>,
+    /// Browser language tag.
+    pub l: Option<String>,
+    /// Custom event properties.
+    pub p: Option<serde_json::Value>,
+    /// Client timestamp (Unix ms).
+    pub t: Option<i64>,
+}
+
+/// Server-side custom event body (mirrors `ServerEventPayload` for OpenAPI).
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct ServerIngestBody {
+    pub name: String,
+    pub url: Option<String>,
+    pub properties: Option<serde_json::Value>,
+    pub timestamp: Option<i64>,
+    pub referrer: Option<String>,
+    pub session_id: Option<String>,
+}
+
+/// Session / API-key probe response (shape depends on principal).
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[schema(example = json!({"auth": "api_key", "org_id": "01HXYZ", "site_id": null}))]
+pub struct MeResponse {
+    pub auth: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub org_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+}
+
 /// Ingest endpoint — delegates to the ingest crate using AppState fields.
+#[utoipa::path(
+    post,
+    path = "/api/v1/event",
+    tag = "ingest",
+    request_body = BrowserIngestBody,
+    responses(
+        (status = 204, description = "Accepted"),
+        (status = 401, description = "Unknown site public key"),
+        (status = 429, description = "Ingest back-pressure"),
+        (status = 503, description = "Ingest channel closed")
+    )
+)]
 pub async fn handle_ingest(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
@@ -42,6 +105,19 @@ pub async fn handle_ingest(
 /// Authentication: `Authorization: Bearer <ingest_key>` against the
 /// `api_keys` table (scope = ingest). Distinct from `/api/v1/event`, which
 /// uses a public site key in the body for browser beacons.
+#[utoipa::path(
+    post,
+    path = "/api/v1/ingest",
+    tag = "ingest",
+    security(("ingest_key" = [])),
+    request_body = ServerIngestBody,
+    responses(
+        (status = 204, description = "Accepted"),
+        (status = 400, description = "Empty event name"),
+        (status = 401, description = "Missing or invalid ingest key"),
+        (status = 429, description = "Ingest back-pressure")
+    )
+)]
 pub async fn handle_key_ingest(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -128,6 +204,16 @@ fn session_user_id(state: &AppState, principal: &Principal, jar: &CookieJar) -> 
 /// `GET /api/v1/me` — session probe so the SPA can confirm it is logged in
 /// and learn who the current user is. API-key principals get a reduced view
 /// (org/site scope, no user row) since keys aren't tied to a specific user.
+#[utoipa::path(
+    get,
+    path = "/api/v1/me",
+    tag = "meta",
+    security(("read_key" = [])),
+    responses(
+        (status = 200, description = "Current principal", body = MeResponse),
+        (status = 401, description = "Unauthenticated")
+    )
+)]
 pub async fn me(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,

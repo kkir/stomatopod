@@ -9,6 +9,7 @@ use tower_http::{compression::CompressionLayer, trace::TraceLayer};
 
 use crate::{
     middleware::{auth::require_api_auth, cors::ingest_cors, security_headers::security_headers},
+    openapi,
     routes::{analytics, api, api_keys, auth, digest, insights, sites},
     state::AppState,
 };
@@ -31,7 +32,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     // is served by the Dioxus SSR fallback (behind `require_auth`).
     let public_assets = Router::new()
         .route("/app.css", get(api::dashboard_css))
-        .route("/llms.txt", get(api::llms_txt));
+        .route("/llms.txt", get(api::llms_txt))
+        .route("/openapi.json", get(openapi::openapi_json));
 
     // Server-side custom event ingest. Bearer-auth'd inline via an ingest
     // API key (handler resolves the site from the key). No CORS - calls

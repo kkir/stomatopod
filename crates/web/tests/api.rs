@@ -1068,7 +1068,37 @@ async fn responses_include_security_headers() {
     assert!(resp.headers().get("content-security-policy").is_some());
 }
 
-// ---- Docs ----
+// ---- Docs / OpenAPI ----
+
+#[tokio::test]
+async fn openapi_json_is_public_and_lists_core_paths() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/openapi.json")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .contains("json"));
+    let body: serde_json::Value =
+        serde_json::from_slice(&body_bytes(resp).await).expect("openapi json");
+    assert_eq!(body["openapi"].as_str().unwrap_or(""), "3.1.0");
+    let paths = body["paths"].as_object().expect("paths object");
+    assert!(paths.contains_key("/api/v1/event"));
+    assert!(paths.contains_key("/api/v1/ingest"));
+    assert!(paths.contains_key("/api/v1/sites"));
+    assert!(paths.contains_key("/api/v1/sites/{site}/pageviews"));
+    assert!(paths.contains_key("/openapi.json"));
+    assert!(body["components"]["securitySchemes"]
+        .as_object()
+        .map(|s| s.contains_key("read_key") && s.contains_key("ingest_key"))
+        .unwrap_or(false));
+}
 
 #[tokio::test]
 async fn llms_txt_is_public_markdown() {
