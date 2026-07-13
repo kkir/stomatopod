@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "spq"
+name = "stoma"
 path = "src/main.rs"
 
 [dependencies]

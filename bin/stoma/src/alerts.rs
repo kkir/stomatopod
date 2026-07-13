@@ -1,4 +1,4 @@
-//! `spq alerts` - manage analytics alerts (traffic spikes/drops, referrer spikes).
+//! `stoma alerts` - manage analytics alerts (traffic spikes/drops, referrer spikes).
 
 use clap::Subcommand;
 
@@ -106,7 +106,7 @@ mod tests {
     }
 
     fn build_args(args: &[&str]) -> Req {
-        let mut full = vec!["spq"];
+        let mut full = vec!["stoma"];
         full.extend_from_slice(args);
         build(&Harness::try_parse_from(full).expect("parse").cmd).expect("build")
     }

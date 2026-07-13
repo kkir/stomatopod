@@ -2,8 +2,8 @@ use anyhow::Result;
 use clap::{Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 
-const SKILL_MD: &str = include_str!("../../../.claude/skills/spq-analytics/SKILL.md");
-const SKILL_NAME: &str = "spq-analytics";
+const SKILL_MD: &str = include_str!("../../../.claude/skills/stoma-analytics/SKILL.md");
+const SKILL_NAME: &str = "stoma-analytics";
 
 /// Coding agents that load skills from a well-known `SKILL.md` directory layout.
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
@@ -54,7 +54,7 @@ impl Provider {
 
 #[derive(Subcommand)]
 pub enum SkillsCommand {
-    /// Install the spq-analytics skill for coding agents that support SKILL.md.
+    /// Install the stoma-analytics skill for coding agents that support SKILL.md.
     Install {
         /// Overwrite an existing installation without prompting.
         #[arg(long)]

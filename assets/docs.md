@@ -269,7 +269,7 @@ curl -X POST https://your-host/api/v1/sites/example.com/funnels \
 
 ## CLI
 
-The `spq` binary wraps the read API and is designed for LLM-agent use — it
+The `stoma` binary wraps the read API and is designed for LLM-agent use — it
 emits JSON by default (`--human` for a table). It is a separate binary from the
 `stomatopod` server.
 
@@ -283,22 +283,22 @@ export STOMATOPOD_SERVER=https://your-host  # defaults to http://localhost:8080
 Commands:
 
 ```bash
-spq sites
-spq query pageviews       --site <id|domain> [--range 30d] [--granularity day]
-spq query top-pages       --site <id|domain> [--range 30d] [--limit 20]
-spq query top-referrers   --site <id|domain> [--range 30d] [--limit 20]
-spq query top-countries   --site <id|domain>
-spq query top-browsers    --site <id|domain>
-spq query top-devices     --site <id|domain>
-spq query top-os          --site <id|domain>
-spq query top-regions     --site <id|domain>
-spq query events          --site <id|domain> [--name signup] [--range 30d]
-spq query campaigns       --site <id|domain>
-spq query export-events   --site <id|domain> [--limit 1000]
-spq query export-sessions --site <id|domain> [--limit 1000]
-spq query funnels         --site <id|domain>
-spq query funnel          --site <id|domain> --funnel <funnel_id> [--range 30d]
-spq query funnel-create   --site <id|domain> --name <name> --steps '<json-array>'
+stoma sites
+stoma query pageviews       --site <id|domain> [--range 30d] [--granularity day]
+stoma query top-pages       --site <id|domain> [--range 30d] [--limit 20]
+stoma query top-referrers   --site <id|domain> [--range 30d] [--limit 20]
+stoma query top-countries   --site <id|domain>
+stoma query top-browsers    --site <id|domain>
+stoma query top-devices     --site <id|domain>
+stoma query top-os          --site <id|domain>
+stoma query top-regions     --site <id|domain>
+stoma query events          --site <id|domain> [--name signup] [--range 30d]
+stoma query campaigns       --site <id|domain>
+stoma query export-events   --site <id|domain> [--limit 1000]
+stoma query export-sessions --site <id|domain> [--limit 1000]
+stoma query funnels         --site <id|domain>
+stoma query funnel          --site <id|domain> --funnel <funnel_id> [--range 30d]
+stoma query funnel-create   --site <id|domain> --name <name> --steps '<json-array>'
 ```
 
 `funnel-create` is the one write command available to **read API keys**: it
@@ -306,33 +306,33 @@ posts a new funnel and prints the created record (with its `id`) as JSON.
 `--steps` is a JSON array of step objects with at least two entries.
 
 ```bash
-spq query funnel-create --site example.com --name "Signup flow" \
+stoma query funnel-create --site example.com --name "Signup flow" \
   --steps '[{"name":"Landing","event_name":"pageview","filters":[]},
             {"name":"Signup","event_name":"signup","filters":[]}]'
 ```
 
-Run `spq describe` for a machine-readable JSON manifest of every command and
-argument — useful for wiring `spq` into an LLM agent or MCP server.
+Run `stoma describe` for a machine-readable JSON manifest of every command and
+argument — useful for wiring `stoma` into an LLM agent or MCP server.
 
 ### Agent skill
 
-Install the bundled `spq-analytics` skill globally so coding agents that support
-`SKILL.md` can run `spq` in any project session. By default this writes into the
+Install the bundled `stoma-analytics` skill globally so coding agents that support
+`SKILL.md` can run `stoma` in any project session. By default this writes into the
 common skill directories used by Claude Code, Grok, Cursor, and the generic
 Agent Skills path:
 
 ```bash
-spq skills install                     # all known providers
-spq skills install --force             # overwrite existing installs
-spq skills install --provider claude   # one provider: claude|grok|cursor|agents
+stoma skills install                     # all known providers
+stoma skills install --force             # overwrite existing installs
+stoma skills install --provider claude   # one provider: claude|grok|cursor|agents
 ```
 
 | Provider | Install path |
 |----------|----------------|
-| `claude` | `~/.claude/skills/spq-analytics/` |
-| `grok`   | `~/.grok/skills/spq-analytics/` |
-| `cursor` | `~/.cursor/skills/spq-analytics/` |
-| `agents` | `~/.agents/skills/spq-analytics/` |
+| `claude` | `~/.claude/skills/stoma-analytics/` |
+| `grok`   | `~/.grok/skills/stoma-analytics/` |
+| `cursor` | `~/.cursor/skills/stoma-analytics/` |
+| `agents` | `~/.agents/skills/stoma-analytics/` |
 
 Restart the agent session so it reloads skills.
 
@@ -346,7 +346,7 @@ To analyze a site's traffic:
    that match the question (`7d` for recent trends, `12m` for year-over-year).
 4. Custom events are queried via `…/events?name=<event>`; emit them via the
    ingest endpoint with an ingest key.
-5. To define a new funnel, `POST …/funnels` (or `spq query funnel-create`) with
+5. To define a new funnel, `POST …/funnels` (or `stoma query funnel-create`) with
    a read key — list its results afterward via the funnel endpoints.
 
 All responses are JSON; errors use standard HTTP status codes (`401`

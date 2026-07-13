@@ -706,7 +706,7 @@ mod tests {
     }
 
     fn parse(args: &[&str]) -> QueryCommand {
-        let mut full = vec!["spq"];
+        let mut full = vec!["stoma"];
         full.extend_from_slice(args);
         Harness::try_parse_from(full).expect("parse").cmd
     }

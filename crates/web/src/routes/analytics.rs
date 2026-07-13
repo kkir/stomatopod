@@ -1449,7 +1449,7 @@ pub async fn campaigns(
     Json(serde_json::Value::Object(out)).into_response()
 }
 
-/// Query params for the single-dimension UTM breakdown used by `spq query utm`.
+/// Query params for the single-dimension UTM breakdown used by `stoma query utm`.
 /// Fields are inlined (not flattened from `AnalyticsParams`) so `axum_extra`
 /// Query collection of repeated `filter=` keys works reliably.
 #[derive(Deserialize, Default)]
@@ -1482,7 +1482,7 @@ fn utm_field_from_dimension(dim: &str) -> Option<TopListField> {
 
 /// GET /api/v1/sites/:site/utm — single UTM dimension top-list.
 ///
-/// Powers `spq query utm`. Prefer `/campaigns` when you want every UTM
+/// Powers `stoma query utm`. Prefer `/campaigns` when you want every UTM
 /// dimension in one response.
 pub async fn utm(
     State(state): State<Arc<AppState>>,

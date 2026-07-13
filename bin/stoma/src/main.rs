@@ -1,4 +1,4 @@
-//! `spq` — Stomatopod query CLI.
+//! `stoma` — Stomatopod query CLI.
 //!
 //! A read-first command-line client for the analytics API, built for humans
 //! and LLM agents. Outputs JSON by default. Authenticates with a read-scoped
@@ -18,7 +18,7 @@ use clap::{Parser, Subcommand};
 use client::ApiClient;
 
 #[derive(Parser)]
-#[command(name = "spq", about = "Stomatopod query CLI for humans and LLM agents")]
+#[command(name = "stoma", about = "Stomatopod query CLI for humans and LLM agents")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -55,7 +55,7 @@ enum Commands {
     },
     /// Print a machine-readable description of every command (for LLM agents).
     Describe,
-    /// Manage agent skills bundled with spq (Claude, Grok, Cursor, agents).
+    /// Manage agent skills bundled with stoma (Claude, Grok, Cursor, agents).
     Skills {
         #[command(subcommand)]
         cmd: skills::SkillsCommand,
@@ -83,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
 /// commands and arguments without scraping `--help`. Mirrors `/llms.txt`.
 fn describe() -> serde_json::Value {
     serde_json::json!({
-        "tool": "spq",
+        "tool": "stoma",
         "description": "Stomatopod analytics CLI for LLM agents: read-only queries plus funnel creation.",
         "auth": {
             "env": "STOMATOPOD_TOKEN",
