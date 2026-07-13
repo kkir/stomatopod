@@ -244,18 +244,23 @@ impl StorageBackend for PostgresBackend {
     }
 
     async fn query_custom_events(&self, q: &EventQuery) -> Result<TopList, StoreError> {
+        // $1 site, $2 start, $3 end, optional $4 name, then filter values.
+        let mut next_idx = 4;
         let name_filter = if q.event_name.is_some() {
-            "AND name = $4"
+            let clause = format!("AND name = ${next_idx}");
+            next_idx += 1;
+            clause
         } else {
-            ""
+            String::new()
         };
+        let (filter_sql, filter_vals) = pg_filter_clause(&q.filters, next_idx);
         let sql = format!(
             "SELECT name AS value, \
                     COUNT(*)::BIGINT AS pageviews, \
                     COUNT(DISTINCT session_id)::BIGINT AS sessions \
              FROM events \
              WHERE site_id = $1 AND timestamp >= $2 AND timestamp <= $3 \
-               AND kind = 'custom' {name_filter} \
+               AND kind = 'custom' {name_filter} {filter_sql} \
              GROUP BY 1 ORDER BY pageviews DESC \
              LIMIT {}",
             q.limit,
@@ -266,6 +271,9 @@ impl StorageBackend for PostgresBackend {
             .bind(q.range.end);
         if let Some(name) = q.event_name.as_deref() {
             query = query.bind(name.to_string());
+        }
+        for val in &filter_vals {
+            query = query.bind(val.clone());
         }
         let rows = query
             .fetch_all(&self.pool)

@@ -63,9 +63,11 @@ pub fn Events(site_id: String, q: DashQuery) -> Element {
                     value: row.value.clone(),
                     count: row.pageviews,
                     pct: row.pct,
-                    spark: None,
+                    spark: row.spark.clone(),
                 })
                 .collect::<Vec<_>>();
+            let route = route.clone();
+            let q = q.clone();
             rsx! {
                 BreakdownTable {
                     title: "Events",
@@ -73,7 +75,11 @@ pub fn Events(site_id: String, q: DashQuery) -> Element {
                     count_header: "Count",
                     rows,
                     csv_href,
-                    on_filter: None,
+                    on_filter: Some(EventHandler::new(move |value: String| {
+                        let mut nq = q.clone();
+                        nq.filters.push(format!("event_name:eq:{value}"));
+                        navigator().push(route.with_query(nq));
+                    })),
                 }
             }
         }

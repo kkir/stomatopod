@@ -100,6 +100,7 @@ fn GeneralCard(site: SiteSummary) -> Element {
 #[component]
 fn DigestCard(site_id: String) -> Element {
     let refresh = use_signal(|| 0u32);
+    let test_status = use_signal(String::new);
     let sub = use_resource({
         let site_id = site_id.clone();
         move || {
@@ -139,6 +140,7 @@ fn DigestCard(site_id: String) -> Element {
                 Some(Ok(resp)) => {
                     let current = resp.subscription.clone();
                     let enabled = current.as_ref().map(|s| s.enabled).unwrap_or(false);
+                    let has_sub = current.is_some();
                     let frequency = current
                         .as_ref()
                         .map(|s| s.frequency.clone())
@@ -146,6 +148,7 @@ fn DigestCard(site_id: String) -> Element {
                     let put_toggle = put.clone();
                     let put_freq = put.clone();
                     let freq_for_toggle = frequency.clone();
+                    let status = test_status();
                     rsx! {
                         div { class: "flex flex-wrap items-center gap-4",
                             Switch {
@@ -161,6 +164,32 @@ fn DigestCard(site_id: String) -> Element {
                                 option { value: "monthly", "Monthly" }
                                 option { value: "both", "Weekly + monthly" }
                             }
+                            if has_sub {
+                                button {
+                                    r#type: "button",
+                                    class: BTN_GHOST,
+                                    onclick: {
+                                        let site_id = site_id.clone();
+                                        move |_| {
+                                            let site_id = site_id.clone();
+                                            let mut test_status = test_status;
+                                            spawn(async move {
+                                                let path = format!(
+                                                    "/api/v1/sites/{site_id}/digest-subscription/test"
+                                                );
+                                                match post_json::<(), serde_json::Value>(&path, &()).await {
+                                                    Ok(_) => test_status.set("Test digest sent".into()),
+                                                    Err(e) => test_status.set(format!("Test failed: {e}")),
+                                                }
+                                            });
+                                        }
+                                    },
+                                    "Send test"
+                                }
+                            }
+                        }
+                        if !status.is_empty() {
+                            p { class: "text-muted-1 text-[12px] mt-2", "{status}" }
                         }
                     }
                 }

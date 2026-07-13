@@ -174,25 +174,24 @@ impl AnalyticsParams {
     }
 }
 
-#[derive(Deserialize, utoipa::IntoParams, utoipa::ToSchema)]
+#[derive(Deserialize, Default, utoipa::IntoParams, utoipa::ToSchema)]
 #[into_params(parameter_in = Query)]
 pub struct EventsParams {
-    #[serde(default = "default_range")]
-    pub range: String,
+    /// Preset window; overridden when both `from` and `to` are set.
+    pub range: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
-    #[serde(default = "default_limit")]
-    pub limit: u32,
+    pub limit: Option<u32>,
     /// Filter to a single custom event name.
     pub name: Option<String>,
+    /// Repeatable dimension filter (`field:op:value`). `event_name:eq:…`
+    /// is treated like `name=` when `name` is absent.
+    #[serde(default)]
+    pub filter: Vec<String>,
 }
 
 fn default_range() -> String {
     "30d".into()
-}
-
-fn default_limit() -> u32 {
-    20
 }
 
 // ---- Response / OpenAPI schema types ----
@@ -396,6 +395,7 @@ async fn top_list_response(
         Err(resp) => return resp,
     };
     let range = params.range();
+    let filters = params.filters();
     // CSV export has no row cap; the JSON view keeps the dashboard's default.
     let limit = if params.wants_csv() {
         params.limit.unwrap_or(100_000)
@@ -404,7 +404,7 @@ async fn top_list_response(
     };
     match state
         .backend
-        .query_top_list(site_id, field, &range, limit, &params.filters())
+        .query_top_list(site_id, field, &range, limit, &filters)
         .await
     {
         Ok(result) => {
@@ -421,7 +421,35 @@ async fn top_list_response(
                 }
                 csv_response(&format!("{}.csv", field_filename(field)), csv)
             } else {
-                Json(serde_json::to_value(result).unwrap()).into_response()
+                // Attach per-row sparklines for the dashboard Trend column.
+                // Failure is non-fatal: rows still return without `spark`.
+                let spark_by_value: std::collections::HashMap<String, Vec<f64>> = match state
+                    .backend
+                    .query_top_sparklines(site_id, field, &range, limit, &filters)
+                    .await
+                {
+                    Ok(s) => s
+                        .rows
+                        .into_iter()
+                        .map(|r| (r.value, r.points.into_iter().map(|p| p as f64).collect()))
+                        .collect(),
+                    Err(_) => std::collections::HashMap::new(),
+                };
+                let rows: Vec<serde_json::Value> = result
+                    .rows
+                    .into_iter()
+                    .map(|r| {
+                        let spark = spark_by_value.get(&r.value).cloned();
+                        serde_json::json!({
+                            "value": r.value,
+                            "pageviews": r.pageviews,
+                            "sessions": r.sessions,
+                            "pct": r.pct,
+                            "spark": spark,
+                        })
+                    })
+                    .collect();
+                Json(serde_json::json!({ "rows": rows })).into_response()
             }
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -623,22 +651,36 @@ pub async fn events(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
     Path(site): Path<String>,
-    Query(params): Query<EventsParams>,
+    FormQuery(params): FormQuery<EventsParams>,
 ) -> impl IntoResponse {
     let site_id = match resolve_authorized_site(&state, &principal, &site).await {
         Ok(id) => id,
         Err(resp) => return resp,
     };
+    let mut event_name = params.name.filter(|s| !s.is_empty());
+    let mut filters = Vec::new();
+    for f in parse_filters(&params.filter) {
+        // Click-to-filter on the Events page emits event_name:eq:…; treat it
+        // as the dedicated name filter so the breakdown collapses to one row.
+        if event_name.is_none()
+            && f.field == stomatopod_core::query::pageviews::FilterField::EventName
+            && f.op == stomatopod_core::query::pageviews::FilterOp::Eq
+        {
+            event_name = Some(f.value);
+        } else {
+            filters.push(f);
+        }
+    }
     let q = EventQuery {
         site_id,
         range: resolve_range(
-            Some(&params.range),
+            params.range.as_deref(),
             params.from.as_deref(),
             params.to.as_deref(),
         ),
-        event_name: params.name,
-        filters: vec![],
-        limit: params.limit,
+        event_name,
+        filters,
+        limit: params.limit.unwrap_or(20),
     };
     match state.backend.query_custom_events(&q).await {
         Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),

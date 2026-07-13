@@ -59,6 +59,20 @@ fn compute_delta(cur: u64, prev: u64) -> Option<DeltaInfo> {
     })
 }
 
+/// Format average session duration for the overview tile (`45s`, `2m`, `1m 05s`).
+fn format_avg_duration(secs: f64) -> String {
+    let total = secs.round().max(0.0) as u64;
+    let mins = total / 60;
+    let rem = total % 60;
+    if mins == 0 {
+        format!("{rem}s")
+    } else if rem == 0 {
+        format!("{mins}m")
+    } else {
+        format!("{mins}m {rem:02}s")
+    }
+}
+
 /// One top-N breakdown for the active dimension tab. Lazy: only mounts when
 /// its parent tab is selected, so inactive dimensions stay unfetched.
 /// Set `framed` to wrap in a standalone card (e.g. Sources with no sub-tabs).
@@ -120,7 +134,7 @@ fn BreakdownPanel(
                         value: r.value.clone(),
                         count: if use_pageviews { r.pageviews } else { r.sessions },
                         pct: r.pct,
-                        spark: None,
+                        spark: r.spark.clone(),
                     })
                     .collect::<Vec<_>>();
                 let route = route.clone();
@@ -368,6 +382,8 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                     option { value: "utm_source", "UTM source" }
                     option { value: "utm_medium", "UTM medium" }
                     option { value: "utm_campaign", "UTM campaign" }
+                    option { value: "utm_term", "UTM term" }
+                    option { value: "utm_content", "UTM content" }
                 }
                 select {
                     class: CTRL_INPUT,
@@ -457,7 +473,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                 let tz_hint = tz_label.clone();
                 rsx! {
                     Card {
-                        div { class: "grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 md:gap-8 mb-5 sm:mb-7",
+                        div { class: "grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6 md:gap-8 mb-5 sm:mb-7",
                             StatTile {
                                 label: "Pageviews",
                                 value: format!("{}", d.total_pageviews),
@@ -471,6 +487,10 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                                 prev: sess_prev,
                             }
                             StatTile { label: "Bounce Rate", value: format!("{:.1}%", d.bounce_rate) }
+                            StatTile {
+                                label: "Avg Duration",
+                                value: format_avg_duration(d.avg_duration_secs),
+                            }
                         }
                         div { class: "pt-5 border-t border-border-1",
                             TimeseriesChart { points, previous }

@@ -65,6 +65,8 @@ pub struct PageviewsResult {
     pub total_sessions: u64,
     pub bounce_rate: f64,
     #[serde(default)]
+    pub avg_duration_secs: f64,
+    #[serde(default)]
     pub comparison: Option<Box<PageviewsResult>>,
 }
 
@@ -78,6 +80,10 @@ pub struct TopRow {
     pub pageviews: u64,
     pub sessions: u64,
     pub pct: f64,
+    /// Daily trend series for the dashboard sparkline column (omitted on
+    /// CSV / older responses).
+    #[serde(default)]
+    pub spark: Option<Vec<f64>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]

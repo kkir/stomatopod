@@ -36,6 +36,24 @@ impl DashQuery {
         }
     }
 
+    /// A copy of this query with a custom inclusive from/to window.
+    /// Clears the preset `range` so the server uses the custom dates.
+    pub fn with_custom_range(&self, from: &str, to: &str) -> Self {
+        Self {
+            range: None,
+            from: Some(from.to_string()),
+            to: Some(to.to_string()),
+            compare: self.compare,
+            filters: self.filters.clone(),
+        }
+    }
+
+    /// True when a custom from/to window is set (overrides preset range).
+    pub fn is_custom_range(&self) -> bool {
+        self.from.as_ref().is_some_and(|s| !s.is_empty())
+            && self.to.as_ref().is_some_and(|s| !s.is_empty())
+    }
+
     /// A copy of this query with one filter token removed (used by
     /// `FilterPill`'s remove button).
     pub fn without_filter(&self, filter: &str) -> Self {

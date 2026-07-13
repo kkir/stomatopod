@@ -333,6 +333,7 @@ impl EmbeddedReader {
             .as_deref()
             .map(|n| format!("AND name = '{}'", n.replace('\'', "''")))
             .unwrap_or_default();
+        let filters = datafusion_filter_clause(&q.filters);
 
         let sql = format!(
             r#"
@@ -346,6 +347,7 @@ impl EmbeddedReader {
               AND "timestamp" <= to_timestamp_micros({end})
               AND kind = 'custom'
               {name_filter}
+              {filters}
             GROUP BY 1
             ORDER BY pageviews DESC
             LIMIT {}

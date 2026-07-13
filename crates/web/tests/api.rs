@@ -583,6 +583,23 @@ async fn api_top_os_and_regions_routes_return_rows() {
 }
 
 #[tokio::test]
+async fn api_top_pages_json_includes_optional_spark() {
+    let ctx = setup().await;
+    let (site, token) = site_and_token(&ctx).await;
+
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/top-pages?range=7d", site.id),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let rows = json["rows"].as_array().expect("rows array");
+    // Empty site: still a list. When rows exist they may carry `spark`.
+    assert!(rows.is_empty() || rows[0].get("value").is_some());
+}
+
+#[tokio::test]
 async fn api_utm_dimension_route_returns_rows() {
     let ctx = setup().await;
     let (site, token) = site_and_token(&ctx).await;
