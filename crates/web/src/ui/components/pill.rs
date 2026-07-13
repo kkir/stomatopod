@@ -1,15 +1,5 @@
 use dioxus::prelude::*;
 
-/// Status pill, port of `.pill`.
-#[component]
-pub fn Pill(children: Element) -> Element {
-    rsx! {
-        span { class: "inline-flex items-center gap-1.5 px-[9px] py-[3px] rounded-full text-[11px] font-semibold uppercase tracking-[0.06em] bg-surface-2 border border-border-2 text-muted-1",
-            {children}
-        }
-    }
-}
-
 /// An active-filter chip with a remove button.
 #[component]
 pub fn FilterPill(label: String, on_remove: EventHandler<()>) -> Element {

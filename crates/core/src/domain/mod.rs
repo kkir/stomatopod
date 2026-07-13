@@ -5,5 +5,4 @@ pub mod digest;
 pub mod event;
 pub mod incident;
 pub mod org;
-pub mod session;
 pub mod site;

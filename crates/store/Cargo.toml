@@ -29,7 +29,6 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
 parking_lot = { workspace = true }
-bytes = { workspace = true }
 blake3 = { workspace = true }
 ulid = { workspace = true }
 

@@ -247,7 +247,7 @@ pub async fn build_digest_message(
     let site = meta.get_site(site_id).await.ok().flatten()?;
     let (range, label) = cadence_range(cadence);
     let stats = compute_digest_stats(backend, meta, site_id, &range).await;
-    let dashboard_url = format!("{base_url}/app/sites/{site_id}");
+    let dashboard_url = format!("{base_url}/sites/{site_id}");
     let text = render_digest_text(&site.domain, label, &stats, &dashboard_url);
     let subject = format!("Your {} analytics - {}", site.domain, label);
     Some(DigestMessage {

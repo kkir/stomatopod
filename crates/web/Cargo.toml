@@ -26,7 +26,6 @@ server = [
     "dioxus/server",
     "dep:dioxus-server",
     "dep:stomatopod-ingest",
-    "dep:stomatopod-query",
     "dep:stomatopod-store",
     "dep:tokio",
     "dep:axum",
@@ -64,7 +63,6 @@ chrono = { workspace = true }
 # build never pulls axum/tokio/datafusion.
 dioxus-server = { version = "0.7.9", optional = true }
 stomatopod-ingest = { path = "../ingest", optional = true }
-stomatopod-query = { path = "../query", optional = true }
 stomatopod-store = { path = "../store", features = ["embedded", "postgres"], optional = true }
 tokio = { workspace = true, optional = true }
 axum = { version = "0.8", features = ["macros"], optional = true }

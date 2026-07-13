@@ -358,25 +358,6 @@ impl TopListField {
         }
     }
 
-    /// Filename of the htmx partial that renders this dimension. UTM
-    /// dimensions reuse the generic value/sessions/pct table.
-    pub fn template_partial(&self) -> &'static str {
-        match self {
-            TopListField::Page => "partials/top_pages.jinja",
-            TopListField::Referrer => "partials/top_referrers.jinja",
-            TopListField::Country => "partials/top_countries.jinja",
-            TopListField::Browser => "partials/top_browsers.jinja",
-            TopListField::Device => "partials/top_devices.jinja",
-            TopListField::Os => "partials/top_os.jinja",
-            TopListField::Region => "partials/top_regions.jinja",
-            TopListField::UtmSource
-            | TopListField::UtmMedium
-            | TopListField::UtmCampaign
-            | TopListField::UtmTerm
-            | TopListField::UtmContent => "partials/top_referrers.jinja",
-        }
-    }
-
     /// Canonical wire token, used by the JSON API and CLI to name a UTM
     /// breakdown in the campaign report.
     pub fn token(&self) -> &'static str {

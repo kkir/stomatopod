@@ -3,7 +3,6 @@ members = [
     "crates/core",
     "crates/store",
     "crates/ingest",
-    "crates/query",
     "crates/web",
     "bin/spq",
     "bin/seed",
@@ -21,9 +20,6 @@ rust-version = "1.85"
 tokio = { version = "1.36", features = ["full"] }
 # HTTP
 axum = { version = "0.7", features = ["macros"] }
-axum-extra = { version = "0.9", features = ["cookie", "query"] }
-tower = { version = "0.4" }
-tower-http = { version = "0.5", features = ["compression-gzip", "cors", "trace"] }
 # Storage — embedded
 datafusion = "43"
 arrow = "53"
@@ -43,8 +39,6 @@ serde_json = "1"
 # Hashing / crypto
 blake3 = "1"
 argon2 = "0.5"
-# Templates
-minijinja = { version = "2", features = ["loader"] }
 # Config
 config = "0.14"
 # Geo

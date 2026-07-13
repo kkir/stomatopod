@@ -1,8 +1,7 @@
-//! Shared write-ahead-log mechanics. The events WAL and the spans WAL had
-//! 90% identical implementations - segment rotation, bincode+zstd record
-//! framing, CRC verification, and replay. Extracting the common skeleton
-//! keeps the two type-specific wrappers (`Wal`, `SpanWal`) thin while
-//! preserving the per-stream magic byte that identifies on-disk format.
+//! Shared write-ahead-log mechanics: segment rotation, bincode+zstd record
+//! framing, CRC verification, and replay. The events WAL (`Wal`) is the
+//! only on-disk stream today; the common helpers keep a per-stream magic
+//! byte so the on-disk format stays identifiable.
 
 use std::{
     fs::{File, OpenOptions},
