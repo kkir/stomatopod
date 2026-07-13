@@ -314,17 +314,27 @@ spq query funnel-create --site example.com --name "Signup flow" \
 Run `spq describe` for a machine-readable JSON manifest of every command and
 argument — useful for wiring `spq` into an LLM agent or MCP server.
 
-### Claude Code skill
+### Agent skill
 
-Install the bundled Claude Code skill globally so `spq` commands are available
-in any project session:
+Install the bundled `spq-analytics` skill globally so coding agents that support
+`SKILL.md` can run `spq` in any project session. By default this writes into the
+common skill directories used by Claude Code, Grok, Cursor, and the generic
+Agent Skills path:
 
 ```bash
-spq skills install          # installs to ~/.claude/skills/spq-analytics/
-spq skills install --force  # overwrite an existing installation
+spq skills install                     # all known providers
+spq skills install --force             # overwrite existing installs
+spq skills install --provider claude   # one provider: claude|grok|cursor|agents
 ```
 
-Claude Code picks up the skill on next session start.
+| Provider | Install path |
+|----------|----------------|
+| `claude` | `~/.claude/skills/spq-analytics/` |
+| `grok`   | `~/.grok/skills/spq-analytics/` |
+| `cursor` | `~/.cursor/skills/spq-analytics/` |
+| `agents` | `~/.agents/skills/spq-analytics/` |
+
+Restart the agent session so it reloads skills.
 
 ## For LLM agents
 

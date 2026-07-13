@@ -55,7 +55,7 @@ enum Commands {
     },
     /// Print a machine-readable description of every command (for LLM agents).
     Describe,
-    /// Manage Claude Code skills bundled with spq.
+    /// Manage agent skills bundled with spq (Claude, Grok, Cursor, agents).
     Skills {
         #[command(subcommand)]
         cmd: skills::SkillsCommand,
