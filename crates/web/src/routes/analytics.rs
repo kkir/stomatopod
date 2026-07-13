@@ -758,14 +758,14 @@ pub async fn create_analytics_alert(
     };
     // Alerts notify every destination on the site. Require at least one so
     // create fails early with a clear error rather than silent no-ops.
-    // `channel_id` on the row is legacy (schema NOT NULL + FK); fire path
-    // fans out to all channels regardless.
+    // `channel_id` is legacy (placeholder); the fire path fans out to all
+    // channels regardless.
     let channels = state
         .meta
         .list_alert_channels(site_id)
         .await
         .unwrap_or_default();
-    let Some(first) = channels.first() else {
+    if channels.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({
@@ -773,7 +773,7 @@ pub async fn create_analytics_alert(
             })),
         )
             .into_response();
-    };
+    }
     let alert = AnalyticsAlert {
         id: Ulid::new(),
         site_id,
@@ -786,7 +786,7 @@ pub async fn create_analytics_alert(
                 body.window_minutes
             },
         },
-        channel_id: first.id,
+        channel_id: stomatopod_core::domain::analytics_alert::unassigned_channel_id(),
         enabled: true,
         created_at: chrono::Utc::now(),
     };

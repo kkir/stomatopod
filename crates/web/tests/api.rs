@@ -1321,6 +1321,53 @@ async fn export_endpoints_serve_csv_and_json() {
 }
 
 #[tokio::test]
+async fn create_site_seeds_default_analytics_alerts() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let user = stomatopod_core::domain::org::User {
+        id: Ulid::new(),
+        org_id: org.id,
+        email: format!("owner-{}@example.com", Ulid::new()),
+        password_hash: "x".into(),
+        role: stomatopod_core::domain::org::UserRole::Owner,
+        created_at: Utc::now(),
+    };
+    ctx.backend.meta.create_user(&user).await.unwrap();
+    let token = sign_session(&ctx.secret, &user.id.to_string(), 3600);
+
+    let (status, json) = send_json(
+        ctx.state.clone(),
+        "POST",
+        "/api/v1/sites",
+        &token,
+        Some(serde_json::json!({
+            "domain": "seeded-alerts.example",
+            "name": "Seeded Alerts",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "got {json}");
+    let site_id = json["id"].as_str().unwrap();
+
+    let (_, list) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{site_id}/analytics-alerts"),
+        &token,
+    )
+    .await;
+    let alerts = list["alerts"].as_array().unwrap();
+    assert_eq!(alerts.len(), 3, "expected starter spike/drop/referrer rules");
+    let kinds: std::collections::HashSet<_> = alerts
+        .iter()
+        .filter_map(|a| a["kind"].as_str())
+        .collect();
+    assert!(kinds.contains("traffic_spike"));
+    assert!(kinds.contains("traffic_drop"));
+    assert!(kinds.contains("new_referrer_spike"));
+}
+
+#[tokio::test]
 async fn analytics_alert_requires_channel_then_round_trips() {
     use stomatopod_core::domain::agent::{AlertChannel, AlertChannelKind};
 
@@ -1373,14 +1420,15 @@ async fn analytics_alert_requires_channel_then_round_trips() {
     assert_eq!(status, StatusCode::CREATED, "got {json}");
     let alert_id = json["id"].as_str().unwrap().to_string();
 
-    // List, disable, delete.
+    // List, disable, delete. create_site seeds three starter rules, so the
+    // manual create is a fourth row.
     let (_, json) = get_json(
         ctx.state.clone(),
         &format!("/api/v1/sites/{}/analytics-alerts", site.id),
         &token,
     )
     .await;
-    assert_eq!(json["alerts"].as_array().unwrap().len(), 1);
+    assert_eq!(json["alerts"].as_array().unwrap().len(), 4);
 
     let (status, _) = send_json(
         ctx.state.clone(),

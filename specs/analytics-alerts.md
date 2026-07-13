@@ -62,6 +62,8 @@ PATCH  /api/v1/sites/{site}/analytics-alerts/{id}   -- enable/disable
 - New "Alerts" tab in site settings (not on main dashboard)
 - List alerts with status, last fired time
 - Create form: type selector → config fields (dynamic per type); destinations managed under Settings
+- `create_site` writes three starter rules as real `analytics_alerts` rows (traffic spike 100%/60m, traffic drop 50%/60m, referrer spike 35%/60m) so users can disable or delete any they do not need; a one-time meta migration backfills empty existing sites
+- When the site has no notification destinations, show a callout with a link to Settings; custom create stays disabled until a destination exists
 
 ## CLI Changes
 ```

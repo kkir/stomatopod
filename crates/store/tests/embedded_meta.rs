@@ -120,6 +120,32 @@ async fn create_and_get_site() {
 }
 
 #[tokio::test]
+async fn create_site_writes_default_analytics_alerts() {
+    use stomatopod_core::domain::analytics_alert::AnalyticsAlertKind;
+
+    let dir = tempfile::tempdir().unwrap();
+    let meta = open_meta(&dir).await;
+    let org = make_org();
+    meta.create_org(&org).await.unwrap();
+    let site = make_site(org.id);
+    meta.create_site(&site).await.unwrap();
+
+    let alerts = meta.list_analytics_alerts(site.id).await.unwrap();
+    assert_eq!(alerts.len(), 3, "starter rules must be real DB rows");
+    assert!(alerts.iter().all(|a| a.enabled && a.site_id == site.id));
+    let kinds: Vec<_> = alerts.iter().map(|a| a.kind).collect();
+    assert!(kinds.contains(&AnalyticsAlertKind::TrafficSpike));
+    assert!(kinds.contains(&AnalyticsAlertKind::TrafficDrop));
+    assert!(kinds.contains(&AnalyticsAlertKind::NewReferrerSpike));
+
+    // Users can remove them permanently (no re-seed on next list).
+    for a in &alerts {
+        meta.delete_analytics_alert(a.id).await.unwrap();
+    }
+    assert!(meta.list_analytics_alerts(site.id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn get_site_nonexistent_returns_none() {
     let dir = tempfile::tempdir().unwrap();
     let meta = open_meta(&dir).await;

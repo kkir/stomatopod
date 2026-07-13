@@ -256,18 +256,19 @@ test("a notification destination can be added and an alert created", async ({
 
   // With a channel present, create a traffic-spike alert on the Alerts tab.
   // PageHead is h1 "Alerts" and the card is also h2 "Alerts" — pick level 1.
+  // New sites already have starter alerts; Add alert is enabled once a
+  // notification destination exists.
   await page.goto(`${UI}/sites/${siteId}/alerts`);
   await waitForSpa(page);
   await expect(
     page.getByRole("heading", { name: "Alerts", level: 1 }),
   ).toBeVisible();
-  // Channel should appear in the destination select once loaded.
-  await expect(
-    page.locator("select").filter({ hasText: /Webhook/ }).first(),
-  ).toBeVisible({ timeout: 10_000 });
-  await page.getByLabel("Threshold").fill("200");
+  await expect(page.getByRole("button", { name: "Add alert" })).toBeEnabled({
+    timeout: 10_000,
+  });
+  await page.getByLabel(/Threshold/).fill("200");
   await page.getByRole("button", { name: "Add alert" }).click();
-  await expect(page.getByText(/threshold 200/)).toBeVisible({
+  await expect(page.getByText(/200% pageviews above/)).toBeVisible({
     timeout: 10_000,
   });
 });

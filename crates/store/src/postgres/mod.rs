@@ -19,7 +19,9 @@ use stomatopod_core::{
     config::PostgresConfig,
     domain::{
         agent::{AlertChannel, AlertChannelKind},
-        analytics_alert::{AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind},
+        analytics_alert::{
+            default_analytics_alerts, AnalyticsAlert, AnalyticsAlertFire, AnalyticsAlertKind,
+        },
         api_key::{ApiKey, ApiKeyScope},
         digest::{DigestFrequency, DigestSubscription},
         event::Event,
@@ -665,6 +667,10 @@ impl MetaStore for PostgresBackend {
         .execute(&self.pool)
         .await
         .map_err(StoreError::db)?;
+        // Real starter rows so the Alerts UI can list/disable/delete them.
+        for alert in default_analytics_alerts(site.id) {
+            self.create_analytics_alert(&alert).await?;
+        }
         Ok(())
     }
 
@@ -1425,7 +1431,7 @@ mod ddl {
             site_id     TEXT NOT NULL REFERENCES sites(id),
             type        TEXT NOT NULL,
             config      TEXT NOT NULL,
-            channel_id  TEXT NOT NULL REFERENCES alert_channels(id),
+            channel_id  TEXT NOT NULL,
             enabled     BOOLEAN NOT NULL DEFAULT TRUE,
             created_at  TIMESTAMPTZ NOT NULL
         )

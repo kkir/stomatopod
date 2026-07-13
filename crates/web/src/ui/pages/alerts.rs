@@ -23,6 +23,22 @@ fn alert_kind_label(kind: &str) -> &'static str {
         .unwrap_or("Alert")
 }
 
+fn alert_kind_hint(kind: &str) -> &'static str {
+    match kind {
+        "traffic_spike" => "pageviews above the previous window",
+        "traffic_drop" => "pageviews below the previous window",
+        "new_referrer_spike" => "share of traffic from one referrer",
+        _ => "threshold",
+    }
+}
+
+fn threshold_suffix(kind: &str) -> &'static str {
+    match kind {
+        "new_referrer_spike" => "% of traffic",
+        _ => "% change",
+    }
+}
+
 /// Analytics alerts for one site. Notification destinations live under
 /// Settings (Telegram, Slack, webhooks); each fire goes to every channel.
 #[component]
@@ -59,6 +75,7 @@ fn AlertsCard(site_id: String) -> Element {
     let mut threshold = use_signal(|| "100".to_string());
     let mut window = use_signal(|| "60".to_string());
 
+    let channels_loaded = matches!(&*channels.read(), Some(_));
     let has_channels = match &*channels.read() {
         Some(Ok(list)) => !list.channels.is_empty(),
         _ => false,
@@ -69,17 +86,23 @@ fn AlertsCard(site_id: String) -> Element {
 
     rsx! {
         Card { title: "Alerts",
-            if !has_channels {
-                div { class: "text-xs text-muted-1 mb-3",
-                    "Add a notification destination under "
-                    Link {
-                        to: settings_href.clone(),
-                        class: "text-teal-hi hover:underline",
-                        "Settings"
+            if channels_loaded && !has_channels {
+                div {
+                    class: "mb-4 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3.5 py-3 text-[13px] leading-relaxed text-text-1",
+                    p { class: "font-medium",
+                        "No notification destinations set up"
                     }
-                    " (Telegram, Slack, or webhook) before creating an alert. Fires go to every channel."
+                    p { class: "text-muted-1 mt-1",
+                        "Alerts are evaluating in the background, but nothing will be delivered until you add a destination under "
+                        Link {
+                            to: settings_href.clone(),
+                            class: "text-teal-hi hover:underline font-medium",
+                            "Settings"
+                        }
+                        " (Telegram, Slack, or webhook)."
+                    }
                 }
-            } else {
+            } else if has_channels {
                 div { class: "text-xs text-muted-1 mb-3",
                     "When an alert fires it is sent to every notification destination under "
                     Link {
@@ -119,14 +142,25 @@ fn AlertsCard(site_id: String) -> Element {
                     select {
                         class: CTRL_INPUT,
                         value: "{kind}",
-                        onchange: move |e| kind.set(e.value()),
+                        onchange: move |e| {
+                            let v = e.value();
+                            // Keep thresholds in a sensible range when switching kinds.
+                            match v.as_str() {
+                                "traffic_drop" => threshold.set("50".into()),
+                                "new_referrer_spike" => threshold.set("35".into()),
+                                _ => threshold.set("100".into()),
+                            }
+                            kind.set(v);
+                        },
                         for (val , label) in ALERT_KINDS {
                             option { key: "{val}", value: "{val}", "{label}" }
                         }
                     }
                 }
                 label { class: "flex flex-col gap-1.5",
-                    span { class: "text-[0.72rem] tracking-[0.06em] uppercase text-muted-1 font-semibold", "Threshold" }
+                    span { class: "text-[0.72rem] tracking-[0.06em] uppercase text-muted-1 font-semibold",
+                        "Threshold ({threshold_suffix(&kind())})"
+                    }
                     input {
                         class: CTRL_INPUT,
                         r#type: "number",
@@ -162,7 +196,10 @@ fn AlertsCard(site_id: String) -> Element {
                 Some(Ok(list)) => {
                     if list.alerts.is_empty() {
                         rsx! {
-                            EmptyState { message: "No alerts yet" }
+                            EmptyState {
+                                title: "No alerts yet",
+                                message: "Starter traffic spike, drop, and referrer rules are stored when a site is created (delete any you do not need). Add more above once a notification destination is configured.",
+                            }
                         }
                     } else {
                         rsx! {
@@ -174,9 +211,14 @@ fn AlertsCard(site_id: String) -> Element {
                                         div {
                                             div { class: "text-text-1 text-[13px] font-medium",
                                                 "{alert_kind_label(&alert.kind)}"
+                                                if !alert.enabled {
+                                                    span { class: "ml-2 text-[11px] font-semibold uppercase tracking-wide text-muted-1",
+                                                        "Off"
+                                                    }
+                                                }
                                             }
                                             div { class: "text-muted-1 text-xs",
-                                                "threshold {alert.config.threshold} · {alert.config.window_minutes}m"
+                                                "{alert.config.threshold}% {alert_kind_hint(&alert.kind)} · {alert.config.window_minutes}m window"
                                             }
                                         }
                                         div { class: "flex items-center gap-2",
