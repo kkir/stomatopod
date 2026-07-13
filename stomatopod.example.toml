@@ -23,7 +23,9 @@ session_ttl_s = 2592000 # 30 days (embedded in the signed session token)
 # cookie_secure = true   # force Secure cookie; default: true when base_url is https
 # trust_forwarded_headers = true  # set false if exposed without a reverse proxy
 
-# Storage backend.  Only "embedded" is currently implemented.
+# Storage backend: "embedded" (default, SQLite + Parquet on disk) or "postgres".
+# Postgres is fully implemented for SaaS-style durability without a volume;
+# self-hosted appliances usually stick with embedded + a mounted data_dir.
 [storage]
 backend = "embedded"
 # All state (SQLite metadata, WAL, Parquet files) lives here. In a container
@@ -41,6 +43,16 @@ parquet_flush_interval_s = 30
 # Set true (or STOMATOPOD_STORAGE__ALLOW_EPHEMERAL=true) to allow running on
 # ephemeral container storage for throwaway demos/tests. Data is lost on redeploy.
 allow_ephemeral = false
+# Drop analytics events older than N days. 0 (default) keeps forever.
+# Embedded deletes Hive date= partitions; Postgres DELETEs old rows.
+# retention_days = 365
+
+# Postgres alternative (omit data_dir; set url instead):
+# [storage]
+# backend = "postgres"
+# url = "postgresql://user:pass@host:5432/stomatopod"
+# max_connections = 20
+# retention_days = 365
 
 # Optional MaxMind GeoLite2-City database for country/region lookup.
 [geo]

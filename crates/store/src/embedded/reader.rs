@@ -84,6 +84,74 @@ impl EmbeddedReader {
         Ok(self.registered.read().contains(site_id))
     }
 
+    /// Drop Hive `date=` partitions strictly older than `cutoff` and
+    /// re-register affected sites so DataFusion drops the deleted files.
+    /// Returns the number of partition directories removed.
+    pub async fn prune_before(
+        &self,
+        cutoff: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, StoreError> {
+        let cutoff_day = cutoff.date_naive();
+        if !self.data_dir.exists() {
+            return Ok(0);
+        }
+        let mut removed = 0u64;
+        let mut touched_sites: Vec<String> = Vec::new();
+        let mut sites = tokio::fs::read_dir(&self.data_dir)
+            .await
+            .map_err(StoreError::db)?;
+        while let Some(site_entry) = sites.next_entry().await.map_err(StoreError::db)? {
+            if !site_entry
+                .file_type()
+                .await
+                .map_err(StoreError::db)?
+                .is_dir()
+            {
+                continue;
+            }
+            let site_id = site_entry.file_name().to_string_lossy().to_string();
+            let site_dir = site_entry.path();
+            let mut parts = tokio::fs::read_dir(&site_dir)
+                .await
+                .map_err(StoreError::db)?;
+            let mut site_touched = false;
+            while let Some(part) = parts.next_entry().await.map_err(StoreError::db)? {
+                if !part.file_type().await.map_err(StoreError::db)?.is_dir() {
+                    continue;
+                }
+                let name = part.file_name().to_string_lossy().to_string();
+                let date_str = name.strip_prefix("date=").unwrap_or(&name);
+                let Ok(day) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") else {
+                    continue;
+                };
+                if day < cutoff_day {
+                    tokio::fs::remove_dir_all(part.path())
+                        .await
+                        .map_err(StoreError::db)?;
+                    removed += 1;
+                    site_touched = true;
+                }
+            }
+            if site_touched {
+                touched_sites.push(site_id);
+            }
+        }
+        for site_id in touched_sites {
+            self.reregister_site(&site_id)
+                .await
+                .map_err(StoreError::db)?;
+        }
+        Ok(removed)
+    }
+
+    /// Drop and re-register a site's ListingTable after partition changes.
+    async fn reregister_site(&self, site_id: &str) -> Result<()> {
+        let name = table_name(site_id);
+        let _ = self.ctx.deregister_table(&name);
+        self.registered.write().remove(site_id);
+        self.register_site(site_id).await
+    }
+
     async fn register_site(&self, site_id: &str) -> Result<()> {
         let site_dir = self.data_dir.join(site_id);
         if !site_dir.exists() {

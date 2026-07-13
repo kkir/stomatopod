@@ -201,6 +201,140 @@ fn session_user_id(state: &AppState, principal: &Principal, jar: &CookieJar) -> 
     Ulid::from_string(&raw).ok()
 }
 
+/// `GET /health` — liveness probe for orchestrators. Always 200 when the
+/// process is accepting HTTP.
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "meta",
+    responses((status = 200, description = "Process is up"))
+)]
+pub async fn health() -> impl IntoResponse {
+    (StatusCode::OK, Json(serde_json::json!({ "status": "ok" })))
+}
+
+/// `GET /ready` — readiness probe: meta store answers a cheap list call.
+#[utoipa::path(
+    get,
+    path = "/ready",
+    tag = "meta",
+    responses(
+        (status = 200, description = "Ready to serve traffic"),
+        (status = 503, description = "Storage not ready")
+    )
+)]
+pub async fn ready(State(state): State<Arc<AppState>>) -> Response {
+    match state.meta.list_orgs().await {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "ready" })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "status": "not_ready", "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Body for `POST /api/v1/me/password`.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub struct ChangePasswordBody {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+/// `POST /api/v1/me/password` — rotate the owner password (dashboard session only).
+#[utoipa::path(
+    post,
+    path = "/api/v1/me/password",
+    tag = "meta",
+    request_body = ChangePasswordBody,
+    responses(
+        (status = 200, description = "Password updated"),
+        (status = 400, description = "Weak or mismatched password"),
+        (status = 401, description = "Unauthenticated or wrong current password"),
+        (status = 403, description = "API keys cannot change passwords")
+    )
+)]
+pub async fn change_password(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    jar: CookieJar,
+    Json(body): Json<ChangePasswordBody>,
+) -> Response {
+    use argon2::{
+        password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
+        Argon2, PasswordHash, PasswordVerifier,
+    };
+
+    if matches!(principal, Principal::ApiKey { .. }) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "requires a dashboard session, not an API key"
+            })),
+        )
+            .into_response();
+    }
+    let Some(user_id) = session_user_id(&state, &principal, &jar) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "authentication required"})),
+        )
+            .into_response();
+    };
+    if body.new_password.len() < 12 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "new password must be at least 12 characters"
+            })),
+        )
+            .into_response();
+    }
+    let user = match state.meta.get_user(user_id).await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "authentication required"})),
+            )
+                .into_response()
+        }
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    let Ok(parsed) = PasswordHash::new(&user.password_hash) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "invalid stored hash").into_response();
+    };
+    if Argon2::default()
+        .verify_password(body.current_password.as_bytes(), &parsed)
+        .is_err()
+    {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "current password is incorrect"})),
+        )
+            .into_response();
+    }
+    let salt = SaltString::generate(&mut OsRng);
+    let hash = match Argon2::default().hash_password(body.new_password.as_bytes(), &salt) {
+        Ok(h) => h.to_string(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("argon2 error: {e}"),
+            )
+                .into_response()
+        }
+    };
+    match state.meta.update_user_password(user_id, &hash).await {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 /// `GET /api/v1/me` — session probe so the SPA can confirm it is logged in
 /// and learn who the current user is. API-key principals get a reduced view
 /// (org/site scope, no user row) since keys aren't tied to a specific user.

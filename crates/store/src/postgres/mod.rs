@@ -569,6 +569,15 @@ impl StorageBackend for PostgresBackend {
         Ok(out)
     }
 
+    async fn prune_events_before(&self, cutoff: chrono::DateTime<Utc>) -> Result<u64, StoreError> {
+        let result = sqlx::query("DELETE FROM events WHERE timestamp < $1")
+            .bind(cutoff)
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        Ok(result.rows_affected())
+    }
+
     async fn query_top_sparklines(
         &self,
         site_id: Ulid,
@@ -916,6 +925,19 @@ impl MetaStore for PostgresBackend {
         .await
         .map_err(StoreError::db)?;
         row.map(row_to_user).transpose()
+    }
+
+    async fn update_user_password(&self, id: Ulid, password_hash: &str) -> Result<(), StoreError> {
+        let result = sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+            .bind(password_hash)
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::db)?;
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
     }
 
     async fn create_funnel(&self, funnel: &Funnel) -> Result<(), StoreError> {

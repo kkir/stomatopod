@@ -30,10 +30,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     // Public assets the login page needs before auth. `/app.css` is the same
     // compiled Tailwind bundle the Dioxus SPA uses. The dashboard root `/`
     // is served by the Dioxus SSR fallback (behind `require_auth`).
+    // `/health` and `/ready` are unauthenticated probes for orchestrators.
     let public_assets = Router::new()
         .route("/app.css", get(api::dashboard_css))
         .route("/llms.txt", get(api::llms_txt))
-        .route("/openapi.json", get(openapi::openapi_json));
+        .route("/openapi.json", get(openapi::openapi_json))
+        .route("/health", get(api::health))
+        .route("/ready", get(api::ready));
 
     // Server-side custom event ingest. Bearer-auth'd inline via an ingest
     // API key (handler resolves the site from the key). No CORS - calls
@@ -51,6 +54,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             axum::routing::patch(sites::patch_site_api),
         )
         .route("/api/v1/me", get(api::me))
+        .route("/api/v1/me/password", post(api::change_password))
         .route("/api/v1/docs", get(api::docs_api))
         .route("/api/v1/sites/{site}/pageviews", get(analytics::pageviews))
         .route("/api/v1/sites/{site}/top-pages", get(analytics::top_pages))

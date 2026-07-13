@@ -66,6 +66,7 @@ async fn setup_with_flush(flush_rows: usize, flush_interval_s: u64) -> TestCtx {
         parquet_flush_rows: flush_rows,
         parquet_flush_interval_s: flush_interval_s,
         allow_ephemeral: true,
+        ..Default::default()
     };
     let backend = Arc::new(EmbeddedBackend::open(&cfg).await.unwrap());
 
@@ -1163,6 +1164,86 @@ async fn responses_include_security_headers() {
 }
 
 // ---- Docs / OpenAPI ----
+
+#[tokio::test]
+async fn health_and_ready_are_public() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/health")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&body_bytes(resp).await).expect("health json");
+    assert_eq!(body["status"], "ok");
+
+    let req = Request::builder()
+        .uri("/ready")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: serde_json::Value =
+        serde_json::from_slice(&body_bytes(resp).await).expect("ready json");
+    assert_eq!(body["status"], "ready");
+}
+
+#[tokio::test]
+async fn change_password_requires_session_and_correct_current() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let password = "correcthorsebatterystaple";
+    let hash = hash_password(password);
+    let user = User {
+        id: Ulid::new(),
+        org_id: org.id,
+        email: "owner@example.com".into(),
+        password_hash: hash,
+        role: UserRole::Owner,
+        created_at: Utc::now(),
+    };
+    ctx.backend.meta.create_user(&user).await.unwrap();
+    let token = sign_session(&ctx.secret, &user.id.to_string(), 3600);
+
+    let body = serde_json::json!({
+        "current_password": "wrong-password",
+        "new_password": "brandnewpassword99"
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/me/password")
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+    let body = serde_json::json!({
+        "current_password": password,
+        "new_password": "brandnewpassword99"
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/me/password")
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let updated = ctx
+        .backend
+        .meta
+        .get_user(user.id)
+        .await
+        .unwrap()
+        .expect("user");
+    assert_ne!(updated.password_hash, user.password_hash);
+}
 
 #[tokio::test]
 async fn openapi_json_is_public_and_lists_core_paths() {

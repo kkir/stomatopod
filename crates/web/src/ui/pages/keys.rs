@@ -7,6 +7,87 @@ use crate::ui::components::skeleton::Skeleton;
 use crate::ui::pages::{BTN_GHOST, BTN_PRIMARY, CTRL_INPUT};
 use crate::ui::types::{ApiKey, CreateKeyBody, CreatedApiKey, KeysList};
 
+/// Account password rotation for the single self-hosted owner.
+#[component]
+fn PasswordCard() -> Element {
+    let mut current = use_signal(String::new);
+    let mut new_pw = use_signal(String::new);
+    let mut confirm = use_signal(String::new);
+    let mut status = use_signal(String::new);
+
+    rsx! {
+        Card { title: "Change password",
+            p { class: "text-muted-1 text-[12.5px] mb-3",
+                "Rotate the owner password for this instance. New password must be at least 12 characters."
+            }
+            form {
+                class: "flex flex-col gap-2 max-w-md",
+                onsubmit: move |evt: FormEvent| {
+                    evt.prevent_default();
+                    let cur = current().trim().to_string();
+                    let next = new_pw().trim().to_string();
+                    let conf = confirm().trim().to_string();
+                    if next.len() < 12 {
+                        status.set("New password must be at least 12 characters".into());
+                        return;
+                    }
+                    if next != conf {
+                        status.set("New password and confirmation do not match".into());
+                        return;
+                    }
+                    let mut status = status;
+                    let mut current = current;
+                    let mut new_pw = new_pw;
+                    let mut confirm = confirm;
+                    spawn(async move {
+                        let body = serde_json::json!({
+                            "current_password": cur,
+                            "new_password": next,
+                        });
+                        match post_json::<_, serde_json::Value>("/api/v1/me/password", &body).await {
+                            Ok(_) => {
+                                status.set("Password updated".into());
+                                current.set(String::new());
+                                new_pw.set(String::new());
+                                confirm.set(String::new());
+                            }
+                            Err(e) => status.set(format!("Failed: {e}")),
+                        }
+                    });
+                },
+                input {
+                    class: CTRL_INPUT,
+                    r#type: "password",
+                    autocomplete: "current-password",
+                    placeholder: "Current password",
+                    value: "{current}",
+                    oninput: move |e| current.set(e.value()),
+                }
+                input {
+                    class: CTRL_INPUT,
+                    r#type: "password",
+                    autocomplete: "new-password",
+                    placeholder: "New password",
+                    value: "{new_pw}",
+                    oninput: move |e| new_pw.set(e.value()),
+                }
+                input {
+                    class: CTRL_INPUT,
+                    r#type: "password",
+                    autocomplete: "new-password",
+                    placeholder: "Confirm new password",
+                    value: "{confirm}",
+                    oninput: move |e| confirm.set(e.value()),
+                }
+                button { r#type: "submit", class: BTN_PRIMARY, "Update password" }
+                if !status().is_empty() {
+                    p { class: "text-muted-1 text-[12px]", "{status}" }
+                }
+            }
+        }
+    }
+}
+
 /// A one-time reveal banner for a freshly minted key's plaintext secret.
 #[component]
 pub fn SecretBanner(created: CreatedApiKey) -> Element {
@@ -68,6 +149,10 @@ pub fn Keys() -> Element {
 
     rsx! {
         PageHead { title: "API Keys", subtitle: "Keys not scoped to a single site." }
+
+        div { class: "mb-4",
+            PasswordCard {}
+        }
 
         Card { title: "New key",
             {

@@ -1275,6 +1275,21 @@ pub async fn delete_analytics_alert(
 const EXPORT_MAX_ROWS: u32 = 100_000;
 
 /// GET /api/v1/sites/:site/export/events
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/export/events",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Raw event rows (JSON) or CSV when format=csv"),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn export_events(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -1322,6 +1337,21 @@ pub async fn export_events(
 }
 
 /// GET /api/v1/sites/:site/export/sessions
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/export/sessions",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Derived session rows (JSON) or CSV when format=csv"),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn export_sessions(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -1374,6 +1404,22 @@ referrer,country_code,browser,os,device_type,utm_source,utm_medium,utm_campaign,
 
 /// GET /api/v1/sites/:site/campaigns — UTM breakdowns (source/medium/
 /// campaign/term/content) in a single response.
+/// GET /api/v1/sites/:site/campaigns — all UTM dimensions in one response.
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/campaigns",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Object keyed by utm_source/medium/campaign/term/content"),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn campaigns(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,

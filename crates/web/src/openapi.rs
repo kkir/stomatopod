@@ -19,7 +19,7 @@ use crate::routes::{
         AnalyticsParams, CreateFunnelBody, ErrorBody, EventsParams, FunnelSchema, FunnelStepSchema,
         PageviewsResultSchema, SitesResponse, TopListSchema,
     },
-    api::{BrowserIngestBody, MeResponse, ServerIngestBody},
+    api::{BrowserIngestBody, ChangePasswordBody, MeResponse, ServerIngestBody},
 };
 
 /// OpenAPI document for the public + read analytics API (and funnel create).
@@ -38,6 +38,9 @@ use crate::routes::{
         crate::routes::api::handle_ingest,
         crate::routes::api::handle_key_ingest,
         crate::routes::api::me,
+        crate::routes::api::change_password,
+        crate::routes::api::health,
+        crate::routes::api::ready,
         crate::routes::analytics::list_sites,
         crate::routes::analytics::pageviews,
         crate::routes::analytics::top_pages,
@@ -50,6 +53,9 @@ use crate::routes::{
         crate::routes::analytics::top_entry_pages,
         crate::routes::analytics::top_exit_pages,
         crate::routes::analytics::events,
+        crate::routes::analytics::campaigns,
+        crate::routes::analytics::export_events,
+        crate::routes::analytics::export_sessions,
         crate::routes::analytics::list_funnels,
         crate::routes::analytics::create_funnel,
         crate::routes::analytics::delete_funnel,
@@ -69,6 +75,7 @@ use crate::routes::{
         TopListSchema,
         ErrorBody,
         MeResponse,
+        ChangePasswordBody,
     )),
     tags(
         (name = "ingest", description = "Event ingestion (browser beacon + server-side)"),

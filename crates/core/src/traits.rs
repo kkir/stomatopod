@@ -101,6 +101,14 @@ pub trait StorageBackend: Send + Sync + 'static {
         limit: u32,
         filters: &[Filter],
     ) -> Result<TopSparklines, StoreError>;
+
+    /// Delete analytics events strictly older than `cutoff`. Used by the
+    /// retention loop. Returns the number of logical partitions/rows removed
+    /// (best-effort for logging; may be zero when nothing matched).
+    async fn prune_events_before(
+        &self,
+        cutoff: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, StoreError>;
 }
 
 /// Metadata CRUD: sites, orgs, users, funnels.
@@ -126,6 +134,8 @@ pub trait MetaStore: Send + Sync + 'static {
     async fn create_user(&self, user: &User) -> Result<(), StoreError>;
     async fn get_user_by_email(&self, email: &str) -> Result<Option<User>, StoreError>;
     async fn get_user(&self, id: Ulid) -> Result<Option<User>, StoreError>;
+    /// Replace the password hash for an existing user (owner password rotation).
+    async fn update_user_password(&self, id: Ulid, password_hash: &str) -> Result<(), StoreError>;
 
     // ---- Funnels ----
     async fn create_funnel(&self, funnel: &Funnel) -> Result<(), StoreError>;

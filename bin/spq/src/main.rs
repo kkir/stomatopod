@@ -163,6 +163,42 @@ fn describe() -> serde_json::Value {
                 ]
             },
             {
+                "name": "query top-countries",
+                "description": "Top countries by traffic.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query top-browsers",
+                "description": "Top browsers by traffic.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query top-devices",
+                "description": "Top device types by traffic.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
                 "name": "query top-entry-pages",
                 "description": "Top entry (landing) pages by traffic.",
                 "args": [
@@ -211,6 +247,28 @@ fn describe() -> serde_json::Value {
                     { "name": "--to", "required": false },
                     { "name": "--limit", "default": "20" },
                     { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query export-events",
+                "description": "Export raw event rows for a site.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "1000" }
+                ]
+            },
+            {
+                "name": "query export-sessions",
+                "description": "Export derived session rows for a site.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "1000" }
                 ]
             },
             {

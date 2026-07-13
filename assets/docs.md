@@ -116,7 +116,12 @@ Common filters (repeatable `filter=field:op:value`): fields `url`, `referrer`,
 | `GET /api/v1/sites/:site/funnels/:funnel_id`   | Funnel conversion result.            |
 | `DELETE /api/v1/sites/:site/funnels/:funnel_id`| Delete a funnel definition.          |
 | `GET /api/v1/sites/:site/utm`                  | Single UTM dimension top-list (`dimension=source|medium|campaign|term|content`). |
+| `GET /api/v1/sites/:site/analytics-alerts`     | List analytics alerts for the site.  |
+| `POST /api/v1/sites/:site/analytics-alerts`    | Create an analytics alert (session). |
+| `GET /health`                                  | Liveness probe (public).             |
+| `GET /ready`                                   | Readiness probe (public).            |
 | `GET /openapi.json`                            | OpenAPI 3 contract (public).         |
+| `POST /api/v1/me/password`                     | Change owner password (session).     |
 
 Example:
 
@@ -279,13 +284,21 @@ Commands:
 
 ```bash
 spq sites
-spq query pageviews     --site <id|domain> [--range 30d] [--granularity day]
-spq query top-pages     --site <id|domain> [--range 30d] [--limit 20]
-spq query top-referrers --site <id|domain> [--range 30d] [--limit 20]
-spq query events        --site <id|domain> [--name signup] [--range 30d]
-spq query funnels       --site <id|domain>
-spq query funnel        --site <id|domain> --funnel <funnel_id> [--range 30d]
-spq query funnel-create --site <id|domain> --name <name> --steps '<json-array>'
+spq query pageviews       --site <id|domain> [--range 30d] [--granularity day]
+spq query top-pages       --site <id|domain> [--range 30d] [--limit 20]
+spq query top-referrers   --site <id|domain> [--range 30d] [--limit 20]
+spq query top-countries   --site <id|domain>
+spq query top-browsers    --site <id|domain>
+spq query top-devices     --site <id|domain>
+spq query top-os          --site <id|domain>
+spq query top-regions     --site <id|domain>
+spq query events          --site <id|domain> [--name signup] [--range 30d]
+spq query campaigns       --site <id|domain>
+spq query export-events   --site <id|domain> [--limit 1000]
+spq query export-sessions --site <id|domain> [--limit 1000]
+spq query funnels         --site <id|domain>
+spq query funnel          --site <id|domain> --funnel <funnel_id> [--range 30d]
+spq query funnel-create   --site <id|domain> --name <name> --steps '<json-array>'
 ```
 
 `funnel-create` is the one write command available to **read API keys**: it

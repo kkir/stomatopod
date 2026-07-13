@@ -171,6 +171,14 @@ async fn serve(cfg: Config) -> Result<()> {
         });
     }
 
+    // Optional event retention: prune old partitions/rows once a day.
+    if let Some(days) = retention_days(&cfg.storage) {
+        let backend_for_retention = backend.clone();
+        tokio::spawn(async move {
+            run_retention_loop(backend_for_retention, days).await;
+        });
+    }
+
     let listen_host = cfg.listen.host.clone();
     let listen_port = cfg.listen.port;
 
@@ -328,4 +336,47 @@ fn hash_password(password: &str) -> Result<String> {
         .hash_password(password.as_bytes(), &salt)
         .map_err(|e| anyhow::anyhow!("argon2 error: {e}"))?;
     Ok(hash.to_string())
+}
+
+/// `Some(days)` when retention is enabled (`days > 0`).
+fn retention_days(storage: &StorageConfig) -> Option<u64> {
+    let days = match storage {
+        StorageConfig::Embedded(c) => c.retention_days,
+        StorageConfig::Postgres(c) => c.retention_days,
+    };
+    if days > 0 {
+        Some(days)
+    } else {
+        None
+    }
+}
+
+/// Periodic prune of events older than `retention_days`. Runs immediately
+/// once at boot, then every 24h.
+async fn run_retention_loop(
+    backend: Arc<dyn stomatopod_core::traits::StorageBackend>,
+    retention_days: u64,
+) {
+    use chrono::{Duration, Utc};
+    let interval = std::time::Duration::from_secs(24 * 3600);
+    loop {
+        let cutoff = Utc::now() - Duration::days(retention_days as i64);
+        match stomatopod_core::traits::StorageBackend::prune_events_before(backend.as_ref(), cutoff)
+            .await
+        {
+            Ok(n) if n > 0 => info!(
+                removed = n,
+                retention_days,
+                cutoff = %cutoff.to_rfc3339(),
+                "retention prune removed old event data"
+            ),
+            Ok(_) => tracing::debug!(
+                retention_days,
+                cutoff = %cutoff.to_rfc3339(),
+                "retention prune: nothing older than cutoff"
+            ),
+            Err(e) => tracing::warn!("retention prune failed: {e}"),
+        }
+        tokio::time::sleep(interval).await;
+    }
 }

@@ -18,6 +18,7 @@ fn cfg(dir: &tempfile::TempDir) -> EmbeddedConfig {
         parquet_flush_rows: 1,
         parquet_flush_interval_s: 1,
         allow_ephemeral: true,
+        ..Default::default()
     }
 }
 
@@ -32,6 +33,7 @@ fn cfg_bulk(dir: &tempfile::TempDir) -> EmbeddedConfig {
         parquet_flush_rows: 10_000,
         parquet_flush_interval_s: 1,
         allow_ephemeral: true,
+        ..Default::default()
     }
 }
 
@@ -664,6 +666,45 @@ async fn seed_sessions(backend: &EmbeddedBackend) -> (Ulid, TimeRange) {
         end: now + chrono::Duration::hours(1),
     };
     (site_id, range)
+}
+
+#[tokio::test]
+async fn prune_events_before_removes_old_partitions() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let site_id = Ulid::new();
+    let old = Utc::now() - chrono::Duration::days(40);
+    let recent = Utc::now() - chrono::Duration::hours(1);
+    let mut e_old = make_event(site_id, "/old");
+    e_old.timestamp = old;
+    e_old.received_at = old;
+    let mut e_new = make_event(site_id, "/new");
+    e_new.timestamp = recent;
+    e_new.received_at = recent;
+    backend.ingest_events(vec![e_old, e_new]).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let cutoff = Utc::now() - chrono::Duration::days(30);
+    let removed = backend.prune_events_before(cutoff).await.unwrap();
+    assert!(removed >= 1, "expected at least one old partition removed");
+
+    let range = TimeRange {
+        start: Utc::now() - chrono::Duration::days(60),
+        end: Utc::now() + chrono::Duration::hours(1),
+    };
+    let pv = backend
+        .query_pageviews(&PageviewsQuery {
+            site_id,
+            range,
+            granularity: Granularity::Day,
+            filters: vec![],
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        pv.total_pageviews, 1,
+        "only the recent pageview should remain"
+    );
 }
 
 #[tokio::test]

@@ -94,6 +94,57 @@ pub enum QueryCommand {
         #[arg(long = "filter")]
         filters: Vec<String>,
     },
+    /// Top countries
+    TopCountries {
+        #[arg(long)]
+        site: String,
+        #[arg(long, default_value = "30d")]
+        range: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, default_value = "20")]
+        limit: u32,
+        #[arg(long)]
+        compare: bool,
+        #[arg(long = "filter")]
+        filters: Vec<String>,
+    },
+    /// Top browsers
+    TopBrowsers {
+        #[arg(long)]
+        site: String,
+        #[arg(long, default_value = "30d")]
+        range: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, default_value = "20")]
+        limit: u32,
+        #[arg(long)]
+        compare: bool,
+        #[arg(long = "filter")]
+        filters: Vec<String>,
+    },
+    /// Top device types
+    TopDevices {
+        #[arg(long)]
+        site: String,
+        #[arg(long, default_value = "30d")]
+        range: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, default_value = "20")]
+        limit: u32,
+        #[arg(long)]
+        compare: bool,
+        #[arg(long = "filter")]
+        filters: Vec<String>,
+    },
     /// Top entry (landing) pages
     TopEntryPages {
         #[arg(long)]
@@ -209,6 +260,32 @@ pub enum QueryCommand {
         /// '[{"name":"View","event_name":"pageview","filters":[]},{"name":"Signup","event_name":"signup","filters":[]}]'
         #[arg(long)]
         steps: String,
+    },
+    /// Export raw events (JSON from the export endpoint)
+    ExportEvents {
+        #[arg(long)]
+        site: String,
+        #[arg(long, default_value = "30d")]
+        range: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, default_value = "1000")]
+        limit: u32,
+    },
+    /// Export derived sessions (JSON from the export endpoint)
+    ExportSessions {
+        #[arg(long)]
+        site: String,
+        #[arg(long, default_value = "30d")]
+        range: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, default_value = "1000")]
+        limit: u32,
     },
 }
 
@@ -343,6 +420,60 @@ pub fn build(cmd: &QueryCommand) -> anyhow::Result<Req> {
             *compare,
             filters,
         ),
+        QueryCommand::TopCountries {
+            site,
+            range,
+            from,
+            to,
+            limit,
+            compare,
+            filters,
+        } => top_req(
+            site,
+            "top-countries",
+            range,
+            from,
+            to,
+            *limit,
+            *compare,
+            filters,
+        ),
+        QueryCommand::TopBrowsers {
+            site,
+            range,
+            from,
+            to,
+            limit,
+            compare,
+            filters,
+        } => top_req(
+            site,
+            "top-browsers",
+            range,
+            from,
+            to,
+            *limit,
+            *compare,
+            filters,
+        ),
+        QueryCommand::TopDevices {
+            site,
+            range,
+            from,
+            to,
+            limit,
+            compare,
+            filters,
+        } => top_req(
+            site,
+            "top-devices",
+            range,
+            from,
+            to,
+            *limit,
+            *compare,
+            filters,
+        ),
         QueryCommand::TopEntryPages {
             site,
             range,
@@ -445,6 +576,30 @@ pub fn build(cmd: &QueryCommand) -> anyhow::Result<Req> {
             }
             let body = serde_json::json!({ "name": name, "steps": steps_val });
             Req::Post(format!("/api/v1/sites/{site}/funnels"), body)
+        }
+        QueryCommand::ExportEvents {
+            site,
+            range,
+            from,
+            to,
+            limit,
+        } => {
+            let rq = range_qs(range, from, to);
+            Req::Get(format!(
+                "/api/v1/sites/{site}/export/events?{rq}&limit={limit}"
+            ))
+        }
+        QueryCommand::ExportSessions {
+            site,
+            range,
+            from,
+            to,
+            limit,
+        } => {
+            let rq = range_qs(range, from, to);
+            Req::Get(format!(
+                "/api/v1/sites/{site}/export/sessions?{rq}&limit={limit}"
+            ))
         }
     };
     Ok(req)

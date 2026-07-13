@@ -106,11 +106,15 @@ pub struct EmbeddedConfig {
     pub parquet_flush_interval_s: u64,
     /// When false (the default), the server refuses to start if it detects it
     /// is running inside a container with `data_dir` on ephemeral container
-    /// storage rather than a mounted volume — otherwise all analytics data is
+    /// storage rather than a mounted volume - otherwise all analytics data is
     /// silently lost on the next redeploy. Set to true (or
     /// `STOMATOPOD_STORAGE__ALLOW_EPHEMERAL=true`) only for throwaway demos and
     /// ephemeral test containers.
     pub allow_ephemeral: bool,
+    /// Drop event data older than this many days. `0` (default) keeps forever.
+    /// Embedded backend deletes Hive `date=` Parquet partitions; Postgres
+    /// runs `DELETE FROM events WHERE timestamp < cutoff`.
+    pub retention_days: u64,
 }
 
 impl Default for EmbeddedConfig {
@@ -121,6 +125,7 @@ impl Default for EmbeddedConfig {
             parquet_flush_rows: 50_000,
             parquet_flush_interval_s: 30,
             allow_ephemeral: false,
+            retention_days: 0,
         }
     }
 }
@@ -130,6 +135,9 @@ pub struct PostgresConfig {
     pub url: String,
     #[serde(default = "default_pg_max_connections")]
     pub max_connections: u32,
+    /// Drop event rows older than this many days. `0` (default) keeps forever.
+    #[serde(default)]
+    pub retention_days: u64,
 }
 
 fn default_pg_max_connections() -> u32 {

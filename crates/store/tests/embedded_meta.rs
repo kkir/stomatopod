@@ -314,6 +314,28 @@ async fn get_user_by_email_nonexistent_returns_none() {
 }
 
 #[tokio::test]
+async fn update_user_password_replaces_hash() {
+    let dir = tempfile::tempdir().unwrap();
+    let meta = open_meta(&dir).await;
+    let org = make_org();
+    meta.create_org(&org).await.unwrap();
+    let user = User {
+        id: Ulid::new(),
+        org_id: org.id,
+        email: "bob@example.com".into(),
+        password_hash: "old-hash".into(),
+        role: UserRole::Owner,
+        created_at: Utc::now(),
+    };
+    meta.create_user(&user).await.unwrap();
+    meta.update_user_password(user.id, "new-hash")
+        .await
+        .unwrap();
+    let found = meta.get_user(user.id).await.unwrap().unwrap();
+    assert_eq!(found.password_hash, "new-hash");
+}
+
+#[tokio::test]
 async fn user_email_must_be_unique() {
     let dir = tempfile::tempdir().unwrap();
     let meta = open_meta(&dir).await;
@@ -439,6 +461,7 @@ async fn embedded_backend_accepts_event_batch() {
         parquet_flush_rows: 10,
         parquet_flush_interval_s: 60,
         allow_ephemeral: true,
+        ..Default::default()
     };
     let backend = Arc::new(EmbeddedBackend::open(&cfg).await.unwrap());
 
