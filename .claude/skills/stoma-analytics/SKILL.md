@@ -11,6 +11,24 @@ It is a separate binary from the `stomatopod` server.
 
 ## Setup
 
+### Install `stoma`
+
+If `stoma` is not on your `PATH`, install with
+[`cargo binstall`](https://github.com/cargo-bins/cargo-binstall):
+
+```bash
+# one-time
+curl -L --proto '=https' --tlsv1.2 -sSf \
+  https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+
+cargo binstall --git https://github.com/kkir/stomatopod stomatopod-cli
+```
+
+Private repo: use `gh auth login` or set `GITHUB_TOKEN` / `GH_TOKEN`.
+From a monorepo checkout: `cargo install --path bin/stoma`.
+
+### Authenticate
+
 Authenticate with a **read** API key (`rk_…`), minted in the dashboard under
 **API Keys**. The same key can both query and create funnels.
 

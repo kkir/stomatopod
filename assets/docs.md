@@ -273,6 +273,32 @@ The `stoma` binary wraps the read API and is designed for LLM-agent use — it
 emits JSON by default (`--human` for a table). It is a separate binary from the
 `stomatopod` server.
 
+### Install
+
+Install with [`cargo binstall`](https://github.com/cargo-bins/cargo-binstall)
+(prebuilt binary when a matching GitHub release exists; otherwise compiles from
+source):
+
+```bash
+# one-time: install cargo-binstall
+curl -L --proto '=https' --tlsv1.2 -sSf \
+  https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+
+# install the stoma binary into ~/.cargo/bin
+cargo binstall --git https://github.com/kkir/stomatopod stomatopod-cli
+```
+
+Private repo: log in with `gh`, or set `GITHUB_TOKEN` / `GH_TOKEN`.
+
+From a monorepo checkout:
+
+```bash
+cargo binstall --manifest-path bin/stoma --locked stomatopod-cli
+# equivalent: cargo install --path bin/stoma
+```
+
+### Credentials
+
 Set the credential once:
 
 ```bash
@@ -280,7 +306,7 @@ export STOMATOPOD_TOKEN=rk_xxxxxxxx       # a read API key
 export STOMATOPOD_SERVER=https://your-host  # defaults to http://localhost:8080
 ```
 
-Commands:
+### Commands
 
 ```bash
 stoma sites

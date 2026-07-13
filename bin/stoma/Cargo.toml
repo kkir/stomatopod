@@ -3,10 +3,19 @@ name = "stomatopod-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Stomatopod query CLI (stoma) for humans and LLM agents"
+repository = "https://github.com/kkir/stomatopod"
+homepage = "https://github.com/kkir/stomatopod"
+readme = "README.md"
+keywords = ["analytics", "cli", "stomatopod"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "stoma"
 path = "src/main.rs"
+
+# cargo-binstall uses `repository` for default GitHub release asset URLs.
+# Without prebuilt assets (or crates.io), it falls back to building from source.
 
 [dependencies]
 tokio = { workspace = true }
