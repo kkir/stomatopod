@@ -75,7 +75,7 @@ fn AlertsCard(site_id: String) -> Element {
     let mut threshold = use_signal(|| "100".to_string());
     let mut window = use_signal(|| "60".to_string());
 
-    let channels_loaded = matches!(&*channels.read(), Some(_));
+    let channels_loaded = (*channels.read()).is_some();
     let has_channels = match &*channels.read() {
         Some(Ok(list)) => !list.channels.is_empty(),
         _ => false,

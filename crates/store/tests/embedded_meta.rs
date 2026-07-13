@@ -142,7 +142,11 @@ async fn create_site_writes_default_analytics_alerts() {
     for a in &alerts {
         meta.delete_analytics_alert(a.id).await.unwrap();
     }
-    assert!(meta.list_analytics_alerts(site.id).await.unwrap().is_empty());
+    assert!(meta
+        .list_analytics_alerts(site.id)
+        .await
+        .unwrap()
+        .is_empty());
 }
 
 #[tokio::test]

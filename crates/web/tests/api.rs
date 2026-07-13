@@ -1357,11 +1357,13 @@ async fn create_site_seeds_default_analytics_alerts() {
     )
     .await;
     let alerts = list["alerts"].as_array().unwrap();
-    assert_eq!(alerts.len(), 3, "expected starter spike/drop/referrer rules");
-    let kinds: std::collections::HashSet<_> = alerts
-        .iter()
-        .filter_map(|a| a["kind"].as_str())
-        .collect();
+    assert_eq!(
+        alerts.len(),
+        3,
+        "expected starter spike/drop/referrer rules"
+    );
+    let kinds: std::collections::HashSet<_> =
+        alerts.iter().filter_map(|a| a["kind"].as_str()).collect();
     assert!(kinds.contains("traffic_spike"));
     assert!(kinds.contains("traffic_drop"));
     assert!(kinds.contains("new_referrer_spike"));

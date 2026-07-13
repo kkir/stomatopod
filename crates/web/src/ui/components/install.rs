@@ -19,9 +19,8 @@ pub fn InstallCard(public_key: String, domain: String, prominent: bool) -> Eleme
     } else {
         host
     };
-    let snippet = format!(
-        "<script defer src=\"{src_host}/tracker.js\" data-site=\"{public_key}\"></script>"
-    );
+    let snippet =
+        format!("<script defer src=\"{src_host}/tracker.js\" data-site=\"{public_key}\"></script>");
 
     let title = if prominent {
         "Start collecting analytics"
