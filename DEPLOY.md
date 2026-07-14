@@ -52,9 +52,8 @@ export STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)"
 docker compose up -d
 ```
 
-Self-hosted Stomatopod is a **single-owner appliance**: one organization and
-one admin user per instance (many sites under that org are fine). Multi-tenant
-SaaS mode is not supported yet.
+Stomatopod is a **single-owner appliance**: one organization and one admin user
+per instance (many sites under that org are fine).
 
 Redeploy to a new image without losing data:
 

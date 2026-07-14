@@ -113,7 +113,7 @@ pub trait StorageBackend: Send + Sync + 'static {
 
 /// Metadata CRUD: sites, orgs, users, funnels.
 ///
-/// Embedded: backed by SQLite. SaaS: backed by a Postgres connection pool.
+/// Embedded: backed by SQLite. Postgres: backed by a connection pool.
 #[async_trait]
 pub trait MetaStore: Send + Sync + 'static {
     // ---- Sites ----

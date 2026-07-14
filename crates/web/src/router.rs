@@ -19,7 +19,7 @@ use crate::{
 /// this by [`crate::server::serve`], which owns the catch-all fallback.
 ///
 /// There is intentionally no public user-registration or org-creation route:
-/// self-hosted mode is a single-owner appliance bootstrapped at first start.
+/// this is a single-owner appliance bootstrapped at first start.
 pub fn build_router(state: Arc<AppState>) -> Router {
     // Public ingest routes (CORS-enabled)
     let ingest_routes = Router::new()

@@ -4,7 +4,6 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct Config {
-    pub mode: Mode,
     pub listen: ListenConfig,
     #[serde(default, deserialize_with = "deserialize_storage")]
     pub storage: StorageConfig,
@@ -28,18 +27,6 @@ impl Config {
             trimmed
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum Mode {
-    /// Single org + single owner user, auto-created on first boot.
-    /// This is the only supported deployment mode today.
-    #[default]
-    SelfHosted,
-    /// Multi-org SaaS. Not supported yet; the server refuses to start in
-    /// this mode so nobody runs multi-tenant traffic on single-tenant authz.
-    Saas,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

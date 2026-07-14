@@ -14,7 +14,7 @@ use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use dashmap::DashMap;
-use stomatopod_core::config::{Config, Mode, StorageConfig};
+use stomatopod_core::config::{Config, StorageConfig};
 use stomatopod_ingest::{batch::run_batcher, geo::GeoLookup};
 use stomatopod_store::{embedded::EmbeddedBackend, postgres::PostgresBackend};
 
@@ -83,16 +83,6 @@ async fn serve(cfg: Config) -> Result<()> {
             "auth.secret_key must be set. Set STOMATOPOD_AUTH__SECRET_KEY or add it to stomatopod.toml"
         );
     }
-    // Self-hosted is single-tenant / single-owner only. SaaS multi-org is not
-    // implemented; refuse so operators never run multi-tenant traffic on
-    // authz that assumes one admin for the whole instance.
-    if cfg.mode == Mode::Saas {
-        anyhow::bail!(
-            "mode = \"saas\" is not supported yet. Use the default self-hosted mode \
-             (single organization, single owner user). Multi-tenant SaaS is planned \
-             for a future release."
-        );
-    }
 
     let cfg = Arc::new(cfg);
 
@@ -114,10 +104,8 @@ async fn serve(cfg: Config) -> Result<()> {
         }
     };
 
-    // Self-hosted: ensure a default org exists
-    if cfg.mode == Mode::SelfHosted {
-        bootstrap_self_hosted(&meta, &cfg).await?;
-    }
+    // Single-owner appliance: ensure a default org + owner user exist.
+    bootstrap_self_hosted(&meta, &cfg).await?;
 
     // Build ingest channel + batcher
     let (ingest_tx, ingest_rx) = tokio::sync::mpsc::channel(cfg.limits.ingest_channel_size);
@@ -274,7 +262,7 @@ async fn bootstrap_self_hosted(
         if orgs.len() > 1 {
             tracing::warn!(
                 org_count = orgs.len(),
-                "self-hosted mode expects a single organization; only the first is used"
+                "single-owner appliance expects a single organization; only the first is used"
             );
         }
         return Ok(());
@@ -320,8 +308,8 @@ async fn bootstrap_self_hosted(
     meta.create_user(&user).await?;
 
     info!(
-        "First-boot: created single-tenant org and owner user ({email}). \
-         Self-hosted mode supports one owner account per instance."
+        "First-boot: created single-owner org and owner user ({email}). \
+         This appliance supports one owner account per instance."
     );
     Ok(())
 }

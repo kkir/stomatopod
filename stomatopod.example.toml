@@ -15,7 +15,7 @@ port = 8080
 # base_url = "https://analytics.example.com"
 
 # Authentication.  secret_key is required and has no default.
-# Self-hosted mode is single-owner: one org + one admin user (many sites OK).
+# Single-owner appliance: one org + one admin user (many sites OK).
 # First boot also requires STOMATOPOD_ADMIN_PASSWORD (min 12 chars).
 [auth]
 secret_key = ""          # REQUIRED — set a long random string
@@ -24,8 +24,8 @@ session_ttl_s = 2592000 # 30 days (embedded in the signed session token)
 # trust_forwarded_headers = true  # set false if exposed without a reverse proxy
 
 # Storage backend: "embedded" (default, SQLite + Parquet on disk) or "postgres".
-# Postgres is fully implemented for SaaS-style durability without a volume;
-# self-hosted appliances usually stick with embedded + a mounted data_dir.
+# Postgres is fully implemented for durability without a local volume;
+# most self-hosted appliances stick with embedded + a mounted data_dir.
 [storage]
 backend = "embedded"
 # All state (SQLite metadata, WAL, Parquet files) lives here. In a container

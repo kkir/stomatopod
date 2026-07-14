@@ -1,4 +1,4 @@
-//! Postgres-backed storage for SaaS deployments.
+//! Postgres-backed storage for durable deployments without local volume state.
 //!
 //! Holds everything in one database - analytics events and metadata
 //! (sites, orgs, users, funnels). Uses
