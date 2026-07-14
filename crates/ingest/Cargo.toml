@@ -21,6 +21,11 @@ dashmap = "6"
 
 [dev-dependencies]
 criterion = { workspace = true }
+stomatopod-store = { path = "../store", features = ["embedded"] }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+ulid = { workspace = true }
 
 [[bench]]
 name = "hot_paths"

@@ -5498,6 +5498,8 @@ dependencies = [
  "serde",
  "serde_json",
  "stomatopod-core",
+ "stomatopod-store",
+ "tempfile",
  "tokio",
  "tracing",
  "ulid",

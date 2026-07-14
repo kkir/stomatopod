@@ -246,7 +246,12 @@ fn load_config(path: &str) -> Result<Config> {
 /// Minimum length for the first-boot admin password.
 const MIN_ADMIN_PASSWORD_LEN: usize = 12;
 
-async fn bootstrap_self_hosted(
+/// Ensure a single default org + owner exist (first boot creates them from
+/// `STOMATOPOD_ADMIN_PASSWORD` / optional `STOMATOPOD_ADMIN_EMAIL`).
+///
+/// Public so integration tests can exercise the first-boot path without
+/// starting the full HTTP server.
+pub async fn bootstrap_self_hosted(
     meta: &Arc<dyn stomatopod_core::traits::MetaStore>,
     _cfg: &Config,
 ) -> Result<()> {
