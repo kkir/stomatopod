@@ -14,14 +14,14 @@ use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use dashmap::DashMap;
-use stomatopod_core::config::{Config, Mode, StorageConfig};
+use stomatopod_core::config::{Config, StorageConfig};
 use stomatopod_ingest::{batch::run_batcher, geo::GeoLookup};
 use stomatopod_store::{embedded::EmbeddedBackend, postgres::PostgresBackend};
 
 use crate::{middleware::auth::require_auth, router::build_router, state::AppState};
 
 /// The Stomatopod server binary. Analytics querying lives in the separate
-/// `spq` CLI; this binary only runs the server.
+/// `stoma` CLI; this binary only runs the server.
 #[derive(Parser)]
 #[command(name = "stomatopod", about = "Stomatopod analytics server")]
 struct Cli {
@@ -83,16 +83,6 @@ async fn serve(cfg: Config) -> Result<()> {
             "auth.secret_key must be set. Set STOMATOPOD_AUTH__SECRET_KEY or add it to stomatopod.toml"
         );
     }
-    // Self-hosted is single-tenant / single-owner only. SaaS multi-org is not
-    // implemented; refuse so operators never run multi-tenant traffic on
-    // authz that assumes one admin for the whole instance.
-    if cfg.mode == Mode::Saas {
-        anyhow::bail!(
-            "mode = \"saas\" is not supported yet. Use the default self-hosted mode \
-             (single organization, single owner user). Multi-tenant SaaS is planned \
-             for a future release."
-        );
-    }
 
     let cfg = Arc::new(cfg);
 
@@ -114,10 +104,8 @@ async fn serve(cfg: Config) -> Result<()> {
         }
     };
 
-    // Self-hosted: ensure a default org exists
-    if cfg.mode == Mode::SelfHosted {
-        bootstrap_self_hosted(&meta, &cfg).await?;
-    }
+    // Single-owner appliance: ensure a default org + owner user exist.
+    bootstrap_self_hosted(&meta, &cfg).await?;
 
     // Build ingest channel + batcher
     let (ingest_tx, ingest_rx) = tokio::sync::mpsc::channel(cfg.limits.ingest_channel_size);
@@ -168,6 +156,14 @@ async fn serve(cfg: Config) -> Result<()> {
                 std::time::Duration::from_secs(3600),
             )
             .await;
+        });
+    }
+
+    // Optional event retention: prune old partitions/rows once a day.
+    if let Some(days) = retention_days(&cfg.storage) {
+        let backend_for_retention = backend.clone();
+        tokio::spawn(async move {
+            run_retention_loop(backend_for_retention, days).await;
         });
     }
 
@@ -250,7 +246,12 @@ fn load_config(path: &str) -> Result<Config> {
 /// Minimum length for the first-boot admin password.
 const MIN_ADMIN_PASSWORD_LEN: usize = 12;
 
-async fn bootstrap_self_hosted(
+/// Ensure a single default org + owner exist (first boot creates them from
+/// `STOMATOPOD_ADMIN_PASSWORD` / optional `STOMATOPOD_ADMIN_EMAIL`).
+///
+/// Public so integration tests can exercise the first-boot path without
+/// starting the full HTTP server.
+pub async fn bootstrap_self_hosted(
     meta: &Arc<dyn stomatopod_core::traits::MetaStore>,
     _cfg: &Config,
 ) -> Result<()> {
@@ -266,7 +267,7 @@ async fn bootstrap_self_hosted(
         if orgs.len() > 1 {
             tracing::warn!(
                 org_count = orgs.len(),
-                "self-hosted mode expects a single organization; only the first is used"
+                "single-owner appliance expects a single organization; only the first is used"
             );
         }
         return Ok(());
@@ -312,8 +313,8 @@ async fn bootstrap_self_hosted(
     meta.create_user(&user).await?;
 
     info!(
-        "First-boot: created single-tenant org and owner user ({email}). \
-         Self-hosted mode supports one owner account per instance."
+        "First-boot: created single-owner org and owner user ({email}). \
+         This appliance supports one owner account per instance."
     );
     Ok(())
 }
@@ -328,4 +329,47 @@ fn hash_password(password: &str) -> Result<String> {
         .hash_password(password.as_bytes(), &salt)
         .map_err(|e| anyhow::anyhow!("argon2 error: {e}"))?;
     Ok(hash.to_string())
+}
+
+/// `Some(days)` when retention is enabled (`days > 0`).
+fn retention_days(storage: &StorageConfig) -> Option<u64> {
+    let days = match storage {
+        StorageConfig::Embedded(c) => c.retention_days,
+        StorageConfig::Postgres(c) => c.retention_days,
+    };
+    if days > 0 {
+        Some(days)
+    } else {
+        None
+    }
+}
+
+/// Periodic prune of events older than `retention_days`. Runs immediately
+/// once at boot, then every 24h.
+async fn run_retention_loop(
+    backend: Arc<dyn stomatopod_core::traits::StorageBackend>,
+    retention_days: u64,
+) {
+    use chrono::{Duration, Utc};
+    let interval = std::time::Duration::from_secs(24 * 3600);
+    loop {
+        let cutoff = Utc::now() - Duration::days(retention_days as i64);
+        match stomatopod_core::traits::StorageBackend::prune_events_before(backend.as_ref(), cutoff)
+            .await
+        {
+            Ok(n) if n > 0 => info!(
+                removed = n,
+                retention_days,
+                cutoff = %cutoff.to_rfc3339(),
+                "retention prune removed old event data"
+            ),
+            Ok(_) => tracing::debug!(
+                retention_days,
+                cutoff = %cutoff.to_rfc3339(),
+                "retention prune: nothing older than cutoff"
+            ),
+            Err(e) => tracing::warn!("retention prune failed: {e}"),
+        }
+        tokio::time::sleep(interval).await;
+    }
 }

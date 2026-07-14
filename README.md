@@ -25,8 +25,7 @@ export STOMATOPOD_AUTH__SECRET_KEY="replace-with-a-long-random-secret"
 export STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)"
 ```
 
-Self-hosted Stomatopod is a **single-owner** appliance (one org, one admin user,
-many sites). Multi-tenant SaaS is not supported yet.
+Stomatopod is a **single-owner** appliance (one org, one admin user, many sites).
 
 ## Daily commands
 

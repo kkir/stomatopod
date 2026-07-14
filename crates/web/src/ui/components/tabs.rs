@@ -4,29 +4,84 @@ use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
 
 const RANGES: [&str; 4] = ["7d", "30d", "90d", "12m"];
+/// Compact date input matching range-tab height (mirrors page-head toolbar).
+const DATE_INPUT: &str = "h-9 inline-flex items-center bg-surface-2/80 border border-border-1 text-text-1 rounded-[11px] px-2 text-[12px] font-semibold shadow-inner-hi focus:outline-none focus:border-teal/55 cursor-pointer";
 
-/// The 7d/30d/90d/12m pills, port of `.range-tabs` (legacy dashboard stylesheet Range
-/// tabs section). Navigates by swapping `range` on the current route
-/// while preserving filters/compare.
+/// The 7d/30d/90d/12m pills plus optional custom from/to dates. Navigates by
+/// swapping range params on the current route while preserving filters/compare.
 #[component]
 pub fn RangeTabs(active: String) -> Element {
     let route = use_route::<Route>();
     let current = route.query().cloned().unwrap_or_default();
+    let custom = current.is_custom_range();
+    // When a custom window is active, no preset pill is highlighted.
+    let active_preset = if custom { String::new() } else { active };
+    let mut from_val = use_signal(|| current.from.clone().unwrap_or_default());
+    let mut to_val = use_signal(|| current.to.clone().unwrap_or_default());
+    // Keep the date inputs aligned with the route (e.g. clearing after a preset click).
+    let route_from = current.from.clone().unwrap_or_default();
+    let route_to = current.to.clone().unwrap_or_default();
+    use_effect(use_reactive!(|(route_from, route_to)| {
+        from_val.set(route_from);
+        to_val.set(route_to);
+    }));
+
     rsx! {
-        div {
-            class: "inline-flex items-center h-9 gap-0.5 p-[3px] rounded-[11px] bg-surface-2/80 border border-border-1 shadow-inner-hi shrink-0",
-            role: "tablist",
-            "aria-label": "Date range",
-            for range in RANGES {
-                Link {
-                    key: "{range}",
-                    to: route.with_query(current.with_range(range)),
-                    class: if active == range {
-                        "inline-flex items-center justify-center h-full min-w-[2.4rem] sm:min-w-[2.65rem] px-2.5 sm:px-3.5 rounded-[8px] text-[12px] sm:text-[12.5px] font-semibold bg-grad-btn text-[#032621] shadow-[inset_0_1px_0_rgba(255,255,255,.35),0_1px_6px_rgba(45,212,191,.45)] no-underline"
+        div { class: "inline-flex flex-wrap items-center gap-1.5 shrink-0",
+            div {
+                class: "inline-flex items-center h-9 gap-0.5 p-[3px] rounded-[11px] bg-surface-2/80 border border-border-1 shadow-inner-hi shrink-0",
+                role: "tablist",
+                "aria-label": "Date range",
+                for range in RANGES {
+                    Link {
+                        key: "{range}",
+                        to: route.with_query(current.with_range(range)),
+                        class: if active_preset == range {
+                            "inline-flex items-center justify-center h-full min-w-[2.4rem] sm:min-w-[2.65rem] px-2.5 sm:px-3.5 rounded-[8px] text-[12px] sm:text-[12.5px] font-semibold bg-grad-btn text-[#032621] shadow-[inset_0_1px_0_rgba(255,255,255,.35),0_1px_6px_rgba(45,212,191,.45)] no-underline"
+                        } else {
+                            "inline-flex items-center justify-center h-full min-w-[2.4rem] sm:min-w-[2.65rem] px-2.5 sm:px-3.5 rounded-[8px] text-[12px] sm:text-[12.5px] font-semibold text-muted-1 hover:text-text-1 no-underline"
+                        },
+                        "{range}"
+                    }
+                }
+            }
+            form {
+                class: "inline-flex items-center gap-1 h-9",
+                onsubmit: {
+                    let route = route.clone();
+                    let current = current.clone();
+                    move |evt: FormEvent| {
+                        evt.prevent_default();
+                        let from = from_val().trim().to_string();
+                        let to = to_val().trim().to_string();
+                        if !from.is_empty() && !to.is_empty() {
+                            navigator().push(route.with_query(current.with_custom_range(&from, &to)));
+                        }
+                    }
+                },
+                input {
+                    class: "{DATE_INPUT} w-[8.25rem] max-w-[38vw]",
+                    r#type: "date",
+                    value: "{from_val}",
+                    "aria-label": "From date",
+                    oninput: move |e| from_val.set(e.value()),
+                }
+                span { class: "text-muted-2 text-[11px] font-semibold", "–" }
+                input {
+                    class: "{DATE_INPUT} w-[8.25rem] max-w-[38vw]",
+                    r#type: "date",
+                    value: "{to_val}",
+                    "aria-label": "To date",
+                    oninput: move |e| to_val.set(e.value()),
+                }
+                button {
+                    r#type: "submit",
+                    class: if custom {
+                        "h-9 inline-flex items-center px-3 rounded-[11px] text-[12px] font-semibold bg-teal-soft text-teal-hi border border-teal/35 cursor-pointer shrink-0"
                     } else {
-                        "inline-flex items-center justify-center h-full min-w-[2.4rem] sm:min-w-[2.65rem] px-2.5 sm:px-3.5 rounded-[8px] text-[12px] sm:text-[12.5px] font-semibold text-muted-1 hover:text-text-1 no-underline"
+                        "h-9 inline-flex items-center px-3 rounded-[11px] text-[12px] font-semibold text-muted-1 hover:text-text-1 bg-surface-2/80 border border-border-1 shadow-inner-hi cursor-pointer shrink-0"
                     },
-                    "{range}"
+                    "Go"
                 }
             }
         }
@@ -63,7 +118,11 @@ pub fn SiteTabs(site_id: String, range: String, active: SiteTab, children: Eleme
     });
     // Prefer the live route query; fall back so pages without `?:..q` still
     // deep-link into overview with at least the requested range.
-    let q = if current.range.is_some() || !current.filters.is_empty() || current.compare {
+    let q = if current.range.is_some()
+        || current.is_custom_range()
+        || !current.filters.is_empty()
+        || current.compare
+    {
         current
     } else {
         DashQuery {

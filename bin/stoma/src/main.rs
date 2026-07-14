@@ -1,4 +1,4 @@
-//! `spq` — Stomatopod query CLI.
+//! `stoma` — Stomatopod query CLI.
 //!
 //! A read-first command-line client for the analytics API, built for humans
 //! and LLM agents. Outputs JSON by default. Authenticates with a read-scoped
@@ -18,7 +18,10 @@ use clap::{Parser, Subcommand};
 use client::ApiClient;
 
 #[derive(Parser)]
-#[command(name = "spq", about = "Stomatopod query CLI for humans and LLM agents")]
+#[command(
+    name = "stoma",
+    about = "Stomatopod query CLI for humans and LLM agents"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -55,7 +58,7 @@ enum Commands {
     },
     /// Print a machine-readable description of every command (for LLM agents).
     Describe,
-    /// Manage Claude Code skills bundled with spq.
+    /// Manage agent skills bundled with stoma (Claude, Grok, Cursor, agents).
     Skills {
         #[command(subcommand)]
         cmd: skills::SkillsCommand,
@@ -83,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
 /// commands and arguments without scraping `--help`. Mirrors `/llms.txt`.
 fn describe() -> serde_json::Value {
     serde_json::json!({
-        "tool": "spq",
+        "tool": "stoma",
         "description": "Stomatopod analytics CLI for LLM agents: read-only queries plus funnel creation.",
         "auth": {
             "env": "STOMATOPOD_TOKEN",
@@ -163,6 +166,42 @@ fn describe() -> serde_json::Value {
                 ]
             },
             {
+                "name": "query top-countries",
+                "description": "Top countries by traffic.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query top-browsers",
+                "description": "Top browsers by traffic.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query top-devices",
+                "description": "Top device types by traffic.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "20" },
+                    { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
                 "name": "query top-entry-pages",
                 "description": "Top entry (landing) pages by traffic.",
                 "args": [
@@ -211,6 +250,28 @@ fn describe() -> serde_json::Value {
                     { "name": "--to", "required": false },
                     { "name": "--limit", "default": "20" },
                     { "name": "--filter", "required": false, "note": "Repeatable field:op:value." }
+                ]
+            },
+            {
+                "name": "query export-events",
+                "description": "Export raw event rows for a site.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "1000" }
+                ]
+            },
+            {
+                "name": "query export-sessions",
+                "description": "Export derived session rows for a site.",
+                "args": [
+                    { "name": "--site", "required": true },
+                    { "name": "--range", "default": "30d" },
+                    { "name": "--from", "required": false },
+                    { "name": "--to", "required": false },
+                    { "name": "--limit", "default": "1000" }
                 ]
             },
             {

@@ -95,7 +95,7 @@ test("a created site appears and its overview loads", async ({ page }) => {
   await waitForSpa(page);
   // Site tab "Overview" is the active insight tab; hero stats render even with zero data.
   await expect(page.getByRole("link", { name: "Overview" })).toBeVisible();
-  await expect(page.getByText("Pageviews", { exact: true })).toBeVisible();
+  await expect(page.getByText("Pageviews", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Bounce Rate", { exact: true })).toBeVisible();
   // Progressive layout: tabbed breakdown cards instead of a wall of tables.
   // `exact: true` so "Pages" does not also match empty-state "No pages yet".

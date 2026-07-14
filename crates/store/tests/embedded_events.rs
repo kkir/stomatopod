@@ -18,6 +18,7 @@ fn cfg(dir: &tempfile::TempDir) -> EmbeddedConfig {
         parquet_flush_rows: 1,
         parquet_flush_interval_s: 1,
         allow_ephemeral: true,
+        ..Default::default()
     }
 }
 
@@ -32,6 +33,7 @@ fn cfg_bulk(dir: &tempfile::TempDir) -> EmbeddedConfig {
         parquet_flush_rows: 10_000,
         parquet_flush_interval_s: 1,
         allow_ephemeral: true,
+        ..Default::default()
     }
 }
 
@@ -667,6 +669,80 @@ async fn seed_sessions(backend: &EmbeddedBackend) -> (Ulid, TimeRange) {
 }
 
 #[tokio::test]
+async fn prune_events_before_removes_old_partitions() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let site_id = Ulid::new();
+    let old = Utc::now() - chrono::Duration::days(40);
+    let recent = Utc::now() - chrono::Duration::hours(1);
+    let mut e_old = make_event(site_id, "/old");
+    e_old.timestamp = old;
+    e_old.received_at = old;
+    let mut e_new = make_event(site_id, "/new");
+    e_new.timestamp = recent;
+    e_new.received_at = recent;
+    backend.ingest_events(vec![e_old, e_new]).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let cutoff = Utc::now() - chrono::Duration::days(30);
+    let removed = backend.prune_events_before(cutoff).await.unwrap();
+    assert!(removed >= 1, "expected at least one old partition removed");
+
+    let range = TimeRange {
+        start: Utc::now() - chrono::Duration::days(60),
+        end: Utc::now() + chrono::Duration::hours(1),
+    };
+    let pv = backend
+        .query_pageviews(&PageviewsQuery {
+            site_id,
+            range,
+            granularity: Granularity::Day,
+            filters: vec![],
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        pv.total_pageviews, 1,
+        "only the recent pageview should remain"
+    );
+}
+
+#[tokio::test]
+async fn pageviews_report_bounce_rate_and_avg_duration() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let (site_id, range) = seed_sessions(&backend).await;
+
+    let pv = backend
+        .query_pageviews(&PageviewsQuery {
+            site_id,
+            range: range.clone(),
+            granularity: Granularity::Day,
+            filters: vec![],
+        })
+        .await
+        .unwrap();
+
+    // 5 pageviews across 3 sessions; only session B is a single-pageview bounce.
+    assert_eq!(pv.total_pageviews, 5);
+    assert_eq!(
+        pv.total_sessions, 3,
+        "total_sessions should be unique sessions, not sum of per-bucket counts"
+    );
+    assert!(
+        (pv.bounce_rate - (1.0 / 3.0 * 100.0)).abs() < 0.01,
+        "1 of 3 sessions bounced, got {}",
+        pv.bounce_rate
+    );
+    // Session A spans 10s, B 0s, C 5s → mean 5s.
+    assert!(
+        (pv.avg_duration_secs - 5.0).abs() < 0.01,
+        "expected ~5s avg duration, got {}",
+        pv.avg_duration_secs
+    );
+}
+
+#[tokio::test]
 async fn entry_pages_report_counts_sessions_and_bounces() {
     let dir = tempfile::tempdir().unwrap();
     let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
@@ -790,4 +866,177 @@ async fn sparklines_rank_top_pages() {
     // /home was viewed by all three sessions.
     assert_eq!(home.total, 3);
     assert_eq!(home.points.iter().sum::<u64>(), 3);
+}
+
+// ---- P0.2 / P0.3: funnel evaluation + WAL crash recovery ----
+
+#[tokio::test]
+async fn funnel_query_counts_step_sessions_and_conversion() {
+    use stomatopod_core::query::funnel::{FunnelQuery, FunnelStep};
+
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let site_id = Ulid::new();
+    let now = Utc::now();
+
+    // Session A + B: pageview then signup. Session C: pageview only.
+    let mut events = Vec::new();
+    for (sess, with_signup) in [([1u8; 16], true), ([2u8; 16], true), ([3u8; 16], false)] {
+        let mut pv = make_event(site_id, "/start");
+        pv.session_id = sess;
+        pv.timestamp = now - chrono::Duration::seconds(10);
+        events.push(pv);
+        if with_signup {
+            let mut su = make_event(site_id, "/thanks");
+            su.session_id = sess;
+            su.name = "signup".into();
+            su.kind = EventKind::Custom;
+            su.timestamp = now - chrono::Duration::seconds(5);
+            events.push(su);
+        }
+    }
+    backend.ingest_events(events).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let result = backend
+        .query_funnel(&FunnelQuery {
+            site_id,
+            range: TimeRange {
+                start: now - chrono::Duration::hours(1),
+                end: now + chrono::Duration::minutes(5),
+            },
+            steps: vec![
+                FunnelStep {
+                    name: "Landing".into(),
+                    event_name: "pageview".into(),
+                    filters: vec![],
+                },
+                FunnelStep {
+                    name: "Signup".into(),
+                    event_name: "signup".into(),
+                    filters: vec![],
+                },
+            ],
+            window_secs: 86_400,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(result.steps.len(), 2);
+    assert_eq!(result.steps[0].sessions, 3);
+    assert!((result.steps[0].conversion_rate - 1.0).abs() < f64::EPSILON);
+    assert_eq!(result.steps[1].sessions, 2);
+    assert!((result.steps[1].conversion_rate - (2.0 / 3.0)).abs() < 0.01);
+    assert!((result.steps[1].drop_off_rate - (1.0 / 3.0)).abs() < 0.01);
+}
+
+/// Events written to the WAL but not yet flushed to Parquet must survive a
+/// process restart (reopen of [`EmbeddedBackend`]).
+///
+/// The Parquet writer uses `tokio::time::interval`, whose first tick is
+/// immediately ready. If events land before that tick is consumed, the
+/// writer flushes on the first tick. We sleep briefly after open so the
+/// empty first tick is drained before ingesting.
+#[tokio::test]
+async fn wal_replay_recovers_events_after_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let data_dir = dir.path().to_path_buf();
+    let site_id = Ulid::new();
+
+    // Phase 1: accept events into WAL + memory buffer; do not flush Parquet.
+    {
+        let cfg = EmbeddedConfig {
+            data_dir: data_dir.clone(),
+            wal_fsync_interval_ms: 0,
+            parquet_flush_rows: 10_000,
+            parquet_flush_interval_s: 3_600,
+            allow_ephemeral: true,
+            ..Default::default()
+        };
+        let backend = EmbeddedBackend::open(&cfg).await.unwrap();
+        // Drain the writer's immediate first interval tick while the buffer
+        // is still empty so ingest does not race into an early flush.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        backend
+            .ingest_events(vec![
+                make_event(site_id, "/wal-a"),
+                make_event(site_id, "/wal-b"),
+                make_event(site_id, "/wal-c"),
+            ])
+            .await
+            .unwrap();
+        // Writer appends to WAL on channel receive; give it a beat.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let parquet_site = data_dir.join("parquet").join(site_id.to_string());
+        assert!(
+            !parquet_site.exists(),
+            "test setup broken: parquet flushed before simulated crash"
+        );
+        // Simulate crash: drop backend without waiting for interval flush.
+        drop(backend);
+        // Let the writer task observe the closed channel and exit.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    // Phase 2: reopen — WAL replay fills the buffer; one interval tick should
+    // drain the whole batch (flush_rows large enough for all recovered rows).
+    {
+        let cfg = EmbeddedConfig {
+            data_dir: data_dir.clone(),
+            wal_fsync_interval_ms: 0,
+            parquet_flush_rows: 10_000,
+            parquet_flush_interval_s: 1,
+            allow_ephemeral: true,
+            ..Default::default()
+        };
+        let backend = EmbeddedBackend::open(&cfg).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        let now = Utc::now();
+        let result = backend
+            .query_pageviews(&PageviewsQuery {
+                site_id,
+                range: TimeRange {
+                    start: now - chrono::Duration::hours(1),
+                    end: now + chrono::Duration::minutes(5),
+                },
+                granularity: Granularity::Day,
+                filters: vec![],
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            result.total_pageviews, 3,
+            "WAL replay must restore unflushed events after restart"
+        );
+    }
+}
+
+/// Direct WAL append → reopen → replay into an in-memory buffer.
+#[tokio::test]
+async fn wal_append_and_replay_round_trip() {
+    use stomatopod_store::embedded::{buffer::EventBuffer, wal::Wal};
+
+    let dir = tempfile::tempdir().unwrap();
+    let wal_dir = dir.path().join("wal");
+    let site_id = Ulid::new();
+    let events = vec![make_event(site_id, "/a"), make_event(site_id, "/b")];
+
+    {
+        let wal = Wal::open(&wal_dir, 0).unwrap();
+        wal.append(&events).unwrap();
+        wal.fsync().unwrap();
+        drop(wal);
+    }
+
+    let wal = Wal::open(&wal_dir, 0).unwrap();
+    let buffer = EventBuffer::new(1024);
+    wal.replay(&buffer).unwrap();
+    assert_eq!(buffer.len(), 2, "replay must restore appended events");
+    let drained = buffer.drain(10);
+    assert_eq!(drained.len(), 2);
+    assert_eq!(drained[0].url, "/a");
+    assert_eq!(drained[1].url, "/b");
 }

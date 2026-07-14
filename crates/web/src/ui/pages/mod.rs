@@ -107,13 +107,33 @@ pub(crate) fn use_site_summary(site_id: String) -> Option<SiteSummary> {
     site_from_resource(&sites, &site_id)
 }
 
+/// Browser `confirm()` dialog. Returns `true` when the user accepts.
+/// On non-wasm targets (SSR / tests) returns `false` so deletes never fire
+/// without a real user gesture.
+pub(crate) fn confirm_delete(message: &str) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .map(|w| w.confirm_with_message(message).unwrap_or(false))
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = message;
+        false
+    }
+}
+
 /// Builds `/api/v1/sites/{site_id}/{endpoint}[?qs]` for a site-scoped GET,
 /// reusing a [`DashQuery`]'s rendered query string (see `query.rs`).
+///
+/// Always requests `spark=1` so breakdown Trend columns get sparklines; the
+/// public JSON API leaves sparklines off unless clients opt in.
 pub(crate) fn site_api_url(site_id: &str, endpoint: &str, qs: &str) -> String {
     if qs.is_empty() {
-        format!("/api/v1/sites/{site_id}/{endpoint}")
+        format!("/api/v1/sites/{site_id}/{endpoint}?spark=1")
     } else {
-        format!("/api/v1/sites/{site_id}/{endpoint}?{qs}")
+        format!("/api/v1/sites/{site_id}/{endpoint}?{qs}&spark=1")
     }
 }
 

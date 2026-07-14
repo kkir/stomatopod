@@ -6,4 +6,4 @@
 pub mod html;
 mod launch;
 
-pub use launch::run;
+pub use launch::{bootstrap_self_hosted, run};

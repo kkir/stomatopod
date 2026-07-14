@@ -20,6 +20,8 @@ pub mod extractors;
 #[cfg(feature = "server")]
 pub mod middleware;
 #[cfg(feature = "server")]
+pub mod openapi;
+#[cfg(feature = "server")]
 pub mod router;
 #[cfg(feature = "server")]
 pub mod routes;

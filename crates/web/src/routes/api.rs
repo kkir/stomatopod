@@ -16,11 +16,74 @@ use tracing::warn;
 use ulid::Ulid;
 
 use crate::{
-    middleware::auth::{verify_session, Principal, SESSION_COOKIE},
+    middleware::auth::{sign_session_bound, verify_session, Principal, SESSION_COOKIE},
     state::{ApiKeyCacheEntry, AppState},
 };
 
+/// Browser beacon body (mirrors `IngestPayload` field names for OpenAPI).
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct BrowserIngestBody {
+    /// Site public key.
+    pub k: String,
+    /// Event name (`pageview` or custom).
+    pub n: String,
+    /// Full page URL.
+    pub u: String,
+    /// Referrer URL.
+    pub r: Option<String>,
+    /// Screen width.
+    pub w: Option<u16>,
+    /// Screen height.
+    pub h: Option<u16>,
+    /// Browser language tag.
+    pub l: Option<String>,
+    /// Custom event properties.
+    pub p: Option<serde_json::Value>,
+    /// Client timestamp (Unix ms).
+    pub t: Option<i64>,
+}
+
+/// Server-side custom event body (mirrors `ServerEventPayload` for OpenAPI).
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct ServerIngestBody {
+    pub name: String,
+    pub url: Option<String>,
+    pub properties: Option<serde_json::Value>,
+    pub timestamp: Option<i64>,
+    pub referrer: Option<String>,
+    pub session_id: Option<String>,
+}
+
+/// Session / API-key probe response (shape depends on principal).
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[schema(example = json!({"auth": "api_key", "org_id": "01HXYZ", "site_id": null}))]
+pub struct MeResponse {
+    pub auth: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub org_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+}
+
 /// Ingest endpoint — delegates to the ingest crate using AppState fields.
+#[utoipa::path(
+    post,
+    path = "/api/v1/event",
+    tag = "ingest",
+    request_body = BrowserIngestBody,
+    responses(
+        (status = 204, description = "Accepted"),
+        (status = 401, description = "Unknown site public key"),
+        (status = 429, description = "Ingest back-pressure"),
+        (status = 503, description = "Ingest channel closed")
+    )
+)]
 pub async fn handle_ingest(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
@@ -42,6 +105,19 @@ pub async fn handle_ingest(
 /// Authentication: `Authorization: Bearer <ingest_key>` against the
 /// `api_keys` table (scope = ingest). Distinct from `/api/v1/event`, which
 /// uses a public site key in the body for browser beacons.
+#[utoipa::path(
+    post,
+    path = "/api/v1/ingest",
+    tag = "ingest",
+    security(("ingest_key" = [])),
+    request_body = ServerIngestBody,
+    responses(
+        (status = 204, description = "Accepted"),
+        (status = 400, description = "Empty event name"),
+        (status = 401, description = "Missing or invalid ingest key"),
+        (status = 429, description = "Ingest back-pressure")
+    )
+)]
 pub async fn handle_key_ingest(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -125,9 +201,196 @@ fn session_user_id(state: &AppState, principal: &Principal, jar: &CookieJar) -> 
     Ulid::from_string(&raw).ok()
 }
 
+/// `GET /health` — liveness probe for orchestrators. Always 200 when the
+/// process is accepting HTTP.
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "meta",
+    responses((status = 200, description = "Process is up"))
+)]
+pub async fn health() -> impl IntoResponse {
+    (StatusCode::OK, Json(serde_json::json!({ "status": "ok" })))
+}
+
+/// `GET /ready` — readiness probe: meta store answers a cheap list call.
+#[utoipa::path(
+    get,
+    path = "/ready",
+    tag = "meta",
+    responses(
+        (status = 200, description = "Ready to serve traffic"),
+        (status = 503, description = "Storage not ready")
+    )
+)]
+pub async fn ready(State(state): State<Arc<AppState>>) -> Response {
+    match state.meta.list_orgs().await {
+        Ok(_) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "ready" })),
+        )
+            .into_response(),
+        Err(e) => {
+            // Unauthenticated probe — log details server-side, never leak
+            // storage/driver strings to clients.
+            tracing::warn!("readiness check failed: {e}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "status": "not_ready" })),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Body for `POST /api/v1/me/password`.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub struct ChangePasswordBody {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+/// `POST /api/v1/me/password` — rotate the owner password (dashboard session only).
+#[utoipa::path(
+    post,
+    path = "/api/v1/me/password",
+    tag = "meta",
+    request_body = ChangePasswordBody,
+    responses(
+        (status = 200, description = "Password updated"),
+        (status = 400, description = "Weak or mismatched password"),
+        (status = 401, description = "Unauthenticated or wrong current password"),
+        (status = 403, description = "API keys cannot change passwords")
+    )
+)]
+pub async fn change_password(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    jar: CookieJar,
+    Json(body): Json<ChangePasswordBody>,
+) -> Response {
+    use argon2::{
+        password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
+        Argon2, PasswordHash, PasswordVerifier,
+    };
+    use axum_extra::extract::cookie::{Cookie, SameSite};
+    use cookie::time::Duration as CookieDuration;
+
+    /// Cap before Argon2 so huge bodies cannot be used as a CPU DoS.
+    const MAX_PASSWORD_BYTES: usize = 128;
+
+    if matches!(principal, Principal::ApiKey { .. }) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "requires a dashboard session, not an API key"
+            })),
+        )
+            .into_response();
+    }
+    let Some(user_id) = session_user_id(&state, &principal, &jar) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "authentication required"})),
+        )
+            .into_response();
+    };
+    if body.new_password.len() < 12 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "new password must be at least 12 characters"
+            })),
+        )
+            .into_response();
+    }
+    if body.new_password.len() > MAX_PASSWORD_BYTES
+        || body.current_password.len() > MAX_PASSWORD_BYTES
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "password must be at most 128 characters"
+            })),
+        )
+            .into_response();
+    }
+    let user = match state.meta.get_user(user_id).await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "authentication required"})),
+            )
+                .into_response()
+        }
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    let Ok(parsed) = PasswordHash::new(&user.password_hash) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "invalid stored hash").into_response();
+    };
+    if Argon2::default()
+        .verify_password(body.current_password.as_bytes(), &parsed)
+        .is_err()
+    {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "current password is incorrect"})),
+        )
+            .into_response();
+    }
+    let salt = SaltString::generate(&mut OsRng);
+    let hash = match Argon2::default().hash_password(body.new_password.as_bytes(), &salt) {
+        Ok(h) => h.to_string(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("argon2 error: {e}"),
+            )
+                .into_response()
+        }
+    };
+    if let Err(e) = state.meta.update_user_password(user_id, &hash).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+    }
+
+    // Re-issue a session bound to the new hash so this client stays logged
+    // in; tokens signed with the old hash fail middleware checks.
+    let ttl_secs = state.config.auth.session_ttl_s;
+    let session_value = sign_session_bound(
+        &state.config.auth.secret_key,
+        &user_id.to_string(),
+        ttl_secs,
+        &hash,
+    );
+    let cookie_ttl = i64::try_from(ttl_secs).unwrap_or(i64::MAX);
+    let secure = state
+        .config
+        .auth
+        .effective_cookie_secure(state.config.public_base_url());
+    let cookie = Cookie::build((SESSION_COOKIE, session_value))
+        .path("/")
+        .http_only(true)
+        .secure(secure)
+        .same_site(SameSite::Lax)
+        .max_age(CookieDuration::seconds(cookie_ttl))
+        .build();
+    (jar.add(cookie), Json(serde_json::json!({ "ok": true }))).into_response()
+}
+
 /// `GET /api/v1/me` — session probe so the SPA can confirm it is logged in
 /// and learn who the current user is. API-key principals get a reduced view
 /// (org/site scope, no user row) since keys aren't tied to a specific user.
+#[utoipa::path(
+    get,
+    path = "/api/v1/me",
+    tag = "meta",
+    security(("read_key" = [])),
+    responses(
+        (status = 200, description = "Current principal", body = MeResponse),
+        (status = 401, description = "Unauthenticated")
+    )
+)]
 pub async fn me(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,

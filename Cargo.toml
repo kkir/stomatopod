@@ -4,7 +4,7 @@ members = [
     "crates/store",
     "crates/ingest",
     "crates/web",
-    "bin/spq",
+    "bin/stoma",
     "bin/seed",
 ]
 resolver = "2"

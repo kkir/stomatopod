@@ -4,7 +4,6 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct Config {
-    pub mode: Mode,
     pub listen: ListenConfig,
     #[serde(default, deserialize_with = "deserialize_storage")]
     pub storage: StorageConfig,
@@ -28,18 +27,6 @@ impl Config {
             trimmed
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum Mode {
-    /// Single org + single owner user, auto-created on first boot.
-    /// This is the only supported deployment mode today.
-    #[default]
-    SelfHosted,
-    /// Multi-org SaaS. Not supported yet; the server refuses to start in
-    /// this mode so nobody runs multi-tenant traffic on single-tenant authz.
-    Saas,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -106,11 +93,15 @@ pub struct EmbeddedConfig {
     pub parquet_flush_interval_s: u64,
     /// When false (the default), the server refuses to start if it detects it
     /// is running inside a container with `data_dir` on ephemeral container
-    /// storage rather than a mounted volume — otherwise all analytics data is
+    /// storage rather than a mounted volume - otherwise all analytics data is
     /// silently lost on the next redeploy. Set to true (or
     /// `STOMATOPOD_STORAGE__ALLOW_EPHEMERAL=true`) only for throwaway demos and
     /// ephemeral test containers.
     pub allow_ephemeral: bool,
+    /// Drop event data older than this many days. `0` (default) keeps forever.
+    /// Embedded backend deletes Hive `date=` Parquet partitions; Postgres
+    /// runs `DELETE FROM events WHERE timestamp < cutoff`.
+    pub retention_days: u64,
 }
 
 impl Default for EmbeddedConfig {
@@ -121,6 +112,7 @@ impl Default for EmbeddedConfig {
             parquet_flush_rows: 50_000,
             parquet_flush_interval_s: 30,
             allow_ephemeral: false,
+            retention_days: 0,
         }
     }
 }
@@ -130,6 +122,9 @@ pub struct PostgresConfig {
     pub url: String,
     #[serde(default = "default_pg_max_connections")]
     pub max_connections: u32,
+    /// Drop event rows older than this many days. `0` (default) keeps forever.
+    #[serde(default)]
+    pub retention_days: u64,
 }
 
 fn default_pg_max_connections() -> u32 {

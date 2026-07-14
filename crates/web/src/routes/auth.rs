@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     error::AppError,
-    middleware::auth::{sign_session, verify_session, SESSION_COOKIE},
+    middleware::auth::{sign_session_bound, verify_session, SESSION_COOKIE},
     server::html,
     state::AppState,
 };
@@ -93,10 +93,11 @@ pub async fn login_submit(
     clear_login_failures(&state, &ip_key);
 
     let ttl_secs = state.config.auth.session_ttl_s;
-    let session_value = sign_session(
+    let session_value = sign_session_bound(
         &state.config.auth.secret_key,
         &user.id.to_string(),
         ttl_secs,
+        &user.password_hash,
     );
     // Clamp the configured TTL to `i64::MAX` (≈ 292 billion years) so an
     // accidentally absurd config value can't wrap to a negative max-age

@@ -9,6 +9,7 @@ use tower_http::{compression::CompressionLayer, trace::TraceLayer};
 
 use crate::{
     middleware::{auth::require_api_auth, cors::ingest_cors, security_headers::security_headers},
+    openapi,
     routes::{analytics, api, api_keys, auth, digest, insights, sites},
     state::AppState,
 };
@@ -18,7 +19,7 @@ use crate::{
 /// this by [`crate::server::serve`], which owns the catch-all fallback.
 ///
 /// There is intentionally no public user-registration or org-creation route:
-/// self-hosted mode is a single-owner appliance bootstrapped at first start.
+/// this is a single-owner appliance bootstrapped at first start.
 pub fn build_router(state: Arc<AppState>) -> Router {
     // Public ingest routes (CORS-enabled)
     let ingest_routes = Router::new()
@@ -29,9 +30,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     // Public assets the login page needs before auth. `/app.css` is the same
     // compiled Tailwind bundle the Dioxus SPA uses. The dashboard root `/`
     // is served by the Dioxus SSR fallback (behind `require_auth`).
+    // `/health` and `/ready` are unauthenticated probes for orchestrators.
     let public_assets = Router::new()
         .route("/app.css", get(api::dashboard_css))
-        .route("/llms.txt", get(api::llms_txt));
+        .route("/llms.txt", get(api::llms_txt))
+        .route("/openapi.json", get(openapi::openapi_json))
+        .route("/health", get(api::health))
+        .route("/ready", get(api::ready));
 
     // Server-side custom event ingest. Bearer-auth'd inline via an ingest
     // API key (handler resolves the site from the key). No CORS - calls
@@ -49,6 +54,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             axum::routing::patch(sites::patch_site_api),
         )
         .route("/api/v1/me", get(api::me))
+        .route("/api/v1/me/password", post(api::change_password))
         .route("/api/v1/docs", get(api::docs_api))
         .route("/api/v1/sites/{site}/pageviews", get(analytics::pageviews))
         .route("/api/v1/sites/{site}/top-pages", get(analytics::top_pages))
@@ -100,13 +106,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 .delete(analytics::delete_analytics_alert),
         )
         .route("/api/v1/sites/{site}/campaigns", get(analytics::campaigns))
+        .route("/api/v1/sites/{site}/utm", get(analytics::utm))
         .route(
             "/api/v1/sites/{site}/funnels",
             get(analytics::list_funnels).post(analytics::create_funnel),
         )
         .route(
             "/api/v1/sites/{site}/funnels/{funnel_id}",
-            get(analytics::funnel_result),
+            get(analytics::funnel_result).delete(analytics::delete_funnel),
         )
         // ---- API keys (CRUD): global + per-site ----
         .route(

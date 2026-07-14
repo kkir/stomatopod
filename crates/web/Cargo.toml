@@ -49,6 +49,7 @@ server = [
     "dep:async-trait",
     "dep:config",
     "dep:clap",
+    "dep:utoipa",
 ]
 
 [dependencies]
@@ -86,6 +87,7 @@ reqwest = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
 config = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
+utoipa = { version = "5", features = ["chrono", "ulid"], optional = true }
 
 # Browser-only crates. Target-gated so they compile only for the wasm client;
 # `src/ui/api.rs` uses them behind the same `cfg(target_arch = "wasm32")`.
@@ -98,8 +100,11 @@ gloo-net = "0.6"
 gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [
     "Window",
+    "Navigator",
+    "Clipboard",
     "Location",
     "Document",
     "Element",

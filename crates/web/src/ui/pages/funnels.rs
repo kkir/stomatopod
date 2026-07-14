@@ -1,12 +1,12 @@
 use dioxus::prelude::*;
 
-use crate::ui::api::{get_json, post_json};
+use crate::ui::api::{delete, get_json, post_json};
 use crate::ui::components::card::{Card, EmptyState};
 use crate::ui::components::funnel::FunnelBuilder;
 use crate::ui::components::layout::PageHead;
 use crate::ui::components::skeleton::Skeleton;
 use crate::ui::components::tabs::{RangeTabs, SiteTab, SiteTabs};
-use crate::ui::pages::{active_filters, use_site_name};
+use crate::ui::pages::{active_filters, confirm_delete, use_site_name, BTN_GHOST};
 use crate::ui::query::DashQuery;
 use crate::ui::routes::Route;
 use crate::ui::types::{CreateFunnelBody, FunnelsList};
@@ -59,19 +59,47 @@ pub fn Funnels(site_id: String, q: DashQuery) -> Element {
                             rsx! {
                                 div { class: "flex flex-col gap-2",
                                     for f in list.funnels.clone() {
-                                        Link {
+                                        div {
                                             key: "{f.id}",
-                                            class: "flex items-center justify-between gap-3 py-2.5 px-1 border-t border-border-1 text-text-1 no-underline hover:text-teal-hi",
-                                            to: Route::FunnelDetail {
-                                                site_id: site_id.clone(),
-                                                funnel_id: f.id.clone(),
-                                                q: DashQuery {
-                                                    range: Some(range.clone()),
-                                                    ..Default::default()
+                                            class: "flex items-center justify-between gap-3 py-2.5 px-1 border-t border-border-1",
+                                            Link {
+                                                class: "flex-1 min-w-0 text-text-1 no-underline hover:text-teal-hi",
+                                                to: Route::FunnelDetail {
+                                                    site_id: site_id.clone(),
+                                                    funnel_id: f.id.clone(),
+                                                    q: DashQuery {
+                                                        range: Some(range.clone()),
+                                                        ..Default::default()
+                                                    },
                                                 },
-                                            },
-                                            span { class: "text-[13px] font-medium", "{f.name}" }
-                                            span { class: "text-muted-1 text-xs", "View →" }
+                                                span { class: "text-[13px] font-medium", "{f.name}" }
+                                                span { class: "ml-2 text-muted-1 text-xs", "View →" }
+                                            }
+                                            button {
+                                                r#type: "button",
+                                                class: BTN_GHOST,
+                                                onclick: {
+                                                    let site_id = site_id.clone();
+                                                    let funnel_id = f.id.clone();
+                                                    let mut refresh = refresh;
+                                                    move |_| {
+                                                        if !confirm_delete("Delete this funnel?") {
+                                                            return;
+                                                        }
+                                                        let site_id = site_id.clone();
+                                                        let funnel_id = funnel_id.clone();
+                                                        spawn(async move {
+                                                            let path = format!(
+                                                                "/api/v1/sites/{site_id}/funnels/{funnel_id}"
+                                                            );
+                                                            if delete(&path).await.is_ok() {
+                                                                refresh += 1;
+                                                            }
+                                                        });
+                                                    }
+                                                },
+                                                "Delete"
+                                            }
                                         }
                                     }
                                 }

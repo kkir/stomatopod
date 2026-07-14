@@ -317,10 +317,13 @@ pub enum TopListField {
     UtmCampaign,
     UtmTerm,
     UtmContent,
+    /// Custom event name (`kind = 'custom'`). Used for events sparklines, not
+    /// the main pageview breakdown grid.
+    EventName,
 }
 
 impl TopListField {
-    /// All dimensions, in dashboard render order.
+    /// All pageview dimensions, in dashboard render order.
     pub const ALL: [TopListField; 7] = [
         TopListField::Page,
         TopListField::Referrer,
@@ -355,6 +358,23 @@ impl TopListField {
             TopListField::UtmCampaign => "utm_campaign",
             TopListField::UtmTerm => "utm_term",
             TopListField::UtmContent => "utm_content",
+            TopListField::EventName => "name",
+        }
+    }
+
+    /// `events.kind` filter for this breakdown (`pageview` or `custom`).
+    pub fn event_kind(&self) -> &'static str {
+        match self {
+            TopListField::EventName => "custom",
+            _ => "pageview",
+        }
+    }
+
+    /// Label used when the dimension column is NULL.
+    pub fn null_label(&self) -> &'static str {
+        match self {
+            TopListField::EventName => "(unnamed)",
+            _ => "Direct / None",
         }
     }
 
@@ -374,6 +394,7 @@ impl TopListField {
             TopListField::UtmCampaign => "utm_campaign",
             TopListField::UtmTerm => "utm_term",
             TopListField::UtmContent => "utm_content",
+            TopListField::EventName => "event_name",
         }
     }
 }

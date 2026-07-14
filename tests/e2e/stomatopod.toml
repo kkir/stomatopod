@@ -10,3 +10,12 @@ port = 18080
 [storage]
 backend = "embedded"
 data_dir = "./data/e2e"
+# Fast flush so tracker → dashboard e2e does not wait 30s for Parquet.
+allow_ephemeral = true
+wal_fsync_interval_ms = 0
+parquet_flush_rows = 1
+parquet_flush_interval_s = 1
+
+[limits]
+ingest_batch_size = 1
+ingest_flush_interval_ms = 50

@@ -46,6 +46,16 @@ fn session_key(secret: &str) -> [u8; 32] {
     blake3::derive_key("stomatopod session signing key v1", secret.as_bytes())
 }
 
+/// Short fingerprint of a password hash, embedded in session tokens so a
+/// password change invalidates outstanding sessions without a separate store.
+pub fn session_password_version(password_hash: &str) -> String {
+    if password_hash.is_empty() {
+        // Unbound tokens (tests / callers that omit the hash). Still MAC'd.
+        return "0".into();
+    }
+    hex::encode(&blake3::hash(password_hash.as_bytes()).as_bytes()[..8])
+}
+
 /// Constant-time byte-slice equality. Used to compare MACs/signatures so an
 /// attacker can't recover a valid signature byte-by-byte from response timing.
 /// The length check leaks length only, which is fixed for our signatures.
@@ -67,45 +77,86 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
-/// Returns a signed cookie/bearer value: `{user_id}.{exp_unix}.{hex_mac_16}`.
-/// The MAC covers `user_id.exp` so expiry cannot be stripped or extended.
+/// Returns a signed cookie/bearer value:
+/// `{user_id}.{exp_unix}.{pwd_v}.{hex_mac_16}`.
+///
+/// `password_hash` binds the token to the current credential; after a password
+/// change, tokens signed with the old hash fail [`verify_session_bound`].
+/// Pass an empty string for unbound tokens (tests only).
 pub fn sign_session(secret: &str, user_id: &str, ttl_secs: u64) -> String {
+    sign_session_bound(secret, user_id, ttl_secs, "")
+}
+
+/// Like [`sign_session`] but binds the token to `password_hash`.
+pub fn sign_session_bound(
+    secret: &str,
+    user_id: &str,
+    ttl_secs: u64,
+    password_hash: &str,
+) -> String {
     let exp = unix_now().saturating_add(ttl_secs);
-    let payload = format!("{user_id}.{exp}");
+    let pwd_v = session_password_version(password_hash);
+    let payload = format!("{user_id}.{exp}.{pwd_v}");
     let key = session_key(secret);
     let mac = blake3::keyed_hash(&key, payload.as_bytes());
     format!("{payload}.{}", hex::encode(&mac.as_bytes()[..16]))
 }
 
-/// Validates a signed session value; returns the user_id on success.
+/// Parsed session claims after MAC + expiry checks.
+#[derive(Debug, Clone)]
+pub struct SessionClaims {
+    pub user_id: String,
+    /// Password-hash fingerprint (`"0"` = unbound).
+    pub pwd_v: String,
+}
+
+/// Validates a signed session value; returns claims on success.
 /// Rejects tampered, malformed, or expired tokens (Bearer and cookie share
 /// this path so Max-Age alone is not load-bearing).
-pub fn verify_session(secret: &str, value: &str) -> Option<String> {
-    // Format: user_id.exp.sig — split from the right so user_id may contain
-    // dots in future without breaking parsing (today it is a ULID).
+///
+/// Does **not** check the password version against the database — call
+/// [`session_password_matches`] after loading the user when `pwd_v != "0"`.
+pub fn verify_session_claims(secret: &str, value: &str) -> Option<SessionClaims> {
+    // Format: user_id.exp.pwd_v.sig — split from the right so user_id may
+    // contain dots in future (today it is a ULID).
     let (payload, provided_sig) = value.rsplit_once('.')?;
-    let (user_id, exp_str) = payload.rsplit_once('.')?;
-    if user_id.is_empty() || provided_sig.is_empty() {
+    if provided_sig.is_empty() {
+        return None;
+    }
+    let key = session_key(secret);
+    let expected_sig = hex::encode(&blake3::keyed_hash(&key, payload.as_bytes()).as_bytes()[..16]);
+    if !constant_time_eq(provided_sig.as_bytes(), expected_sig.as_bytes()) {
+        return None;
+    }
+
+    // payload = user_id.exp.pwd_v (legacy user_id.exp fails the second split).
+    let (rest, pwd_v) = payload.rsplit_once('.')?;
+    let (user_id, exp_str) = rest.rsplit_once('.')?;
+    if user_id.is_empty() || pwd_v.is_empty() {
         return None;
     }
     let exp: u64 = exp_str.parse().ok()?;
     if unix_now() > exp {
         return None;
     }
-    let key = session_key(secret);
-    let expected_sig = hex::encode(&blake3::keyed_hash(&key, payload.as_bytes()).as_bytes()[..16]);
-    if constant_time_eq(provided_sig.as_bytes(), expected_sig.as_bytes()) {
-        Some(user_id.to_string())
-    } else {
-        None
-    }
+    Some(SessionClaims {
+        user_id: user_id.to_string(),
+        pwd_v: pwd_v.to_string(),
+    })
 }
 
-fn extract_session_cookie(secret: &str, req: &Request) -> bool {
-    CookieJar::from_headers(req.headers())
-        .get(SESSION_COOKIE)
-        .and_then(|c| verify_session(secret, c.value()))
-        .is_some()
+/// Validates a signed session value; returns the user_id on success.
+pub fn verify_session(secret: &str, value: &str) -> Option<String> {
+    verify_session_claims(secret, value).map(|c| c.user_id)
+}
+
+/// True when the token's password version still matches the stored hash.
+/// Unbound tokens (`pwd_v == "0"`) always match (tests / pre-bound tokens).
+pub fn session_password_matches(claims: &SessionClaims, password_hash: &str) -> bool {
+    if claims.pwd_v == "0" {
+        return true;
+    }
+    claims.pwd_v == session_password_version(password_hash)
 }
 
 fn bearer_token(req: &Request) -> Option<&str> {
@@ -115,13 +166,34 @@ fn bearer_token(req: &Request) -> Option<&str> {
         .and_then(|s| s.strip_prefix("Bearer "))
 }
 
+/// Load the user and confirm a password-bound session still matches.
+async fn session_still_valid(state: &AppState, claims: &SessionClaims) -> bool {
+    if claims.pwd_v == "0" {
+        return true;
+    }
+    let Ok(uid) = Ulid::from_string(&claims.user_id) else {
+        return false;
+    };
+    match state.meta.get_user(uid).await {
+        Ok(Some(user)) => session_password_matches(claims, &user.password_hash),
+        _ => false,
+    }
+}
+
 /// Dashboard middleware: redirects to /login if unauthenticated.
 pub async fn require_auth(
     State(state): State<Arc<AppState>>,
     req: Request,
     next: Next,
 ) -> Response {
-    if !extract_session_cookie(&state.config.auth.secret_key, &req) {
+    let secret = &state.config.auth.secret_key;
+    let Some(claims) = CookieJar::from_headers(req.headers())
+        .get(SESSION_COOKIE)
+        .and_then(|c| verify_session_claims(secret, c.value()))
+    else {
+        return Redirect::to("/login").into_response();
+    };
+    if !session_still_valid(&state, &claims).await {
         return Redirect::to("/login").into_response();
     }
     next.run(req).await
@@ -139,10 +211,14 @@ pub async fn require_api_auth(
 ) -> Response {
     let secret = &state.config.auth.secret_key;
 
-    // 1. Signed-session bearer (sync, cheap) — try first.
-    if let Some(uid) = bearer_token(&req).and_then(|t| verify_session(secret, t)) {
-        req.extensions_mut().insert(Principal::User(uid));
-        return next.run(req).await;
+    // 1. Signed-session bearer (sync MAC, async password-version check).
+    if let Some(token) = bearer_token(&req) {
+        if let Some(claims) = verify_session_claims(secret, token) {
+            if session_still_valid(&state, &claims).await {
+                req.extensions_mut().insert(Principal::User(claims.user_id));
+                return next.run(req).await;
+            }
+        }
     }
 
     // 2. Read-scoped API key. The `rk_` prefix is a cheap discriminator so
@@ -165,9 +241,14 @@ pub async fn require_api_auth(
     }
 
     // 3. Dashboard session cookie (same-origin fetch).
-    if extract_session_cookie(secret, &req) {
-        req.extensions_mut().insert(Principal::Session);
-        return next.run(req).await;
+    if let Some(claims) = CookieJar::from_headers(req.headers())
+        .get(SESSION_COOKIE)
+        .and_then(|c| verify_session_claims(secret, c.value()))
+    {
+        if session_still_valid(&state, &claims).await {
+            req.extensions_mut().insert(Principal::Session);
+            return next.run(req).await;
+        }
     }
 
     (
@@ -191,6 +272,14 @@ mod tests {
     }
 
     #[test]
+    fn session_bound_to_password_hash() {
+        let token = sign_session_bound("sekrit", "user1", 3600, "hash-v1");
+        let claims = verify_session_claims("sekrit", &token).expect("valid");
+        assert!(session_password_matches(&claims, "hash-v1"));
+        assert!(!session_password_matches(&claims, "hash-v2"));
+    }
+
+    #[test]
     fn session_rejects_wrong_secret() {
         let token = sign_session("sekrit", "user1", 3600);
         assert!(verify_session("other", &token).is_none());
@@ -207,7 +296,7 @@ mod tests {
     fn session_rejects_expired() {
         // Build an already-expired payload (exp 10s in the past).
         let exp = unix_now().saturating_sub(10);
-        let payload = format!("user1.{exp}");
+        let payload = format!("user1.{exp}.0");
         let key = session_key("sekrit");
         let mac = blake3::keyed_hash(&key, payload.as_bytes());
         let token = format!("{payload}.{}", hex::encode(&mac.as_bytes()[..16]));
@@ -220,6 +309,17 @@ mod tests {
         let key = session_key("sekrit");
         let mac = blake3::keyed_hash(&key, b"user1");
         let legacy = format!("user1.{}", hex::encode(&mac.as_bytes()[..16]));
+        assert!(verify_session("sekrit", &legacy).is_none());
+    }
+
+    #[test]
+    fn session_rejects_legacy_no_pwd_v_format() {
+        // Pre-bound format was user_id.exp.sig.
+        let exp = unix_now().saturating_add(3600);
+        let payload = format!("user1.{exp}");
+        let key = session_key("sekrit");
+        let mac = blake3::keyed_hash(&key, payload.as_bytes());
+        let legacy = format!("{payload}.{}", hex::encode(&mac.as_bytes()[..16]));
         assert!(verify_session("sekrit", &legacy).is_none());
     }
 }

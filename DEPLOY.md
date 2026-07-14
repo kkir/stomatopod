@@ -18,6 +18,28 @@ storage with `STOMATOPOD_STORAGE__ALLOW_EPHEMERAL=true`.
 
 **What to back up / snapshot:** the entire `data_dir` tree (`/app/data`).
 
+### Health probes
+
+| Path | Purpose |
+|------|---------|
+| `GET /health` | Liveness - process is accepting HTTP |
+| `GET /ready` | Readiness - meta store answers a cheap query |
+
+Example for Kubernetes or Coolify:
+
+```yaml
+livenessProbe:
+  httpGet: { path: /health, port: 8080 }
+readinessProbe:
+  httpGet: { path: /ready, port: 8080 }
+```
+
+### Retention
+
+Optional. Set `storage.retention_days` (or `STOMATOPOD_STORAGE__RETENTION_DAYS`)
+to drop events older than N days. `0` (default) keeps forever. The server prunes
+once at boot and then daily.
+
 ## docker compose (recommended for self-hosting)
 
 A ready-to-use [`docker-compose.yml`](./docker-compose.yml) ships in the repo with a
@@ -30,9 +52,8 @@ export STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)"
 docker compose up -d
 ```
 
-Self-hosted Stomatopod is a **single-owner appliance**: one organization and
-one admin user per instance (many sites under that org are fine). Multi-tenant
-SaaS mode is not supported yet.
+Stomatopod is a **single-owner appliance**: one organization and one admin user
+per instance (many sites under that org are fine).
 
 Redeploy to a new image without losing data:
 

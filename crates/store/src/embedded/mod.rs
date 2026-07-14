@@ -160,6 +160,13 @@ impl StorageBackend for EmbeddedBackend {
             .query_top_sparklines(site_id, field, range, limit, filters)
             .await
     }
+
+    async fn prune_events_before(
+        &self,
+        cutoff: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, StoreError> {
+        self.reader.prune_before(cutoff).await
+    }
 }
 
 // Forward MetaStore calls to the SQLite meta store
@@ -250,6 +257,10 @@ impl MetaStore for EmbeddedBackend {
         id: Ulid,
     ) -> Result<Option<stomatopod_core::domain::org::User>, StoreError> {
         self.meta.get_user(id).await
+    }
+
+    async fn update_user_password(&self, id: Ulid, password_hash: &str) -> Result<(), StoreError> {
+        self.meta.update_user_password(id, password_hash).await
     }
 
     async fn create_funnel(

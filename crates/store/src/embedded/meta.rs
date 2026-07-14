@@ -688,6 +688,23 @@ impl MetaStore for SqliteMeta {
         })
     }
 
+    async fn update_user_password(&self, id: Ulid, password_hash: &str) -> Result<(), StoreError> {
+        let id = id.to_string();
+        let password_hash = password_hash.to_string();
+        db!(self.conn, |conn: &Connection| {
+            let n = conn
+                .execute(
+                    "UPDATE users SET password_hash = ?1 WHERE id = ?2",
+                    params![password_hash, id],
+                )
+                .map_err(StoreError::db)?;
+            if n == 0 {
+                return Err(StoreError::NotFound);
+            }
+            Ok(())
+        })
+    }
+
     async fn create_funnel(&self, funnel: &Funnel) -> Result<(), StoreError> {
         let funnel = funnel.clone();
         db!(self.conn, |conn: &Connection| {

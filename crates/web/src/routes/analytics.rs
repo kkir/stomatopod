@@ -128,19 +128,34 @@ pub struct RangeParams {
 /// `axum_extra`'s `Query` so repeated `filter=` keys collect into a `Vec`.
 /// Supports preset ranges (`range=30d`), custom windows (`from`/`to`),
 /// dimension filters, and the period-comparison toggle.
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, utoipa::IntoParams, utoipa::ToSchema)]
+#[into_params(parameter_in = Query)]
 pub struct AnalyticsParams {
+    /// Preset window: `7d`, `30d` (default), `90d`, `12m`. Overridden when both `from` and `to` are set.
     pub range: Option<String>,
+    /// Custom range start (`YYYY-MM-DD`), inclusive. Requires `to`.
     pub from: Option<String>,
+    /// Custom range end (`YYYY-MM-DD`), inclusive. Requires `from`.
     pub to: Option<String>,
+    /// Period comparison: `1`, `true`, or `on` attaches a prior-window `comparison` object (where supported).
     pub compare: Option<String>,
+    /// Bucket size for timeseries (`hour`, `day`, `week`, `month`). Pageviews only.
     #[serde(default)]
+    #[param(value_type = String)]
+    #[schema(value_type = String)]
     pub granularity: Granularity,
+    /// Max rows for top-N endpoints (default 20 for JSON).
     pub limit: Option<u32>,
+    /// Repeatable dimension filter as `field:op:value` (e.g. `country:eq:US`).
+    /// Fields: url, referrer, country, region, browser, os, device_type, utm_*, event_name.
+    /// Ops: eq, not_eq, contains, starts_with. Malformed entries are ignored; max 10.
     #[serde(default)]
     pub filter: Vec<String>,
     /// `csv` triggers a CSV download; anything else (or absent) is JSON.
     pub format: Option<String>,
+    /// When `1`/`true`/`on`, attach per-row sparklines on JSON top-lists.
+    /// Omitted by default so CLI/API clients avoid the extra query.
+    pub spark: Option<String>,
 }
 
 impl AnalyticsParams {
@@ -160,44 +175,124 @@ impl AnalyticsParams {
     fn wants_csv(&self) -> bool {
         matches!(self.format.as_deref(), Some("csv"))
     }
+    fn wants_spark(&self) -> bool {
+        matches!(self.spark.as_deref(), Some("1") | Some("true") | Some("on"))
+    }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default, utoipa::IntoParams, utoipa::ToSchema)]
+#[into_params(parameter_in = Query)]
 pub struct EventsParams {
-    #[serde(default = "default_range")]
-    pub range: String,
+    /// Preset window; overridden when both `from` and `to` are set.
+    pub range: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
-    #[serde(default = "default_limit")]
-    pub limit: u32,
+    pub limit: Option<u32>,
+    /// Filter to a single custom event name.
     pub name: Option<String>,
+    /// Repeatable dimension filter (`field:op:value`). `event_name:eq:…`
+    /// is treated like `name=` when `name` is absent.
+    #[serde(default)]
+    pub filter: Vec<String>,
+    /// When `1`/`true`/`on`, attach per-row sparklines on JSON responses.
+    pub spark: Option<String>,
+}
+
+impl EventsParams {
+    fn wants_spark(&self) -> bool {
+        matches!(self.spark.as_deref(), Some("1") | Some("true") | Some("on"))
+    }
 }
 
 fn default_range() -> String {
     "30d".into()
 }
 
-fn default_limit() -> u32 {
-    20
+// ---- Response / OpenAPI schema types ----
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct SiteListItem {
+    pub id: String,
+    pub domain: String,
+    pub name: String,
+    /// IANA timezone (stored on the site; digests currently run in UTC).
+    pub timezone: String,
+    pub public_key: String,
+    pub created_at: String,
 }
 
-// ---- Response types ----
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct SitesResponse {
+    pub sites: Vec<SiteListItem>,
+}
 
-#[derive(Serialize)]
-struct SiteListItem {
-    id: String,
-    domain: String,
-    name: String,
-    /// IANA timezone (stored on the site; digests currently run in UTC).
-    timezone: String,
-    public_key: String,
-    created_at: String,
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct ErrorBody {
+    pub error: String,
+}
+
+/// OpenAPI mirror of pageviews JSON (runtime still serializes core types).
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct PageviewsResultSchema {
+    pub buckets: Vec<TimeBucketSchema>,
+    pub total_pageviews: u64,
+    pub total_sessions: u64,
+    pub bounce_rate: f64,
+    pub avg_duration_secs: f64,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct TimeBucketSchema {
+    pub ts: String,
+    pub pageviews: u64,
+    pub sessions: u64,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct TopListSchema {
+    pub rows: Vec<TopRowSchema>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct TopRowSchema {
+    pub value: String,
+    pub pageviews: u64,
+    pub sessions: u64,
+    pub pct: f64,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct FunnelStepSchema {
+    pub name: String,
+    pub event_name: String,
+    /// Property filters; empty array for none. Wire form may vary by client.
+    pub filters: Vec<serde_json::Value>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct FunnelSchema {
+    pub id: String,
+    pub site_id: String,
+    pub name: String,
+    /// JSON-serialized steps.
+    pub definition: String,
+    pub created_at: String,
 }
 
 // ---- Handlers ----
 
 /// GET /api/v1/sites  — list sites. For a read API key, scoped to its org
 /// (and its single site if site-bound); otherwise the default org.
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites",
+    tag = "analytics",
+    security(("read_key" = [])),
+    responses(
+        (status = 200, description = "Sites visible to the credential", body = SitesResponse),
+        (status = 401, description = "Unauthenticated")
+    )
+)]
 pub async fn list_sites(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -232,6 +327,21 @@ pub async fn list_sites(
 }
 
 /// GET /api/v1/sites/:site/pageviews
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/pageviews",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Pageview/session timeseries", body = PageviewsResultSchema),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn pageviews(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -299,6 +409,7 @@ async fn top_list_response(
         Err(resp) => return resp,
     };
     let range = params.range();
+    let filters = params.filters();
     // CSV export has no row cap; the JSON view keeps the dashboard's default.
     let limit = if params.wants_csv() {
         params.limit.unwrap_or(100_000)
@@ -307,7 +418,7 @@ async fn top_list_response(
     };
     match state
         .backend
-        .query_top_list(site_id, field, &range, limit, &params.filters())
+        .query_top_list(site_id, field, &range, limit, &filters)
         .await
     {
         Ok(result) => {
@@ -323,6 +434,36 @@ async fn top_list_response(
                     ));
                 }
                 csv_response(&format!("{}.csv", field_filename(field)), csv)
+            } else if params.wants_spark() {
+                // Opt-in sparklines for the dashboard Trend column.
+                // Failure is non-fatal: rows still return without `spark`.
+                let spark_by_value: std::collections::HashMap<String, Vec<f64>> = match state
+                    .backend
+                    .query_top_sparklines(site_id, field, &range, limit, &filters)
+                    .await
+                {
+                    Ok(s) => s
+                        .rows
+                        .into_iter()
+                        .map(|r| (r.value, r.points.into_iter().map(|p| p as f64).collect()))
+                        .collect(),
+                    Err(_) => std::collections::HashMap::new(),
+                };
+                let rows: Vec<serde_json::Value> = result
+                    .rows
+                    .into_iter()
+                    .map(|r| {
+                        let spark = spark_by_value.get(&r.value).cloned();
+                        serde_json::json!({
+                            "value": r.value,
+                            "pageviews": r.pageviews,
+                            "sessions": r.sessions,
+                            "pct": r.pct,
+                            "spark": spark,
+                        })
+                    })
+                    .collect();
+                Json(serde_json::json!({ "rows": rows })).into_response()
             } else {
                 Json(serde_json::to_value(result).unwrap()).into_response()
             }
@@ -332,6 +473,21 @@ async fn top_list_response(
 }
 
 /// GET /api/v1/sites/:site/top-pages
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/top-pages",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Top pages by traffic", body = TopListSchema),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn top_pages(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -342,6 +498,21 @@ pub async fn top_pages(
 }
 
 /// GET /api/v1/sites/:site/top-referrers
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/top-referrers",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Top referrers", body = TopListSchema),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn top_referrers(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -352,6 +523,21 @@ pub async fn top_referrers(
 }
 
 /// GET /api/v1/sites/:site/top-os
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/top-os",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Top operating systems", body = TopListSchema),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn top_os(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -362,6 +548,21 @@ pub async fn top_os(
 }
 
 /// GET /api/v1/sites/:site/top-regions
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/top-regions",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Top regions", body = TopListSchema),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn top_regions(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -372,6 +573,21 @@ pub async fn top_regions(
 }
 
 /// GET /api/v1/sites/:site/top-countries
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/top-countries",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Top countries", body = TopListSchema),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn top_countries(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -382,6 +598,21 @@ pub async fn top_countries(
 }
 
 /// GET /api/v1/sites/:site/top-browsers
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/top-browsers",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Top browsers", body = TopListSchema),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn top_browsers(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -392,6 +623,21 @@ pub async fn top_browsers(
 }
 
 /// GET /api/v1/sites/:site/top-devices
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/top-devices",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Top device types", body = TopListSchema),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn top_devices(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -402,34 +648,116 @@ pub async fn top_devices(
 }
 
 /// GET /api/v1/sites/:site/events
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/events",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        EventsParams
+    ),
+    responses(
+        (status = 200, description = "Custom event breakdown"),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn events(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
     Path(site): Path<String>,
-    Query(params): Query<EventsParams>,
+    FormQuery(params): FormQuery<EventsParams>,
 ) -> impl IntoResponse {
     let site_id = match resolve_authorized_site(&state, &principal, &site).await {
         Ok(id) => id,
         Err(resp) => return resp,
     };
+    let mut event_name = params.name.clone().filter(|s| !s.is_empty());
+    let mut filters = Vec::new();
+    for f in parse_filters(&params.filter) {
+        // Click-to-filter on the Events page emits event_name:eq:…; treat it
+        // as the dedicated name filter so the breakdown collapses to one row.
+        if event_name.is_none()
+            && f.field == stomatopod_core::query::pageviews::FilterField::EventName
+            && f.op == stomatopod_core::query::pageviews::FilterOp::Eq
+        {
+            event_name = Some(f.value);
+        } else {
+            filters.push(f);
+        }
+    }
+    let wants_spark = params.wants_spark();
     let q = EventQuery {
         site_id,
         range: resolve_range(
-            Some(&params.range),
+            params.range.as_deref(),
             params.from.as_deref(),
             params.to.as_deref(),
         ),
-        event_name: params.name,
-        filters: vec![],
-        limit: params.limit,
+        event_name,
+        filters,
+        limit: params.limit.unwrap_or(20),
     };
     match state.backend.query_custom_events(&q).await {
-        Ok(result) => Json(serde_json::to_value(result).unwrap()).into_response(),
+        Ok(result) => {
+            if !wants_spark {
+                return Json(serde_json::to_value(result).unwrap()).into_response();
+            }
+            // Opt-in sparklines for the Events dashboard Trend column.
+            let spark_by_value: std::collections::HashMap<String, Vec<f64>> = match state
+                .backend
+                .query_top_sparklines(
+                    site_id,
+                    TopListField::EventName,
+                    &q.range,
+                    q.limit,
+                    &q.filters,
+                )
+                .await
+            {
+                Ok(s) => s
+                    .rows
+                    .into_iter()
+                    .map(|r| (r.value, r.points.into_iter().map(|p| p as f64).collect()))
+                    .collect(),
+                Err(_) => std::collections::HashMap::new(),
+            };
+            let rows: Vec<serde_json::Value> = result
+                .rows
+                .into_iter()
+                .map(|r| {
+                    let spark = spark_by_value.get(&r.value).cloned();
+                    serde_json::json!({
+                        "value": r.value,
+                        "pageviews": r.pageviews,
+                        "sessions": r.sessions,
+                        "pct": r.pct,
+                        "spark": spark,
+                    })
+                })
+                .collect();
+            Json(serde_json::json!({ "rows": rows })).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
 /// GET /api/v1/sites/:site/funnels  — list funnels
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/funnels",
+    tag = "funnels",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain")
+    ),
+    responses(
+        (status = 200, description = "Funnels defined for the site"),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn list_funnels(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -447,15 +775,33 @@ pub async fn list_funnels(
 
 /// Body for `POST /api/v1/sites/:site/funnels`. Steps are a real JSON array
 /// (unlike the dashboard form, which posts them as a string field).
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct CreateFunnelBody {
     pub name: String,
+    /// Ordered steps (≥ 2). Schema uses [`FunnelStepSchema`]; runtime uses core `FunnelStep`.
+    #[schema(value_type = Vec<FunnelStepSchema>)]
     pub steps: Vec<FunnelStep>,
 }
 
 /// POST /api/v1/sites/:site/funnels  — create a funnel. Read API keys are
 /// permitted (same authorization as queries); the key must be in-org and, if
 /// site-bound, match the target site.
+#[utoipa::path(
+    post,
+    path = "/api/v1/sites/{site}/funnels",
+    tag = "funnels",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain")
+    ),
+    request_body = CreateFunnelBody,
+    responses(
+        (status = 201, description = "Funnel created", body = FunnelSchema),
+        (status = 400, description = "Invalid body", body = ErrorBody),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn create_funnel(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -501,7 +847,72 @@ pub async fn create_funnel(
     }
 }
 
+/// DELETE /api/v1/sites/:site/funnels/:funnel_id  — remove a funnel definition.
+/// Same auth as create: dashboard session or a read key in scope for the site.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/sites/{site}/funnels/{funnel_id}",
+    tag = "funnels",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        ("funnel_id" = String, Path, description = "Funnel ULID")
+    ),
+    responses(
+        (status = 204, description = "Funnel deleted"),
+        (status = 400, description = "Invalid funnel id", body = ErrorBody),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site or funnel", body = ErrorBody)
+    )
+)]
+pub async fn delete_funnel(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path((site, funnel_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let funnel_ulid = match Ulid::from_string(&funnel_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid funnel id"})),
+            )
+                .into_response()
+        }
+    };
+    match state.meta.get_funnel(funnel_ulid).await {
+        Ok(Some(f)) if f.site_id == site_id => {}
+        Ok(_) => return not_found(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+    match state.meta.delete_funnel(funnel_ulid).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 /// GET /api/v1/sites/:site/funnels/:funnel_id  — run a funnel query
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/funnels/{funnel_id}",
+    tag = "funnels",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        ("funnel_id" = String, Path, description = "Funnel ULID"),
+        ("range" = Option<String>, Query, description = "Preset range: 7d, 30d, 90d, 12m")
+    ),
+    responses(
+        (status = 200, description = "Funnel conversion result"),
+        (status = 400, description = "Invalid funnel id", body = ErrorBody),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site or funnel", body = ErrorBody)
+    )
+)]
 pub async fn funnel_result(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -596,12 +1007,28 @@ fn field_filename(field: TopListField) -> &'static str {
         TopListField::UtmCampaign => "utm-campaign",
         TopListField::UtmTerm => "utm-term",
         TopListField::UtmContent => "utm-content",
+        TopListField::EventName => "events",
     }
 }
 
 // ---- Entry / exit pages ----
 
 /// GET /api/v1/sites/:site/top-entry-pages
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/top-entry-pages",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Top entry (landing) pages"),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn top_entry_pages(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -645,6 +1072,21 @@ pub async fn top_entry_pages(
 }
 
 /// GET /api/v1/sites/:site/top-exit-pages
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/top-exit-pages",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Top exit pages"),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn top_exit_pages(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -889,6 +1331,21 @@ pub async fn delete_analytics_alert(
 const EXPORT_MAX_ROWS: u32 = 100_000;
 
 /// GET /api/v1/sites/:site/export/events
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/export/events",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Raw event rows (JSON) or CSV when format=csv"),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn export_events(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -936,6 +1393,21 @@ pub async fn export_events(
 }
 
 /// GET /api/v1/sites/:site/export/sessions
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/export/sessions",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Derived session rows (JSON) or CSV when format=csv"),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn export_sessions(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -988,6 +1460,22 @@ referrer,country_code,browser,os,device_type,utm_source,utm_medium,utm_campaign,
 
 /// GET /api/v1/sites/:site/campaigns — UTM breakdowns (source/medium/
 /// campaign/term/content) in a single response.
+/// GET /api/v1/sites/:site/campaigns — all UTM dimensions in one response.
+#[utoipa::path(
+    get,
+    path = "/api/v1/sites/{site}/campaigns",
+    tag = "analytics",
+    security(("read_key" = [])),
+    params(
+        ("site" = String, Path, description = "Site ULID or domain"),
+        AnalyticsParams
+    ),
+    responses(
+        (status = 200, description = "Object keyed by utm_source/medium/campaign/term/content"),
+        (status = 403, description = "Out of scope", body = ErrorBody),
+        (status = 404, description = "Unknown site", body = ErrorBody)
+    )
+)]
 pub async fn campaigns(
     State(state): State<Arc<AppState>>,
     Extension(principal): Extension<Principal>,
@@ -1015,6 +1503,102 @@ pub async fn campaigns(
         }
     }
     Json(serde_json::Value::Object(out)).into_response()
+}
+
+/// Query params for the single-dimension UTM breakdown used by `stoma query utm`.
+/// Fields are inlined (not flattened from `AnalyticsParams`) so `axum_extra`
+/// Query collection of repeated `filter=` keys works reliably.
+#[derive(Deserialize, Default)]
+pub struct UtmParams {
+    pub range: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub filter: Vec<String>,
+    /// One of: `source`, `medium`, `campaign`, `term`, `content`
+    /// (or full `utm_*` tokens).
+    pub dimension: Option<String>,
+    /// Restrict to a single utm_source value.
+    pub utm_source: Option<String>,
+    /// Restrict to a single utm_medium value.
+    pub utm_medium: Option<String>,
+}
+
+fn utm_field_from_dimension(dim: &str) -> Option<TopListField> {
+    match dim {
+        "source" | "utm_source" => Some(TopListField::UtmSource),
+        "medium" | "utm_medium" => Some(TopListField::UtmMedium),
+        "campaign" | "utm_campaign" => Some(TopListField::UtmCampaign),
+        "term" | "utm_term" => Some(TopListField::UtmTerm),
+        "content" | "utm_content" => Some(TopListField::UtmContent),
+        _ => None,
+    }
+}
+
+/// GET /api/v1/sites/:site/utm — single UTM dimension top-list.
+///
+/// Powers `stoma query utm`. Prefer `/campaigns` when you want every UTM
+/// dimension in one response.
+pub async fn utm(
+    State(state): State<Arc<AppState>>,
+    Extension(principal): Extension<Principal>,
+    Path(site): Path<String>,
+    FormQuery(params): FormQuery<UtmParams>,
+) -> impl IntoResponse {
+    let site_id = match resolve_authorized_site(&state, &principal, &site).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    let Some(dim) = params.dimension.as_deref().filter(|s| !s.is_empty()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "dimension is required (source|medium|campaign|term|content)"
+            })),
+        )
+            .into_response();
+    };
+    let Some(field) = utm_field_from_dimension(dim) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "unknown dimension; use source|medium|campaign|term|content"
+            })),
+        )
+            .into_response();
+    };
+    let mut filters = parse_filters(&params.filter);
+    if let Some(src) = params.utm_source.as_deref().filter(|s| !s.is_empty()) {
+        filters.push(Filter {
+            field: stomatopod_core::query::pageviews::FilterField::UtmSource,
+            op: stomatopod_core::query::pageviews::FilterOp::Eq,
+            value: src.to_string(),
+        });
+    }
+    if let Some(med) = params.utm_medium.as_deref().filter(|s| !s.is_empty()) {
+        filters.push(Filter {
+            field: stomatopod_core::query::pageviews::FilterField::UtmMedium,
+            op: stomatopod_core::query::pageviews::FilterOp::Eq,
+            value: med.to_string(),
+        });
+    }
+    // Cap again after appending the convenience filters.
+    filters.truncate(10);
+    let range = resolve_range(
+        params.range.as_deref(),
+        params.from.as_deref(),
+        params.to.as_deref(),
+    );
+    let limit = params.limit.unwrap_or(20);
+    match state
+        .backend
+        .query_top_list(site_id, field, &range, limit, &filters)
+        .await
+    {
+        Ok(tl) => Json(serde_json::to_value(tl).unwrap()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
 }
 
 // ---------------------------------------------------------------------------

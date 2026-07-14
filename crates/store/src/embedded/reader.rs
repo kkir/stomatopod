@@ -84,9 +84,112 @@ impl EmbeddedReader {
         Ok(self.registered.read().contains(site_id))
     }
 
+    /// Drop Hive `date=` partitions strictly older than `cutoff` and
+    /// re-register affected sites so DataFusion drops the deleted files.
+    /// Returns the number of partition directories removed.
+    pub async fn prune_before(
+        &self,
+        cutoff: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, StoreError> {
+        let cutoff_day = cutoff.date_naive();
+        if !self.data_dir.exists() {
+            return Ok(0);
+        }
+        let mut removed = 0u64;
+        let mut touched_sites: Vec<String> = Vec::new();
+        let mut sites = tokio::fs::read_dir(&self.data_dir)
+            .await
+            .map_err(StoreError::db)?;
+        while let Some(site_entry) = sites.next_entry().await.map_err(StoreError::db)? {
+            if !site_entry
+                .file_type()
+                .await
+                .map_err(StoreError::db)?
+                .is_dir()
+            {
+                continue;
+            }
+            let site_id = site_entry.file_name().to_string_lossy().to_string();
+            let site_dir = site_entry.path();
+            let mut parts = tokio::fs::read_dir(&site_dir)
+                .await
+                .map_err(StoreError::db)?;
+            let mut site_touched = false;
+            while let Some(part) = parts.next_entry().await.map_err(StoreError::db)? {
+                if !part.file_type().await.map_err(StoreError::db)?.is_dir() {
+                    continue;
+                }
+                let name = part.file_name().to_string_lossy().to_string();
+                let date_str = name.strip_prefix("date=").unwrap_or(&name);
+                let Ok(day) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") else {
+                    continue;
+                };
+                if day < cutoff_day {
+                    tokio::fs::remove_dir_all(part.path())
+                        .await
+                        .map_err(StoreError::db)?;
+                    removed += 1;
+                    site_touched = true;
+                }
+            }
+            if site_touched {
+                touched_sites.push(site_id);
+            }
+        }
+        // Re-register each site independently so one empty/failed site does
+        // not leave other pruned sites on a stale ListingTable view.
+        for site_id in touched_sites {
+            if let Err(e) = self.reregister_site(&site_id).await {
+                tracing::warn!(
+                    site_id = %site_id,
+                    error = %e,
+                    "re-register after prune failed; site left unregistered"
+                );
+            }
+        }
+        Ok(removed)
+    }
+
+    /// Drop and re-register a site's ListingTable after partition changes.
+    /// Empty post-prune dirs stay unregistered so queries return empty results
+    /// instead of infer_schema errors.
+    async fn reregister_site(&self, site_id: &str) -> Result<()> {
+        let name = table_name(site_id);
+        let _ = self.ctx.deregister_table(&name);
+        self.registered.write().remove(site_id);
+        self.register_site(site_id).await
+    }
+
+    /// True when `dir` contains at least one `.parquet` file (recursive).
+    async fn dir_has_parquet(dir: &std::path::Path) -> Result<bool> {
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(cur) = stack.pop() {
+            let mut entries = match tokio::fs::read_dir(&cur).await {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            while let Some(entry) = entries.next_entry().await? {
+                let ft = entry.file_type().await?;
+                if ft.is_dir() {
+                    stack.push(entry.path());
+                } else if ft.is_file()
+                    && entry.path().extension().and_then(|e| e.to_str()) == Some("parquet")
+                {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     async fn register_site(&self, site_id: &str) -> Result<()> {
         let site_dir = self.data_dir.join(site_id);
         if !site_dir.exists() {
+            return Ok(());
+        }
+        // No remaining partitions: leave the site unregistered. Callers that
+        // need a table treat "not registered" as empty results.
+        if !Self::dir_has_parquet(&site_dir).await? {
             return Ok(());
         }
         let site_dir = site_dir.canonicalize()?;
@@ -187,7 +290,80 @@ impl EmbeddedReader {
             }
         }
 
+        // Session-level bounce rate, average duration, and true unique
+        // session count over the full range (not per-bucket). A bounce is a
+        // session with exactly one pageview, matching entry-page bounce
+        // semantics. total_sessions uses this unique count so tiles agree.
+        if result.total_pageviews > 0 {
+            let (bounce_rate, avg_duration_secs, total_sessions) =
+                self.session_summary(&site_id, start, end, &filters).await?;
+            result.bounce_rate = bounce_rate;
+            result.avg_duration_secs = avg_duration_secs;
+            result.total_sessions = total_sessions;
+        }
+
         Ok(result)
+    }
+
+    /// Aggregate bounce rate, mean session duration, and unique session count.
+    async fn session_summary(
+        &self,
+        site_id: &str,
+        start: i64,
+        end: i64,
+        filters: &str,
+    ) -> Result<(f64, f64, u64), StoreError> {
+        let table = table_name(site_id);
+        // Duration uses epoch seconds so DataFusion can AVG without depending
+        // on interval arithmetic. Single-pageview sessions contribute 0s.
+        let sql = format!(
+            r#"
+            WITH sessions AS (
+                SELECT
+                    session_id,
+                    COUNT(*) AS pv_count,
+                    date_part('epoch', MIN("timestamp")) AS started_s,
+                    date_part('epoch', MAX("timestamp")) AS ended_s
+                FROM {table}
+                WHERE site_id = '{site_id}'
+                  AND "timestamp" >= to_timestamp_micros({start})
+                  AND "timestamp" <= to_timestamp_micros({end})
+                  AND CAST(kind AS VARCHAR) = 'pageview'
+                  {filters}
+                GROUP BY session_id
+            )
+            SELECT
+                CAST(COUNT(*) AS BIGINT) AS sessions,
+                CAST(SUM(CASE WHEN pv_count = 1 THEN 1 ELSE 0 END) AS BIGINT) AS bounces,
+                CAST(AVG(ended_s - started_s) AS DOUBLE) AS avg_duration_secs
+            FROM sessions
+            "#
+        );
+        let batches = self.run(&sql).await?;
+        let Some(batch) = batches.first() else {
+            return Ok((0.0, 0.0, 0));
+        };
+        let sessions = i64_col(batch, "sessions")
+            .map(|c| c.value(0) as u64)
+            .unwrap_or(0);
+        let bounces = i64_col(batch, "bounces")
+            .map(|c| c.value(0) as u64)
+            .unwrap_or(0);
+        let avg_duration = f64_col(batch, "avg_duration_secs")
+            .map(|c| {
+                if c.is_valid(0) {
+                    c.value(0).max(0.0)
+                } else {
+                    0.0
+                }
+            })
+            .unwrap_or(0.0);
+        let bounce_rate = if sessions > 0 {
+            bounces as f64 / sessions as f64 * 100.0
+        } else {
+            0.0
+        };
+        Ok((bounce_rate, avg_duration, sessions))
     }
 
     pub async fn query_top_list(
@@ -262,6 +438,7 @@ impl EmbeddedReader {
             .as_deref()
             .map(|n| format!("AND name = '{}'", n.replace('\'', "''")))
             .unwrap_or_default();
+        let filters = datafusion_filter_clause(&q.filters);
 
         let sql = format!(
             r#"
@@ -275,6 +452,7 @@ impl EmbeddedReader {
               AND "timestamp" <= to_timestamp_micros({end})
               AND kind = 'custom'
               {name_filter}
+              {filters}
             GROUP BY 1
             ORDER BY pageviews DESC
             LIMIT {}
@@ -683,17 +861,19 @@ impl EmbeddedReader {
         let start = range.start.timestamp_micros();
         let end = range.end.timestamp_micros();
         let col = field.column();
+        let kind = field.event_kind();
+        let null_label = field.null_label();
         let filter_sql = datafusion_filter_clause(filters);
         let sql = format!(
             r#"
-            SELECT COALESCE(CAST({col} AS VARCHAR), 'Direct / None') AS value,
+            SELECT COALESCE(CAST({col} AS VARCHAR), '{null_label}') AS value,
                    date_trunc('day', "timestamp") AS bucket,
                    CAST(COUNT(*) AS BIGINT) AS c
             FROM {table}
             WHERE site_id = '{site}'
               AND "timestamp" >= to_timestamp_micros({start})
               AND "timestamp" <= to_timestamp_micros({end})
-              AND kind = 'pageview'
+              AND kind = '{kind}'
               {filter_sql}
             GROUP BY 1, 2
             "#
@@ -806,6 +986,11 @@ fn str_col<'a>(b: &'a RecordBatch, name: &str) -> Option<&'a StringArray> {
 fn i64_col<'a>(b: &'a RecordBatch, name: &str) -> Option<&'a Int64Array> {
     b.column_by_name(name)
         .and_then(|c| c.as_any().downcast_ref::<Int64Array>())
+}
+
+fn f64_col<'a>(b: &'a RecordBatch, name: &str) -> Option<&'a arrow::array::Float64Array> {
+    b.column_by_name(name)
+        .and_then(|c| c.as_any().downcast_ref::<arrow::array::Float64Array>())
 }
 
 fn fixedbin_col<'a>(b: &'a RecordBatch, name: &str) -> Option<&'a FixedSizeBinaryArray> {

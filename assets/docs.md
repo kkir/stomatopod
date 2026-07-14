@@ -3,12 +3,15 @@
 Stomatopod is a privacy-friendly, cookieless web analytics product. It ingests
 pageviews and custom events, and exposes analytics over a JSON API and a CLI.
 
-This document is the canonical usage guide. It is published in two forms:
+This document is the canonical usage guide. It is published in three forms:
 
 - **Humans:** rendered at `/docs` in the dashboard.
 - **Machines / LLM agents:** served as Markdown at `/llms.txt`.
+- **Typed clients / codegen:** OpenAPI 3 at `/openapi.json` (derived from the Rust API types).
 
-Both are generated from the same source, so they never drift.
+The human and Markdown forms share this source. The OpenAPI document is generated
+from the same handlers and request types so path and schema details stay aligned
+with the running server.
 
 ## Concepts
 
@@ -87,15 +90,38 @@ Common query parameters:
 - `limit` — max rows for top-N endpoints (default `20`).
 - `:site` — a site ULID **or** its domain.
 
+Common filters (repeatable `filter=field:op:value`): fields `url`, `referrer`,
+`country`, `region`, `browser`, `os`, `device_type`, `utm_source`, `utm_medium`,
+`utm_campaign`, `utm_term`, `utm_content`, `event_name`; ops `eq`, `not_eq`,
+`contains`, `starts_with`. Custom windows: `from`/`to` as `YYYY-MM-DD`.
+
 | Method & path                                  | Returns                              |
 |------------------------------------------------|--------------------------------------|
 | `GET /api/v1/sites`                            | Sites visible to the key.            |
 | `GET /api/v1/sites/:site/pageviews`            | Pageview/session timeseries.         |
 | `GET /api/v1/sites/:site/top-pages`            | Top pages by traffic.                |
 | `GET /api/v1/sites/:site/top-referrers`        | Top referrers.                       |
+| `GET /api/v1/sites/:site/top-os`               | Top operating systems.               |
+| `GET /api/v1/sites/:site/top-regions`          | Top regions.                         |
+| `GET /api/v1/sites/:site/top-countries`        | Top countries.                       |
+| `GET /api/v1/sites/:site/top-browsers`         | Top browsers.                        |
+| `GET /api/v1/sites/:site/top-devices`          | Top device types.                    |
+| `GET /api/v1/sites/:site/top-entry-pages`      | Top entry (landing) pages.           |
+| `GET /api/v1/sites/:site/top-exit-pages`       | Top exit pages.                      |
 | `GET /api/v1/sites/:site/events`               | Custom event breakdown (`name=`).    |
+| `GET /api/v1/sites/:site/campaigns`            | UTM campaign breakdown.              |
+| `GET /api/v1/sites/:site/export/events`        | Export events.                       |
+| `GET /api/v1/sites/:site/export/sessions`      | Export sessions.                     |
 | `GET /api/v1/sites/:site/funnels`              | Funnels defined for the site.        |
 | `GET /api/v1/sites/:site/funnels/:funnel_id`   | Funnel conversion result.            |
+| `DELETE /api/v1/sites/:site/funnels/:funnel_id`| Delete a funnel definition.          |
+| `GET /api/v1/sites/:site/utm`                  | Single UTM dimension top-list (`dimension=source|medium|campaign|term|content`). |
+| `GET /api/v1/sites/:site/analytics-alerts`     | List analytics alerts for the site.  |
+| `POST /api/v1/sites/:site/analytics-alerts`    | Create an analytics alert (session). |
+| `GET /health`                                  | Liveness probe (public).             |
+| `GET /ready`                                   | Readiness probe (public).            |
+| `GET /openapi.json`                            | OpenAPI 3 contract (public).         |
+| `POST /api/v1/me/password`                     | Change owner password (session).     |
 
 Example:
 
@@ -243,9 +269,35 @@ curl -X POST https://your-host/api/v1/sites/example.com/funnels \
 
 ## CLI
 
-The `spq` binary wraps the read API and is designed for LLM-agent use — it
+The `stoma` binary wraps the read API and is designed for LLM-agent use — it
 emits JSON by default (`--human` for a table). It is a separate binary from the
 `stomatopod` server.
+
+### Install
+
+Install with [`cargo binstall`](https://github.com/cargo-bins/cargo-binstall)
+(prebuilt binary when a matching GitHub release exists; otherwise compiles from
+source):
+
+```bash
+# one-time: install cargo-binstall
+curl -L --proto '=https' --tlsv1.2 -sSf \
+  https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+
+# install the stoma binary into ~/.cargo/bin
+cargo binstall --git https://github.com/kkir/stomatopod stomatopod-cli
+```
+
+Private repo: log in with `gh`, or set `GITHUB_TOKEN` / `GH_TOKEN`.
+
+From a monorepo checkout:
+
+```bash
+cargo binstall --manifest-path bin/stoma --locked stomatopod-cli
+# equivalent: cargo install --path bin/stoma
+```
+
+### Credentials
 
 Set the credential once:
 
@@ -254,17 +306,25 @@ export STOMATOPOD_TOKEN=rk_xxxxxxxx       # a read API key
 export STOMATOPOD_SERVER=https://your-host  # defaults to http://localhost:8080
 ```
 
-Commands:
+### Commands
 
 ```bash
-spq sites
-spq query pageviews     --site <id|domain> [--range 30d] [--granularity day]
-spq query top-pages     --site <id|domain> [--range 30d] [--limit 20]
-spq query top-referrers --site <id|domain> [--range 30d] [--limit 20]
-spq query events        --site <id|domain> [--name signup] [--range 30d]
-spq query funnels       --site <id|domain>
-spq query funnel        --site <id|domain> --funnel <funnel_id> [--range 30d]
-spq query funnel-create --site <id|domain> --name <name> --steps '<json-array>'
+stoma sites
+stoma query pageviews       --site <id|domain> [--range 30d] [--granularity day]
+stoma query top-pages       --site <id|domain> [--range 30d] [--limit 20]
+stoma query top-referrers   --site <id|domain> [--range 30d] [--limit 20]
+stoma query top-countries   --site <id|domain>
+stoma query top-browsers    --site <id|domain>
+stoma query top-devices     --site <id|domain>
+stoma query top-os          --site <id|domain>
+stoma query top-regions     --site <id|domain>
+stoma query events          --site <id|domain> [--name signup] [--range 30d]
+stoma query campaigns       --site <id|domain>
+stoma query export-events   --site <id|domain> [--limit 1000]
+stoma query export-sessions --site <id|domain> [--limit 1000]
+stoma query funnels         --site <id|domain>
+stoma query funnel          --site <id|domain> --funnel <funnel_id> [--range 30d]
+stoma query funnel-create   --site <id|domain> --name <name> --steps '<json-array>'
 ```
 
 `funnel-create` is the one write command available to **read API keys**: it
@@ -272,25 +332,35 @@ posts a new funnel and prints the created record (with its `id`) as JSON.
 `--steps` is a JSON array of step objects with at least two entries.
 
 ```bash
-spq query funnel-create --site example.com --name "Signup flow" \
+stoma query funnel-create --site example.com --name "Signup flow" \
   --steps '[{"name":"Landing","event_name":"pageview","filters":[]},
             {"name":"Signup","event_name":"signup","filters":[]}]'
 ```
 
-Run `spq describe` for a machine-readable JSON manifest of every command and
-argument — useful for wiring `spq` into an LLM agent or MCP server.
+Run `stoma describe` for a machine-readable JSON manifest of every command and
+argument — useful for wiring `stoma` into an LLM agent or MCP server.
 
-### Claude Code skill
+### Agent skill
 
-Install the bundled Claude Code skill globally so `spq` commands are available
-in any project session:
+Install the bundled `stoma-analytics` skill globally so coding agents that support
+`SKILL.md` can run `stoma` in any project session. By default this writes into the
+common skill directories used by Claude Code, Grok, Cursor, and the generic
+Agent Skills path:
 
 ```bash
-spq skills install          # installs to ~/.claude/skills/spq-analytics/
-spq skills install --force  # overwrite an existing installation
+stoma skills install                     # all known providers
+stoma skills install --force             # overwrite existing installs
+stoma skills install --provider claude   # one provider: claude|grok|cursor|agents
 ```
 
-Claude Code picks up the skill on next session start.
+| Provider | Install path |
+|----------|----------------|
+| `claude` | `~/.claude/skills/stoma-analytics/` |
+| `grok`   | `~/.grok/skills/stoma-analytics/` |
+| `cursor` | `~/.cursor/skills/stoma-analytics/` |
+| `agents` | `~/.agents/skills/stoma-analytics/` |
+
+Restart the agent session so it reloads skills.
 
 ## For LLM agents
 
@@ -302,7 +372,7 @@ To analyze a site's traffic:
    that match the question (`7d` for recent trends, `12m` for year-over-year).
 4. Custom events are queried via `…/events?name=<event>`; emit them via the
    ingest endpoint with an ingest key.
-5. To define a new funnel, `POST …/funnels` (or `spq query funnel-create`) with
+5. To define a new funnel, `POST …/funnels` (or `stoma query funnel-create`) with
    a read key — list its results afterward via the funnel endpoints.
 
 All responses are JSON; errors use standard HTTP status codes (`401`

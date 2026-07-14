@@ -3,6 +3,7 @@ use dioxus::prelude::*;
 use crate::ui::api::origin;
 use crate::ui::components::card::Card;
 use crate::ui::docs_anchors::{docs_href, INSTALLING_THE_BROWSER_TRACKER};
+use crate::ui::pages::BTN_GHOST;
 
 /// The tracker install card shown on a site's overview: the one-line script
 /// snippet (pre-filled with this site's public key and this dashboard's
@@ -27,6 +28,7 @@ pub fn InstallCard(public_key: String, domain: String, prominent: bool) -> Eleme
     } else {
         "Install the tracker"
     };
+    let copied = use_signal(|| false);
 
     rsx! {
         Card { title: title.to_string(),
@@ -52,7 +54,29 @@ pub fn InstallCard(public_key: String, domain: String, prominent: bool) -> Eleme
                 }
             }
 
-            div { class: "flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-1 text-[12px]",
+            div { class: "flex flex-wrap items-center gap-x-4 gap-y-2 text-muted-1 text-[12px]",
+                button {
+                    r#type: "button",
+                    class: BTN_GHOST,
+                    onclick: {
+                        let snippet = snippet.clone();
+                        move |_| {
+                            let snippet = snippet.clone();
+                            let mut copied = copied;
+                            spawn(async move {
+                                if copy_text(&snippet).await {
+                                    copied.set(true);
+                                    #[cfg(target_arch = "wasm32")]
+                                    {
+                                        gloo_timers::future::TimeoutFuture::new(2000).await;
+                                        copied.set(false);
+                                    }
+                                }
+                            });
+                        }
+                    },
+                    if copied() { "Copied" } else { "Copy snippet" }
+                }
                 span {
                     "data-site is your public key (safe to expose). Events post to the same host as the script."
                 }
@@ -63,5 +87,23 @@ pub fn InstallCard(public_key: String, domain: String, prominent: bool) -> Eleme
                 }
             }
         }
+    }
+}
+
+/// Best-effort clipboard write. No-ops on SSR / native.
+async fn copy_text(text: &str) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(window) = web_sys::window() else {
+            return false;
+        };
+        let clipboard = window.navigator().clipboard();
+        let promise = clipboard.write_text(text);
+        wasm_bindgen_futures::JsFuture::from(promise).await.is_ok()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = text;
+        false
     }
 }
