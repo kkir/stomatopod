@@ -46,8 +46,10 @@ impl stomatopod_web::digest::DigestNotifier for CapturingNotifier {
 /// How the test harness drains (or holds) the ingest channel.
 enum IngestDrain {
     /// Background [`run_batcher`] task.
+    #[allow(dead_code)]
     Batcher(tokio::task::JoinHandle<()>),
     /// Keep the receiver alive without reading (fills up for back-pressure).
+    #[allow(dead_code)]
     Hold(tokio::sync::mpsc::Receiver<stomatopod_core::domain::event::Event>),
     /// Receiver already dropped (channel closed → 503).
     Closed,
@@ -3408,10 +3410,6 @@ async fn events_api_filters_by_event_name_after_key_ingest() {
 async fn bootstrap_self_hosted_creates_admin_and_is_idempotent() {
     use stomatopod_core::config::Config;
     use stomatopod_web::server::bootstrap_self_hosted;
-
-    // Serialize env mutation across concurrent tests.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = ENV_LOCK.lock().unwrap();
 
     let dir = tempfile::tempdir().unwrap();
     let cfg_emb = EmbeddedConfig {
