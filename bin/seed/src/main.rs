@@ -273,33 +273,34 @@ fn plan_events(days: u32, target_pageviews: u32, rng: &mut impl Rng) -> Vec<Plan
     let total_w: f64 = day_weights.iter().map(|(_, w)| w).sum();
     let visitor_pool = (target_pageviews / 15).max(40) as usize;
 
+    // Plan multi-page visits with short gaps so avg session duration stays in
+    // a realistic minutes range (not hours/days). Cookieless sessions key on
+    // IP+UA+event-day, so each visit uses a distinct (ip, ua) and keeps all
+    // pageviews within a few minutes of each other.
     let mut events = Vec::new();
     for (day_idx, (day, weight)) in day_weights.iter().enumerate() {
-        let n = ((target_pageviews as f64) * (weight / total_w))
+        let day_target = ((target_pageviews as f64) * (weight / total_w))
             .round()
             .max(1.0) as usize;
-        let visitors_today = ((n as f64) * rng.gen_range(0.35..0.55)).round().max(5.0) as usize;
-        let visitors_today = visitors_today.min(visitor_pool);
-        let mut visitor_ids: Vec<usize> = (0..visitor_pool).collect();
-        visitor_ids.shuffle(rng);
-        visitor_ids.truncate(visitors_today);
-
-        for _ in 0..n {
-            let vid = visitor_ids[rng.gen_range(0..visitor_ids.len())];
-            let session_tag = format!("v{vid}-d{day_idx}");
+        let mut day_pv = 0usize;
+        let mut visit_n = 0usize;
+        while day_pv < day_target {
+            // Unique visitor identity per visit so same-day journeys do not
+            // merge into a day-long mega-session (which would inflate avg duration).
+            let vid = (day_idx * 10_000 + visit_n) % visitor_pool.max(1);
+            visit_n += 1;
+            let session_tag = format!("v{vid}-d{day_idx}-s{visit_n}");
             let ua = weighted_pick(USER_AGENTS, rng).to_string();
             let base_ip = SAMPLE_IPS[vid % SAMPLE_IPS.len()];
             let mut parts: Vec<&str> = base_ip.split('.').collect();
-            let last = format!("{}", (vid * 7 + day_idx) % 250);
-            // Keep owned last octet alive for format
-            let last_owned = last;
+            // Encode visit into the last octet so IP+UA+day stays unique per visit.
+            let last_owned = format!("{}", (visit_n.wrapping_mul(17) + day_idx * 3) % 250);
             parts[3] = &last_owned;
             let ip = parts.join(".");
+            let (width, height) = screen_for_ua(&ua, rng);
+            let language = LANGUAGES[rng.gen_range(0..LANGUAGES.len())].to_string();
 
-            let path = *weighted_pick(PAGES, rng);
-            let referrer = weighted_pick(REFERRERS, rng).map(|s| s.to_string());
-
-            // Roughly business-hours UTC: average of uniforms centered near 17:00.
+            // Visit start: business-hours-ish UTC, then pageviews every 20-180s.
             let hour = {
                 let s: f64 = (0..6).map(|_| rng.gen::<f64>()).sum::<f64>() / 6.0;
                 ((s - 0.5) * 12.0 + 17.0).round().clamp(0.0, 23.0) as u32
@@ -315,49 +316,73 @@ fn plan_events(days: u32, target_pageviews: u32, rng: &mut impl Rng) -> Vec<Plan
                 ts = now - Duration::minutes(rng.gen_range(1..90));
             }
 
-            let mut url = format!("https://demo.localhost{path}");
-            if rng.gen::<f64>() < 0.18 && matches!(path, "/" | "/pricing" | "/signup") {
-                let (src, med, camp) = UTM_CAMPAIGNS[rng.gen_range(0..UTM_CAMPAIGNS.len())];
-                url = format!(
-                    "{url}?utm_source={src}&utm_medium={med}&utm_campaign={camp}&utm_content=hero"
-                );
-            }
+            // 1-5 pages; weight toward short visits so bounce rate stays realistic.
+            let pages_in_visit = [1usize, 1, 1, 2, 2, 3, 3, 4, 5]
+                .choose(rng)
+                .copied()
+                .unwrap_or(1);
+            let pages_in_visit = pages_in_visit.min(day_target - day_pv).max(1);
+            let entry_referrer = weighted_pick(REFERRERS, rng).map(|s| s.to_string());
 
-            let (width, height) = screen_for_ua(&ua, rng);
-            let language = LANGUAGES[rng.gen_range(0..LANGUAGES.len())].to_string();
-            let ts_ms = ts.timestamp_millis();
+            for step in 0..pages_in_visit {
+                if step > 0 {
+                    ts += Duration::seconds(rng.gen_range(20..180));
+                    if ts > now {
+                        ts = now - Duration::seconds(rng.gen_range(1..30));
+                    }
+                }
+                let path = *weighted_pick(PAGES, rng);
+                let mut url = format!("https://demo.localhost{path}");
+                if step == 0
+                    && rng.gen::<f64>() < 0.18
+                    && matches!(path, "/" | "/pricing" | "/signup")
+                {
+                    let (src, med, camp) = UTM_CAMPAIGNS[rng.gen_range(0..UTM_CAMPAIGNS.len())];
+                    url = format!(
+                        "{url}?utm_source={src}&utm_medium={med}&utm_campaign={camp}&utm_content=hero"
+                    );
+                }
+                // Internal navigations have no external referrer after the entry hit.
+                let referrer = if step == 0 {
+                    entry_referrer.clone()
+                } else {
+                    None
+                };
+                let ts_ms = ts.timestamp_millis();
 
-            events.push(PlannedEvent {
-                kind: EventKind::Pageview,
-                name: "pageview".into(),
-                url: url.clone(),
-                referrer: referrer.clone(),
-                ts_ms,
-                ua: ua.clone(),
-                ip: ip.clone(),
-                session_tag: session_tag.clone(),
-                width,
-                height,
-                language: language.clone(),
-                properties: None,
-            });
+                events.push(PlannedEvent {
+                    kind: EventKind::Pageview,
+                    name: "pageview".into(),
+                    url: url.clone(),
+                    referrer: referrer.clone(),
+                    ts_ms,
+                    ua: ua.clone(),
+                    ip: ip.clone(),
+                    session_tag: session_tag.clone(),
+                    width,
+                    height,
+                    language: language.clone(),
+                    properties: None,
+                });
+                day_pv += 1;
 
-            for &(ev_name, rate) in CUSTOM_EVENTS {
-                if rng.gen::<f64>() < rate {
-                    events.push(PlannedEvent {
-                        kind: EventKind::Custom,
-                        name: ev_name.into(),
-                        url: url.clone(),
-                        referrer: referrer.clone(),
-                        ts_ms: ts_ms + rng.gen_range(500..15_000),
-                        ua: ua.clone(),
-                        ip: ip.clone(),
-                        session_tag: session_tag.clone(),
-                        width,
-                        height,
-                        language: language.clone(),
-                        properties: Some(json!({"seed": true, "path": path})),
-                    });
+                for &(ev_name, rate) in CUSTOM_EVENTS {
+                    if rng.gen::<f64>() < rate {
+                        events.push(PlannedEvent {
+                            kind: EventKind::Custom,
+                            name: ev_name.into(),
+                            url: url.clone(),
+                            referrer: referrer.clone(),
+                            ts_ms: ts_ms + rng.gen_range(500..15_000),
+                            ua: ua.clone(),
+                            ip: ip.clone(),
+                            session_tag: session_tag.clone(),
+                            width,
+                            height,
+                            language: language.clone(),
+                            properties: Some(json!({"seed": true, "path": path})),
+                        });
+                    }
                 }
             }
         }
