@@ -742,6 +742,71 @@ async fn pageviews_report_bounce_rate_and_avg_duration() {
     );
 }
 
+/// Regression: if many days of pageviews incorrectly share one session_id
+/// (the old ingest used receive-day, not event-day), avg duration balloons
+/// to multi-day spans. Distinct per-day sessions keep duration local.
+#[tokio::test]
+async fn avg_duration_does_not_span_days_when_sessions_are_per_day() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = EmbeddedBackend::open(&cfg_bulk(&dir)).await.unwrap();
+    let site_id = Ulid::new();
+    let now = Utc::now();
+    let day0 = now - chrono::Duration::days(3);
+    let day1 = now - chrono::Duration::days(2);
+    let day2 = now - chrono::Duration::days(1);
+
+    // Three days, each a 30s two-pageview session with its own session_id.
+    let mut events = Vec::new();
+    for (i, start) in [day0, day1, day2].into_iter().enumerate() {
+        let mut a = mk(
+            site_id,
+            (i + 1) as u8,
+            "/home",
+            EventKind::Pageview,
+            "pageview",
+            start,
+            None,
+        );
+        a.session_id = [i as u8 + 1; 16];
+        let mut b = mk(
+            site_id,
+            (i + 1) as u8,
+            "/pricing",
+            EventKind::Pageview,
+            "pageview",
+            start + chrono::Duration::seconds(30),
+            None,
+        );
+        b.session_id = [i as u8 + 1; 16];
+        events.push(a);
+        events.push(b);
+    }
+    backend.ingest_events(events).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let range = TimeRange {
+        start: now - chrono::Duration::days(7),
+        end: now + chrono::Duration::hours(1),
+    };
+    let pv = backend
+        .query_pageviews(&PageviewsQuery {
+            site_id,
+            range,
+            granularity: Granularity::Day,
+            filters: vec![],
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(pv.total_pageviews, 6);
+    assert_eq!(pv.total_sessions, 3);
+    assert!(
+        (pv.avg_duration_secs - 30.0).abs() < 0.5,
+        "per-day sessions should avg ~30s, got {} (would be ~1-2 days if collapsed)",
+        pv.avg_duration_secs
+    );
+}
+
 #[tokio::test]
 async fn entry_pages_report_counts_sessions_and_bounces() {
     let dir = tempfile::tempdir().unwrap();

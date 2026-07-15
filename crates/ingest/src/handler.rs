@@ -16,7 +16,7 @@ use stomatopod_core::{
 
 use crate::{
     geo::{anonymize_ip, extract_ip, GeoLookup},
-    session::{current_utc_day, derive_session_id},
+    session::{derive_session_id, utc_day},
     ua,
 };
 
@@ -93,33 +93,35 @@ pub async fn handle_ingest_inner(
         return StatusCode::NO_CONTENT;
     }
 
-    // 4. Session ID (cookieless, resets at UTC midnight)
-    let session_id = derive_session_id(
-        site_id.to_bytes().as_ref(),
-        ip_anon.as_bytes(),
-        ua_str.as_bytes(),
-        current_utc_day(),
-    );
-
-    // 5. Geo lookup (non-blocking; MaxMind MMDB is memory-mapped)
-    let geo = ctx.geo.lookup(&raw_ip);
-
-    // 6. Parse UTM params from URL
-    let utms = extract_utm(&payload.u);
-
-    // 7. Determine event kind
-    let kind = if payload.n == "pageview" {
-        EventKind::Pageview
-    } else {
-        EventKind::Custom
-    };
-
-    // 8. Timestamp
+    // 4. Timestamp first so session day matches the event time. Using receive
+    // time (current_utc_day) collapses backdated beacons - e.g. seed history
+    // or delayed sendBeacon - into one mega-session and inflates avg duration.
     let timestamp = payload
         .t
         .and_then(chrono::DateTime::from_timestamp_millis)
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_else(Utc::now);
+
+    // 5. Session ID (cookieless, resets at UTC midnight of the event day)
+    let session_id = derive_session_id(
+        site_id.to_bytes().as_ref(),
+        ip_anon.as_bytes(),
+        ua_str.as_bytes(),
+        utc_day(timestamp),
+    );
+
+    // 6. Geo lookup (non-blocking; MaxMind MMDB is memory-mapped)
+    let geo = ctx.geo.lookup(&raw_ip);
+
+    // 7. Parse UTM params from URL
+    let utms = extract_utm(&payload.u);
+
+    // 8. Determine event kind
+    let kind = if payload.n == "pageview" {
+        EventKind::Pageview
+    } else {
+        EventKind::Custom
+    };
 
     let event = Event {
         id: Ulid::new(),
