@@ -1,0 +1,9 @@
+[application]
+# Compile the Tailwind v4 source (imports shared theme + sources this crate and
+# stomatopod-ui) into the asset that `App` links via `asset!("/assets/tailwind.css")`.
+tailwind_input = "tailwind.css"
+tailwind_output = "assets/tailwind.css"
+
+[web.app]
+title = "Stomatopod"
+# Root / custom-domain ready: no base_path (GitHub Pages at site root).

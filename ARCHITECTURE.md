@@ -20,6 +20,10 @@ stomatopod-core              domain, traits, query DTOs, errors, config
                      └─ stomatopod-api    axum REST, auth middleware, state, digest, openapi
                             │
                             └─ stomatopod-web   Dioxus dashboard + `stomatopod` serve binary
+                                   │
+                                   └─ stomatopod-ui   shared components + theme CSS
+                                          ▲
+stomatopod-www  (SSG marketing / GitHub Pages) ──┘
 
 bin/stoma, bin/seed          CLI and demo seeder
 ```
@@ -31,7 +35,9 @@ bin/stoma, bin/seed          CLI and demo seeder
 | `stomatopod-ingest` | Browser/server event ingest pipeline |
 | `stomatopod-alerts` | Analytics alert evaluation and delivery |
 | `stomatopod-api` | HTTP API and appliance auth (no Dioxus) |
+| `stomatopod-ui` | Shared presentational Dioxus components and brand CSS |
 | `stomatopod-web` | Dashboard UI and process wiring |
+| `stomatopod-www` | Static marketing site (Dioxus SSG) |
 
 ## Trait boundary
 

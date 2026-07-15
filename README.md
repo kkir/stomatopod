@@ -93,6 +93,22 @@ at it with `DIOXUS_PUBLIC_PATH`. For production/CI, `mise run ui:bundle`
 containing the `server` binary next to its `public/` bundle; the Docker build
 copies both.
 
+## Marketing site (Dioxus SSG)
+
+The public marketing site lives in [`crates/www`](./crates/www) and shares brand
+tokens and presentational components with the dashboard via
+[`crates/ui`](./crates/ui) (`stomatopod-ui`). It is pre-rendered with Dioxus SSG
+and deployed to **GitHub Pages** (site root / custom-domain ready).
+
+```bash
+mise run www:serve     # local dev with hot reload
+mise run www:bundle    # release SSG (dx build --ssg) → target/dx/stomatopod-www/release/web/public
+```
+
+CI deploys on push to `main` when `crates/www` or `crates/ui` change
+(`.github/workflows/pages.yml`). Enable Pages with **Source: GitHub Actions**
+in the repository settings.
+
 ## Workspace crates
 
 | Crate | Path | Role |
@@ -102,7 +118,9 @@ copies both.
 | `stomatopod-ingest` | `crates/ingest` | Event ingest pipeline |
 | `stomatopod-alerts` | `crates/alerts` | Alert evaluation and delivery |
 | `stomatopod-api` | `crates/api` | REST API (no UI) |
+| `stomatopod-ui` | `crates/ui` | Shared design system (components + theme CSS) |
 | `stomatopod-web` | `crates/web` | Dashboard + server binary |
+| `stomatopod-www` | `crates/www` | Marketing site (SSG / GitHub Pages) |
 | `stomatopod-cli` | `bin/stoma` | `stoma` query CLI |
 
 ## Deployment

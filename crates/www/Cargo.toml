@@ -1,0 +1,27 @@
+[package]
+name = "stomatopod-www"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Stomatopod marketing website (Dioxus SSG for GitHub Pages)"
+
+[lib]
+name = "stomatopod_www"
+path = "src/lib.rs"
+
+[[bin]]
+name = "stomatopod-www"
+path = "src/main.rs"
+
+[features]
+default = ["server"]
+# Browser build: hydrate the pre-rendered static pages.
+web = ["dioxus/web"]
+# Native build: used at SSG bundle time to pre-render routes into public/.
+server = ["dioxus/server"]
+
+[dependencies]
+dioxus = { version = "0.7.9", features = ["fullstack", "router"] }
+stomatopod-ui = { path = "../ui" }

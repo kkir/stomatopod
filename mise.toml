@@ -89,6 +89,15 @@ run = "cd crates/web && dx build --platform web"
 description = "Release build of the fullstack app into target/dx/stomatopod/release/web ({server, public/})"
 run = "cd crates/web && dx build --platform web --release"
 
+[tasks."www:serve"]
+description = "Dev-serve the marketing site (Dioxus fullstack + hot reload)"
+run = "cd crates/www && dx serve --platform web"
+
+[tasks."www:bundle"]
+description = "SSG release build of the marketing site into target/dx/stomatopod-www/release/web/public (uses dx build: bundle skips SSG in CLI 0.7.9)"
+# --force-sequential: client assets land in public/ before SSG writes HTML (avoids race).
+run = "cd crates/www && dx build --platform web --ssg --release --force-sequential"
+
 [tasks."e2e:install"]
 description = "Install Playwright dependencies and Chromium browser"
 run = """

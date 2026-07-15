@@ -1,0 +1,12 @@
+[package]
+name = "stomatopod-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Shared Stomatopod design system: presentational Dioxus components and theme CSS"
+
+[dependencies]
+# Pure presentational components only - no router, fullstack, or product crates.
+dioxus = { version = "0.7.9", default-features = false, features = ["html", "macro", "launch"] }
