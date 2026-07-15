@@ -43,15 +43,16 @@ pub fn SelectField(
 /// Toggle switch, port of `.switch`/`.switch-track`.
 ///
 /// Uses a real checkbox (keyboard + screen reader operable) with `role="switch"`
-/// and a focus ring on the visible track.
+/// and a focus ring on the visible track. The input covers the track at
+/// `opacity-0` so pointer hits (including Playwright) land on the control
+/// rather than the decorative peer track.
 #[component]
 pub fn Switch(label: String, checked: bool, onchange: EventHandler<bool>) -> Element {
     rsx! {
         label { class: "inline-flex items-center gap-2.5 min-h-[38px] cursor-pointer",
             span { class: "relative w-[42px] h-6 inline-block shrink-0",
                 input {
-                    // Visually hidden but focusable (unlike opacity-0 + pointer-events-none).
-                    class: "sr-only peer",
+                    class: "peer absolute inset-0 z-10 w-full h-full opacity-0 cursor-pointer",
                     r#type: "checkbox",
                     role: "switch",
                     "aria-checked": if checked { "true" } else { "false" },
@@ -60,9 +61,9 @@ pub fn Switch(label: String, checked: bool, onchange: EventHandler<bool>) -> Ele
                 }
                 span {
                     class: if checked {
-                        "block w-full h-full rounded-full bg-teal/60 border border-teal/70 relative transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-teal-hi after:content-[''] after:absolute after:left-[20px] after:top-0.5 after:w-[18px] after:h-[18px] after:rounded-full after:bg-[#e8fffb] after:transition-transform"
+                        "pointer-events-none block w-full h-full rounded-full bg-teal/60 border border-teal/70 relative transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-teal-hi after:content-[''] after:absolute after:left-[20px] after:top-0.5 after:w-[18px] after:h-[18px] after:rounded-full after:bg-[#e8fffb] after:transition-transform"
                     } else {
-                        "block w-full h-full rounded-full bg-black/40 border border-border-2 relative transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-teal-hi after:content-[''] after:absolute after:left-0.5 after:top-0.5 after:w-[18px] after:h-[18px] after:rounded-full after:bg-[#dbe7ec] after:transition-transform"
+                        "pointer-events-none block w-full h-full rounded-full bg-black/40 border border-border-2 relative transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-teal-hi after:content-[''] after:absolute after:left-0.5 after:top-0.5 after:w-[18px] after:h-[18px] after:rounded-full after:bg-[#dbe7ec] after:transition-transform"
                     },
                     "aria-hidden": "true",
                 }
