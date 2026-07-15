@@ -156,29 +156,29 @@ fn migrate(conn: &Connection) -> anyhow::Result<()> {
         VALUES (1, 1, datetime('now'));
         "#,
     )?;
-    // v2: persist tasteful default alert rows for sites that have none.
-    // One-shot only (schema_version bump) so deleting them later sticks.
-    let version: i64 = conn.query_row(
+    let mut version: i64 = conn.query_row(
         "SELECT version FROM schema_version WHERE id = 1",
         [],
         |row| row.get(0),
     )?;
+    // Drop legacy analytics_alerts.channel_id before any INSERTs. Fires fan
+    // out to all site channels; the column was always a nil placeholder.
+    // Must run before v2 seed: older DBs still have channel_id NOT NULL, and
+    // insert_default_alerts no longer supplies that column.
+    drop_analytics_alert_channel_id(conn)?;
+    // v2: persist tasteful default alert rows for sites that have none.
+    // One-shot only (schema_version bump) so deleting them later sticks.
     if version < 2 {
         seed_default_alerts_for_empty_sites(conn)?;
         conn.execute(
             "UPDATE schema_version SET version = 2, applied_at = datetime('now') WHERE id = 1",
             [],
         )?;
+        version = 2;
     }
-    // v3: drop legacy analytics_alerts.channel_id (fires fan out to all
-    // site channels; the column was always a nil placeholder).
-    let version: i64 = conn.query_row(
-        "SELECT version FROM schema_version WHERE id = 1",
-        [],
-        |row| row.get(0),
-    )?;
+    // v3: record that channel_id drop is applied (drop itself is above and
+    // idempotent so it is safe on every open).
     if version < 3 {
-        drop_analytics_alert_channel_id(conn)?;
         conn.execute(
             "UPDATE schema_version SET version = 3, applied_at = datetime('now') WHERE id = 1",
             [],

@@ -149,6 +149,116 @@ async fn create_site_writes_default_analytics_alerts() {
         .is_empty());
 }
 
+/// Pre-v3 DBs had `analytics_alerts.channel_id NOT NULL`. Opening that DB
+/// must drop the column *before* the v2 default-alert seed, otherwise
+/// INSERT fails with "NOT NULL constraint failed: analytics_alerts.channel_id".
+#[tokio::test]
+async fn migrate_drops_legacy_channel_id_before_seeding_defaults() {
+    use rusqlite::Connection;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("meta.db");
+    let org_id = Ulid::new();
+    let site_id = Ulid::new();
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys=ON;
+            CREATE TABLE schema_version (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                version INTEGER NOT NULL,
+                applied_at TEXT NOT NULL
+            );
+            CREATE TABLE orgs (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                slug TEXT UNIQUE NOT NULL,
+                plan TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE sites (
+                id TEXT PRIMARY KEY,
+                org_id TEXT NOT NULL REFERENCES orgs(id),
+                domain TEXT NOT NULL,
+                name TEXT NOT NULL,
+                timezone TEXT NOT NULL,
+                public_key TEXT UNIQUE NOT NULL,
+                created_at TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE analytics_alerts (
+                id TEXT PRIMARY KEY,
+                site_id TEXT NOT NULL REFERENCES sites(id),
+                type TEXT NOT NULL,
+                config TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO schema_version (id, version, applied_at)
+                VALUES (1, 1, datetime('now'));
+            "#,
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO orgs (id, name, slug, plan, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                org_id.to_string(),
+                "Legacy Org",
+                format!("legacy-{org_id}"),
+                "self_hosted",
+                Utc::now().to_rfc3339(),
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sites (id, org_id, domain, name, timezone, public_key, created_at, is_active)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
+            rusqlite::params![
+                site_id.to_string(),
+                org_id.to_string(),
+                "legacy.example.com",
+                "Legacy Site",
+                "UTC",
+                Ulid::new().to_string(),
+                Utc::now().to_rfc3339(),
+            ],
+        )
+        .unwrap();
+    }
+
+    // Must not fail with NOT NULL on channel_id during migrate.
+    let meta = SqliteMeta::open(&path)
+        .await
+        .expect("migrate legacy meta.db");
+    let alerts = meta.list_analytics_alerts(site_id).await.unwrap();
+    assert_eq!(
+        alerts.len(),
+        3,
+        "v2 seed should run after channel_id is dropped"
+    );
+
+    // Column is gone on disk.
+    let conn = Connection::open(&path).unwrap();
+    let mut stmt = conn.prepare("PRAGMA table_info(analytics_alerts)").unwrap();
+    let cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert!(
+        !cols.iter().any(|c| c == "channel_id"),
+        "legacy channel_id column must be dropped"
+    );
+    let version: i64 = conn
+        .query_row("SELECT version FROM schema_version WHERE id = 1", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(version, 3);
+}
+
 #[tokio::test]
 async fn get_site_nonexistent_returns_none() {
     let dir = tempfile::tempdir().unwrap();

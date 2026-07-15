@@ -52,6 +52,7 @@ criterion = { workspace = true }
 chrono = { workspace = true }
 serde_json = { workspace = true }
 ulid = { workspace = true }
+rusqlite = { workspace = true }
 
 [[bench]]
 name = "record_batch"
