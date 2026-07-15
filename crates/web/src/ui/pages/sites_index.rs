@@ -55,6 +55,21 @@ fn compute_delta(cur: u64, prev: u64) -> Option<DeltaInfo> {
 
 #[component]
 fn DeltaBadge(delta: DeltaInfo) -> Element {
+    let (visible, spoken) = match delta.dir {
+        DeltaDir::Up => (
+            format!("▲ {:.0}%", delta.pct),
+            format!("up {:.0}% versus previous period", delta.pct),
+        ),
+        DeltaDir::Down => (
+            format!("▼ {:.0}%", delta.pct),
+            format!("down {:.0}% versus previous period", delta.pct),
+        ),
+        DeltaDir::New => ("New".to_string(), "new versus previous period".to_string()),
+        DeltaDir::Flat => (
+            "-".to_string(),
+            "unchanged versus previous period".to_string(),
+        ),
+    };
     rsx! {
         span {
             class: match delta.dir {
@@ -62,12 +77,8 @@ fn DeltaBadge(delta: DeltaInfo) -> Element {
                 DeltaDir::Down => "text-[11px] font-semibold text-red",
                 DeltaDir::New | DeltaDir::Flat => "text-[11px] font-semibold text-muted-2",
             },
-            {match delta.dir {
-                DeltaDir::Up => rsx! { "▲ {delta.pct:.0}%" },
-                DeltaDir::Down => rsx! { "▼ {delta.pct:.0}%" },
-                DeltaDir::New => rsx! { "New" },
-                DeltaDir::Flat => rsx! { "-" },
-            }}
+            span { class: "sr-only", "{spoken}" }
+            span { "aria-hidden": "true", "{visible}" }
         }
     }
 }
@@ -275,18 +286,24 @@ pub fn SitesIndex() -> Element {
             Button {
                 variant: ButtonVariant::Primary,
                 onclick: move |_| show_form.set(!show_form()),
+                // Button children only; expanded state via sibling form id.
                 "New Site"
             }
         }
 
         if show_form() {
             Card { title: "Add a new site".to_string(),
-                form { class: "grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-stretch sm:items-end mb-4", onsubmit,
+                form {
+                    id: "new-site-form",
+                    class: "grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-stretch sm:items-end mb-4",
+                    "aria-label": "Create site",
+                    onsubmit,
                     Field { label: "Domain",
                         input {
                             class: "w-full bg-black/32 border border-border-2 text-text-1 rounded-[10px] px-3 py-2 text-[13px] shadow-inner-hi focus:outline-none focus:border-teal/55",
                             placeholder: "example.com",
                             required: true,
+                            autocomplete: "url",
                             value: "{domain}",
                             oninput: move |evt| domain.set(evt.value()),
                         }
@@ -296,6 +313,7 @@ pub fn SitesIndex() -> Element {
                             class: "w-full bg-black/32 border border-border-2 text-text-1 rounded-[10px] px-3 py-2 text-[13px] shadow-inner-hi focus:outline-none focus:border-teal/55",
                             placeholder: "My Site",
                             required: true,
+                            autocomplete: "organization",
                             value: "{name}",
                             oninput: move |evt| name.set(evt.value()),
                         }
@@ -307,7 +325,7 @@ pub fn SitesIndex() -> Element {
                     }
                 }
                 if let Some(msg) = error() {
-                    p { class: "text-red text-[12.5px] mt-2", "{msg}" }
+                    p { class: "text-red text-[12.5px] mt-2", role: "alert", "{msg}" }
                 }
             }
         }

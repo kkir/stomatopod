@@ -183,6 +183,12 @@ fn AlertsCard(site_id: String) -> Element {
                     r#type: "submit",
                     class: BTN_PRIMARY,
                     disabled: !has_channels,
+                    title: if !has_channels {
+                        "Add a notification destination under Settings first"
+                    } else {
+                        ""
+                    },
+                    "aria-disabled": if !has_channels { "true" },
                     "Add alert"
                 }
             }
@@ -205,68 +211,81 @@ fn AlertsCard(site_id: String) -> Element {
                         rsx! {
                             div { class: "flex flex-col gap-2",
                                 for alert in list.alerts.clone() {
-                                    div {
-                                        key: "{alert.id}",
-                                        class: "flex items-center justify-between gap-3 py-2 border-t border-border-1",
-                                        div {
-                                            div { class: "text-text-1 text-[13px] font-medium",
-                                                "{alert_kind_label(&alert.kind)}"
-                                                if !alert.enabled {
-                                                    span { class: "ml-2 text-[11px] font-semibold uppercase tracking-wide text-muted-1",
-                                                        "Off"
+                                    {
+                                        let kind_label = alert_kind_label(&alert.kind);
+                                        let toggle_label = if alert.enabled {
+                                            format!("Disable {kind_label}")
+                                        } else {
+                                            format!("Enable {kind_label}")
+                                        };
+                                        let delete_label = format!("Delete {kind_label}");
+                                        rsx! {
+                                            div {
+                                                key: "{alert.id}",
+                                                class: "flex items-center justify-between gap-3 py-2 border-t border-border-1",
+                                                div {
+                                                    div { class: "text-text-1 text-[13px] font-medium",
+                                                        "{kind_label}"
+                                                        if !alert.enabled {
+                                                            span { class: "ml-2 text-[11px] font-semibold uppercase tracking-wide text-muted-1",
+                                                                "Off"
+                                                            }
+                                                        }
+                                                    }
+                                                    div { class: "text-muted-1 text-xs",
+                                                        "{alert.config.threshold}% {alert_kind_hint(&alert.kind)} · {alert.config.window_minutes}m window"
                                                     }
                                                 }
-                                            }
-                                            div { class: "text-muted-1 text-xs",
-                                                "{alert.config.threshold}% {alert_kind_hint(&alert.kind)} · {alert.config.window_minutes}m window"
-                                            }
-                                        }
-                                        div { class: "flex items-center gap-2",
-                                            button {
-                                                r#type: "button",
-                                                class: BTN_GHOST,
-                                                onclick: {
-                                                    let site_id = site_id.clone();
-                                                    let id = alert.id.clone();
-                                                    let enabled = alert.enabled;
-                                                    move |_| {
-                                                        let site_id = site_id.clone();
-                                                        let id = id.clone();
-                                                        spawn(async move {
-                                                            let path = format!(
-                                                                "/api/v1/sites/{site_id}/analytics-alerts/{id}",
-                                                            );
-                                                            let body = PatchAlertBody { enabled: !enabled };
-                                                            if patch_json::<_, serde_json::Value>(&path, &body).await.is_ok() {
-                                                                let mut r = refresh;
-                                                                r += 1;
+                                                div { class: "flex items-center gap-2",
+                                                    button {
+                                                        r#type: "button",
+                                                        class: BTN_GHOST,
+                                                        "aria-label": "{toggle_label}",
+                                                        onclick: {
+                                                            let site_id = site_id.clone();
+                                                            let id = alert.id.clone();
+                                                            let enabled = alert.enabled;
+                                                            move |_| {
+                                                                let site_id = site_id.clone();
+                                                                let id = id.clone();
+                                                                spawn(async move {
+                                                                    let path = format!(
+                                                                        "/api/v1/sites/{site_id}/analytics-alerts/{id}",
+                                                                    );
+                                                                    let body = PatchAlertBody { enabled: !enabled };
+                                                                    if patch_json::<_, serde_json::Value>(&path, &body).await.is_ok() {
+                                                                        let mut r = refresh;
+                                                                        r += 1;
+                                                                    }
+                                                                });
                                                             }
-                                                        });
+                                                        },
+                                                        if alert.enabled { "Disable" } else { "Enable" }
                                                     }
-                                                },
-                                                if alert.enabled { "Disable" } else { "Enable" }
-                                            }
-                                            button {
-                                                r#type: "button",
-                                                class: BTN_GHOST,
-                                                onclick: {
-                                                    let site_id = site_id.clone();
-                                                    let id = alert.id.clone();
-                                                    move |_| {
-                                                        let site_id = site_id.clone();
-                                                        let id = id.clone();
-                                                        spawn(async move {
-                                                            let path = format!(
-                                                                "/api/v1/sites/{site_id}/analytics-alerts/{id}",
-                                                            );
-                                                            if delete(&path).await.is_ok() {
-                                                                let mut r = refresh;
-                                                                r += 1;
+                                                    button {
+                                                        r#type: "button",
+                                                        class: BTN_GHOST,
+                                                        "aria-label": "{delete_label}",
+                                                        onclick: {
+                                                            let site_id = site_id.clone();
+                                                            let id = alert.id.clone();
+                                                            move |_| {
+                                                                let site_id = site_id.clone();
+                                                                let id = id.clone();
+                                                                spawn(async move {
+                                                                    let path = format!(
+                                                                        "/api/v1/sites/{site_id}/analytics-alerts/{id}",
+                                                                    );
+                                                                    if delete(&path).await.is_ok() {
+                                                                        let mut r = refresh;
+                                                                        r += 1;
+                                                                    }
+                                                                });
                                                             }
-                                                        });
+                                                        },
+                                                        "Delete"
                                                     }
-                                                },
-                                                "Delete"
+                                                }
                                             }
                                         }
                                     }

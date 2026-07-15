@@ -7,6 +7,8 @@ pub fn App() -> Element {
     rsx! {
         document::Title { "Stomatopod" }
         document::Meta { name: "theme-color", content: "#04080b" }
+        // Hint color scheme for browser UI (scrollbars, form controls).
+        document::Meta { name: "color-scheme", content: "dark" }
         document::Link { rel: "preconnect", href: "https://fonts.googleapis.com" }
         document::Link { rel: "preconnect", href: "https://fonts.gstatic.com", crossorigin: "" }
         document::Link {

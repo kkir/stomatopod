@@ -65,30 +65,43 @@ pub fn FunnelBuilder(on_submit: EventHandler<(String, Vec<FunnelStepDraft>)>) ->
                 on_submit.call((n, drafts));
             },
             div { class: "mb-3.5",
-                label { class: "block text-[0.72rem] tracking-[0.06em] uppercase text-muted-1 mb-1.5 font-semibold",
-                    "Funnel name"
-                }
-                input {
-                    class: "{FB_INPUT} w-full",
-                    value: "{name}",
-                    placeholder: "e.g. Signup flow",
-                    oninput: move |e| name.set(e.value()),
+                label { class: "block",
+                    span { class: "block text-[0.72rem] tracking-[0.06em] uppercase text-muted-1 mb-1.5 font-semibold",
+                        "Funnel name"
+                    }
+                    input {
+                        class: "{FB_INPUT} w-full",
+                        value: "{name}",
+                        placeholder: "e.g. Signup flow",
+                        required: true,
+                        oninput: move |e| name.set(e.value()),
+                    }
                 }
             }
-            label { class: "block text-[0.72rem] tracking-[0.06em] uppercase text-muted-1 mb-2 font-semibold",
-                "Steps"
-            }
+            div {
+                role: "group",
+                "aria-label": "Funnel steps",
+                span { class: "block text-[0.72rem] tracking-[0.06em] uppercase text-muted-1 mb-2 font-semibold",
+                    "Steps"
+                }
             div { class: "flex flex-col gap-3",
                 for (i , step) in steps().into_iter().enumerate() {
                     div {
                         key: "{i}",
                         class: "bg-surface-2/60 border border-border-1 rounded-lg p-3",
+                        role: "group",
+                        "aria-label": "Step {i + 1}",
                         div { class: "flex items-center gap-2 mb-2",
-                            span { class: "text-muted-1 text-xs font-semibold w-14", "Step {i + 1}" }
+                            span {
+                                class: "text-muted-1 text-xs font-semibold w-14",
+                                "aria-hidden": "true",
+                                "Step {i + 1}"
+                            }
                             input {
                                 class: "{FB_INPUT} flex-1",
                                 value: "{step.name}",
                                 placeholder: "Step label",
+                                "aria-label": "Step {i + 1} label",
                                 oninput: move |e| {
                                     steps.write()[i].name = e.value();
                                 },
@@ -97,6 +110,7 @@ pub fn FunnelBuilder(on_submit: EventHandler<(String, Vec<FunnelStepDraft>)>) ->
                                 class: "{FB_INPUT} flex-1",
                                 value: "{step.event_name}",
                                 placeholder: "Event name",
+                                "aria-label": "Step {i + 1} event name",
                                 oninput: move |e| {
                                     steps.write()[i].event_name = e.value();
                                 },
@@ -105,6 +119,7 @@ pub fn FunnelBuilder(on_submit: EventHandler<(String, Vec<FunnelStepDraft>)>) ->
                                 button {
                                     r#type: "button",
                                     class: FB_BTN_GHOST,
+                                    "aria-label": "Remove step {i + 1}",
                                     onclick: move |_| {
                                         steps.write().remove(i);
                                     },
@@ -114,10 +129,15 @@ pub fn FunnelBuilder(on_submit: EventHandler<(String, Vec<FunnelStepDraft>)>) ->
                         }
                         div { class: "flex flex-col gap-2 pl-14",
                             for (j , filter) in step.filters.iter().enumerate() {
-                                div { key: "{j}", class: "flex items-center gap-2",
+                                div {
+                                    key: "{j}",
+                                    class: "flex items-center gap-2",
+                                    role: "group",
+                                    "aria-label": "Step {i + 1} filter {j + 1}",
                                     select {
                                         class: FB_INPUT,
                                         value: "{filter.field}",
+                                        "aria-label": "Filter field",
                                         onchange: move |e| {
                                             steps.write()[i].filters[j].field = e.value();
                                         },
@@ -128,6 +148,7 @@ pub fn FunnelBuilder(on_submit: EventHandler<(String, Vec<FunnelStepDraft>)>) ->
                                     select {
                                         class: FB_INPUT,
                                         value: "{filter.op}",
+                                        "aria-label": "Filter operator",
                                         onchange: move |e| {
                                             steps.write()[i].filters[j].op = e.value();
                                         },
@@ -139,6 +160,7 @@ pub fn FunnelBuilder(on_submit: EventHandler<(String, Vec<FunnelStepDraft>)>) ->
                                         class: "{FB_INPUT} flex-1",
                                         value: "{filter.value}",
                                         placeholder: "value",
+                                        "aria-label": "Filter value",
                                         oninput: move |e| {
                                             steps.write()[i].filters[j].value = e.value();
                                         },
@@ -146,10 +168,11 @@ pub fn FunnelBuilder(on_submit: EventHandler<(String, Vec<FunnelStepDraft>)>) ->
                                     button {
                                         r#type: "button",
                                         class: FB_BTN_GHOST,
+                                        "aria-label": "Remove filter",
                                         onclick: move |_| {
                                             steps.write()[i].filters.remove(j);
                                         },
-                                        "×"
+                                        span { "aria-hidden": "true", "×" }
                                     }
                                 }
                             }
@@ -171,6 +194,7 @@ pub fn FunnelBuilder(on_submit: EventHandler<(String, Vec<FunnelStepDraft>)>) ->
                         }
                     }
                 }
+            }
             }
             div { class: "flex items-center gap-2 mt-3",
                 button {
@@ -199,8 +223,33 @@ pub fn FunnelBuilder(on_submit: EventHandler<(String, Vec<FunnelStepDraft>)>) ->
 #[component]
 pub fn FunnelBars(steps: Vec<FunnelStepResult>) -> Element {
     rsx! {
-        div { class: "overflow-x-auto -mx-1 px-1",
-            div { class: "flex items-end gap-3 sm:gap-4 min-h-[200px] sm:min-h-[220px] pt-4 min-w-[min(100%,18rem)]",
+        div {
+            class: "overflow-x-auto -mx-1 px-1",
+            role: "img",
+            "aria-label": "Funnel conversion by step",
+            // Accessible data; visual bars are decorative.
+            table { class: "sr-only",
+                caption { "Funnel steps" }
+                thead {
+                    tr {
+                        th { scope: "col", "Step" }
+                        th { scope: "col", "Sessions" }
+                        th { scope: "col", "Conversion" }
+                    }
+                }
+                tbody {
+                    for step in steps.iter() {
+                        tr {
+                            th { scope: "row", "{step.name}" }
+                            td { "{step.sessions}" }
+                            td { "{(step.conversion_rate * 100.0):.0}%" }
+                        }
+                    }
+                }
+            }
+            div {
+                class: "flex items-end gap-3 sm:gap-4 min-h-[200px] sm:min-h-[220px] pt-4 min-w-[min(100%,18rem)]",
+                "aria-hidden": "true",
                 for (i , step) in steps.iter().enumerate() {
                     div { key: "{i}", class: "flex-1 min-w-[3.5rem] flex flex-col items-center justify-end gap-1.5",
                         div { class: "text-teal-hi text-[12px] sm:text-[13px] font-semibold tabular-nums",

@@ -111,10 +111,10 @@ test("a created site appears and its overview loads", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Technology", exact: true }),
   ).toBeVisible();
-  // Entry/exit live under Pages dimension tabs (not always mounted).
-  await page.getByRole("button", { name: "Entry", exact: true }).click();
+  // Entry/exit live under Pages dimension tabs (role=tab, not button).
+  await page.getByRole("tab", { name: "Entry", exact: true }).click();
   await expect(page.getByText("No Entry pages yet")).toBeVisible();
-  await page.getByRole("button", { name: "Exit", exact: true }).click();
+  await page.getByRole("tab", { name: "Exit", exact: true }).click();
   await expect(page.getByText("No Exit pages yet")).toBeVisible();
   // Export is behind a disclosure control, not a permanent card.
   await page.getByRole("button", { name: "Export", exact: true }).click();
@@ -238,8 +238,8 @@ test("a notification destination can be added and an alert created", async ({
     page.getByRole("heading", { name: "Notifications" }),
   ).toBeVisible();
 
-  // Switch to the Webhook tab (Telegram is the default).
-  await page.getByRole("button", { name: "Webhook", exact: true }).click();
+  // Switch to the Webhook tab (Telegram is the default; dimension tabs use role=tab).
+  await page.getByRole("tab", { name: "Webhook", exact: true }).click();
 
   // Host must resolve to a public address so the server's SSRF checks accept
   // it (fake TLDs like .e2e.test fail DNS and are rejected).

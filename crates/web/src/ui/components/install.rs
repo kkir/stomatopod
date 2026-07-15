@@ -48,7 +48,9 @@ pub fn InstallCard(public_key: String, domain: String, prominent: bool) -> Eleme
                 }
             }
 
-            pre { class: "bg-black/40 border border-border-1 rounded-lg p-3 overflow-x-auto mb-3",
+            pre {
+                class: "bg-black/40 border border-border-1 rounded-lg p-3 overflow-x-auto mb-3",
+                "aria-label": "Tracker install snippet",
                 code { class: "text-[13px] font-mono text-teal-hi break-all whitespace-pre-wrap select-all",
                     "{snippet}"
                 }
@@ -58,6 +60,7 @@ pub fn InstallCard(public_key: String, domain: String, prominent: bool) -> Eleme
                 button {
                     r#type: "button",
                     class: BTN_GHOST,
+                    "aria-label": if copied() { "Snippet copied to clipboard".to_string() } else { "Copy tracker snippet to clipboard".to_string() },
                     onclick: {
                         let snippet = snippet.clone();
                         move |_| {
@@ -76,6 +79,12 @@ pub fn InstallCard(public_key: String, domain: String, prominent: bool) -> Eleme
                         }
                     },
                     if copied() { "Copied" } else { "Copy snippet" }
+                }
+                div {
+                    class: "sr-only",
+                    role: "status",
+                    "aria-live": "polite",
+                    if copied() { "Snippet copied to clipboard" }
                 }
                 span {
                     "data-site is your public key (safe to expose). Events post to the same host as the script."

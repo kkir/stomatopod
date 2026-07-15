@@ -15,6 +15,13 @@ pub fn Shell() -> Element {
     use_effect(move || hydrated.set(true));
 
     rsx! {
+        // Skip link first in tab order so keyboard users reach main content
+        // without walking the full sidebar.
+        a {
+            class: "skip-link focus:skip-link-focus",
+            href: "#main-content",
+            "Skip to main content"
+        }
         // `h-dvh` + `min-h-0` on main make main the real scrollport. Without
         // a fixed-height ancestor, `overflow-y-auto` never clips and sticky
         // sub-navs (docs TOC) fail to stick because they sit inside a tall
@@ -26,7 +33,10 @@ pub fn Shell() -> Element {
             class: "grid grid-cols-1 [grid-template-rows:auto_minmax(0,1fr)] md:grid-cols-[232px_minmax(0,1fr)] md:[grid-template-rows:minmax(0,1fr)] h-dvh bg-bg font-ui text-text-1",
             "data-hydrated": if hydrated() { "true" },
             Sidebar {}
-            main { class: "main min-w-0 min-h-0 overflow-y-auto overflow-x-hidden",
+            main {
+                id: "main-content",
+                class: "main min-w-0 min-h-0 overflow-y-auto overflow-x-hidden",
+                tabindex: "-1",
                 div { class: "container mx-auto max-w-[1200px] px-3 sm:px-f4 pt-5 sm:pt-8 pb-12 sm:pb-16",
                     Outlet::<Route> {}
                 }
@@ -55,15 +65,24 @@ pub fn Sidebar() -> Element {
         .max_by_key(|href| href.len());
 
     rsx! {
-        aside { class: "side sticky top-0 z-30 flex flex-row items-center gap-2 sm:gap-3 px-2.5 sm:px-3.5 py-2.5 md:flex-col md:items-stretch md:gap-0 md:h-dvh md:pt-5.5 md:pb-4 md:px-3.5 bg-bg-2/65 backdrop-blur-lg border-b border-border-1 md:border-b-0 md:border-r",
+        aside {
+            class: "side sticky top-0 z-30 flex flex-row items-center gap-2 sm:gap-3 px-2.5 sm:px-3.5 py-2.5 md:flex-col md:items-stretch md:gap-0 md:h-dvh md:pt-5.5 md:pb-4 md:px-3.5 bg-bg-2/65 backdrop-blur-lg border-b border-border-1 md:border-b-0 md:border-r",
+            "aria-label": "Application",
             Link {
                 class: "logo inline-flex items-center gap-2 sm:gap-2.5 px-1.5 sm:px-2.5 font-display font-bold text-[15px] sm:text-base tracking-tight text-text-1 shrink-0",
                 to: Route::SitesIndex {},
+                // Explicit name: on narrow viewports only the mark shows, and
+                // it is decorative, so without this the link would be empty.
+                "aria-label": "Stomatopod home",
                 span { class: "logo-mark bg-iri inline-block h-3.25 w-3.25 rounded-sm", "aria-hidden": "true" }
-                span { class: "hidden min-[380px]:inline", "Stomatopod" }
+                span { class: "hidden min-[380px]:inline", "aria-hidden": "true", "Stomatopod" }
             }
-            nav { class: "side-nav flex flex-row items-center gap-0.5 flex-1 min-w-0 overflow-x-auto scrollbar-none md:flex-col md:overflow-visible md:mt-7 md:items-stretch",
-                span { class: "side-label hidden md:block text-[10.5px] font-semibold uppercase tracking-wider text-muted-2 mx-3 mt-4 mb-1",
+            nav {
+                class: "side-nav flex flex-row items-center gap-0.5 flex-1 min-w-0 overflow-x-auto scrollbar-none md:flex-col md:overflow-visible md:mt-7 md:items-stretch",
+                "aria-label": "Primary",
+                span {
+                    class: "side-label hidden md:block text-[10.5px] font-semibold uppercase tracking-wider text-muted-2 mx-3 mt-4 mb-1",
+                    "aria-hidden": "true",
                     "Analytics"
                 }
                 for (route , label) in nav_items {
@@ -99,9 +118,14 @@ pub fn Sidebar() -> Element {
 
 /// Page title + optional subtitle, with a right-hand slot for
 /// `RangeTabs`/`SiteTabs`/a site selector. Port of `.page-head`.
+///
+/// Also updates the document title so SPA navigations announce the new page
+/// to assistive tech (and show a useful browser tab label).
 #[component]
 pub fn PageHead(title: String, subtitle: Option<String>, children: Element) -> Element {
+    let doc_title = format!("{title} · Stomatopod");
     rsx! {
+        document::Title { "{doc_title}" }
         div { class: "flex justify-between items-start sm:items-center gap-x-4 sm:gap-x-6 gap-y-3 sm:gap-y-4 mb-6 sm:mb-8 flex-wrap",
             div { class: "min-w-0",
                 h1 { class: "text-[20px] sm:text-[24px] font-bold tracking-tight text-text-1 leading-tight", "{title}" }

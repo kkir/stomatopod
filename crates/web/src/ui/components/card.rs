@@ -47,6 +47,7 @@ pub fn SectionHeader(title: String, csv_href: Option<String>) -> Element {
                 a {
                     class: "csv-btn inline-flex items-center px-[9px] py-0.5 rounded-md border border-border-2 text-[11px] font-semibold tracking-[0.04em] text-muted-1 no-underline hover:text-text-1 hover:border-border-3",
                     href: "{href}",
+                    "aria-label": "Export {title} CSV",
                     "Export CSV"
                 }
             }

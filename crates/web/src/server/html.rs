@@ -41,7 +41,7 @@ fn head(title: &str) -> String {
 /// The login screen. `error` renders the invalid-credentials notice when present.
 pub fn login_page(error: Option<&str>) -> String {
     let error_html = match error {
-        Some(msg) => format!(r#"<p class="auth-error">{}</p>"#, escape(msg)),
+        Some(msg) => format!(r#"<p class="auth-error" role="alert">{}</p>"#, escape(msg)),
         None => String::new(),
     };
     format!(
