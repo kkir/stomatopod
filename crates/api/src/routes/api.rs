@@ -637,16 +637,15 @@ fn shared_css_search_dirs() -> Vec<std::path::PathBuf> {
 #[cfg(test)]
 mod docs_slug_tests {
     use super::{render_docs, slugify};
-    use crate::ui::docs_anchors::{EMITTING_CUSTOM_EVENTS, INSTALLING_THE_BROWSER_TRACKER};
-
     #[test]
     fn known_heading_slugs() {
+        // Must stay in sync with `stomatopod_web::ui::docs_anchors` deep links.
         let cases = [
             (
                 "Installing the browser tracker",
-                INSTALLING_THE_BROWSER_TRACKER,
+                "installing-the-browser-tracker",
             ),
-            ("Emitting custom events", EMITTING_CUSTOM_EVENTS),
+            ("Emitting custom events", "emitting-custom-events"),
             (
                 "Manual events from the browser",
                 "manual-events-from-the-browser",
@@ -677,7 +676,8 @@ mod docs_slug_tests {
             );
         }
         // UI deep links must resolve to real anchors in the rendered HTML.
-        for slug in [INSTALLING_THE_BROWSER_TRACKER, EMITTING_CUSTOM_EVENTS] {
+        // Keep in sync with stomatopod_web::ui::docs_anchors.
+        for slug in ["installing-the-browser-tracker", "emitting-custom-events"] {
             assert!(
                 rendered.body.contains(&format!("id=\"{slug}\"")),
                 "UI deep-link slug {slug} missing from docs HTML"

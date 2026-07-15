@@ -16,7 +16,8 @@ use crate::{
 
 /// Builds the non-SPA router: the REST API, ingest, and auth. The Dioxus
 /// application itself (SSR + hydration + static assets) is merged on top of
-/// this by [`crate::server::serve`], which owns the catch-all fallback.
+/// this by the appliance server (`stomatopod-web`), which owns the catch-all
+/// fallback.
 ///
 /// There is intentionally no public user-registration or org-creation route:
 /// this is a single-owner appliance bootstrapped at first start.

@@ -3,6 +3,8 @@ members = [
     "crates/core",
     "crates/store",
     "crates/ingest",
+    "crates/alerts",
+    "crates/api",
     "crates/web",
     "bin/stoma",
     "bin/seed",
@@ -12,8 +14,11 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "AGPL-3.0"
+license = "MIT"
 rust-version = "1.85"
+authors = ["Kirill Kayer"]
+repository = "https://github.com/kkir/stomatopod"
+homepage = "https://github.com/kkir/stomatopod"
 
 [workspace.dependencies]
 # Async runtime
@@ -29,8 +34,6 @@ crossbeam = "0.8"
 bincode = "1"
 zstd = "0.13"
 crc32fast = "1"
-# Storage — postgres
-sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio-rustls", "chrono"] }
 # HTTP client (alerts, digest channel delivery)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 # Serialization

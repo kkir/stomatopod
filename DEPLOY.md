@@ -2,19 +2,19 @@
 
 ## Data persistence (read this first)
 
-With the default **embedded** storage backend, Stomatopod keeps *all* state under
-`storage.data_dir` (default `/app/data` in the container): the SQLite metadata
+Stomatopod uses **embedded** storage only: *all* state lives under
+`storage.data_dir` (default `/app/data` in the container) - the SQLite metadata
 database (organizations, users, sites, API keys, funnels), the write-ahead
 logs, and the Parquet event files.
 
 Inside a container that directory lives in the writable image layer **unless you
 mount a volume over it**. Without a volume, every redeploy starts from an empty
-data dir — all analytics history is lost.
+data dir - all analytics history is lost.
 
 To prevent silent data loss, the server **refuses to start** when it detects it is
 running in a container with `data_dir` on ephemeral storage. Mount a persistent
-volume (below), use the `postgres` backend, or explicitly opt into ephemeral
-storage with `STOMATOPOD_STORAGE__ALLOW_EPHEMERAL=true`.
+volume (below), or explicitly opt into ephemeral storage with
+`STOMATOPOD_STORAGE__ALLOW_EPHEMERAL=true`.
 
 **What to back up / snapshot:** the entire `data_dir` tree (`/app/data`).
 
@@ -117,17 +117,6 @@ for provisioning correct ownership on that path.
       persistentVolumeClaim:
         claimName: stomatopod-data
   ```
-
-## Alternative: external database
-
-Set the storage backend to Postgres in `stomatopod.toml` (or via env) so durability
-lives in a managed database — no volume required:
-
-```toml
-[storage]
-backend = "postgres"
-url = "postgresql://user:pass@host:5432/stomatopod"
-```
 
 ## Required configuration
 

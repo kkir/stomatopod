@@ -67,7 +67,7 @@ pub fn login_page(error: Option<&str>) -> String {
         <input id="password" type="password" name="password" required autocomplete="current-password" />
       </div>
       <button type="submit" class="auth-submit">Sign in</button>
-      <div class="auth-foot">Self-hosted, AGPL-3.0.</div>
+      <div class="auth-foot">Self-hosted, MIT.</div>
     </form>
   </body>
 </html>"#,

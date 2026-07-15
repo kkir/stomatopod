@@ -1,11 +1,29 @@
-# stomatopod
+# Stomatopod
 
-Use [`mise` tasks](https://mise.jdx.dev/tasks/) for local development.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
+Privacy-friendly, cookieless **web analytics** you run yourself. One binary (plus
+a small wasm dashboard), embedded storage on a local volume, JSON API and CLI
+for humans and agents.
+
+Stomatopod is a **single-owner appliance** (one org, one admin user, many sites).
+Licensed under **MIT**.
+
+## Features
+
+- Browser tracker (`/tracker.js`) and server-side ingest
+- Dashboard (Dioxus fullstack) with pageviews, funnels, alerts, digests
+- REST API + OpenAPI (`/openapi.json`) and `stoma` CLI
+- Embedded storage: SQLite metadata, WAL, Parquet partitions (no external DB)
+
+See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the crate map and how library
+crates can plug into a separate multi-tenant product. Production SaaS storage
+is intentionally **not** part of this repository.
 
 ## Prerequisites
 
-1. Install `mise` (see <https://mise.jdx.dev/getting-started.html>).
-2. Install toolchain versions declared in `mise.toml`:
+1. Install [`mise`](https://mise.jdx.dev/getting-started.html).
+2. Install toolchain versions from `mise.toml`:
 
 ```bash
 mise install
@@ -24,8 +42,6 @@ export STOMATOPOD_AUTH__SECRET_KEY="replace-with-a-long-random-secret"
 # First boot (empty data dir) also needs a strong owner password (min 12 chars):
 export STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)"
 ```
-
-Stomatopod is a **single-owner** appliance (one org, one admin user, many sites).
 
 ## Daily commands
 
@@ -56,15 +72,14 @@ Useful knobs: `SEED_DAYS` / `--days` (default 30), `SEED_EVENTS` / `--events`
 (default 2500), `STOMATOPOD_SERVER` / `--server` (default `http://localhost:8080`).
 See `cargo run -p stomatopod-seed -- --help` for the full list.
 
-
 ## Dashboard UI (Dioxus fullstack)
 
-The dashboard is a Dioxus 0.7 **fullstack** app that lives in the single
-[`crates/web`](./crates/web) crate, styled with Tailwind CSS v4. The same code
-compiles two ways: to wasm (the `web` feature — the hydrating client) and to
-native (the `server` feature — the axum server that server-renders it). The
-server serves the SSR'd dashboard at `/`, its hashed wasm/JS/CSS assets, and the
-JSON API at `/api/v1`. `/login` is server-rendered HTML (no template engine).
+The dashboard is a Dioxus 0.7 **fullstack** app in [`crates/web`](./crates/web),
+styled with Tailwind CSS v4. The same code compiles two ways: to wasm (the `web`
+feature - the hydrating client) and to native (the `server` feature - the axum
+server that server-renders it). The server serves the SSR'd dashboard at `/`,
+hashed wasm/JS/CSS assets, and the JSON API at `/api/v1`. `/login` is
+server-rendered HTML.
 
 ```bash
 # Build the wasm client, then run the server against it (SSR + hydration):
@@ -78,18 +93,29 @@ at it with `DIOXUS_PUBLIC_PATH`. For production/CI, `mise run ui:bundle`
 containing the `server` binary next to its `public/` bundle; the Docker build
 copies both.
 
+## Workspace crates
+
+| Crate | Path | Role |
+|-------|------|------|
+| `stomatopod-core` | `crates/core` | Domain, traits, config |
+| `stomatopod-store` | `crates/store` | Embedded analytics storage |
+| `stomatopod-ingest` | `crates/ingest` | Event ingest pipeline |
+| `stomatopod-alerts` | `crates/alerts` | Alert evaluation and delivery |
+| `stomatopod-api` | `crates/api` | REST API (no UI) |
+| `stomatopod-web` | `crates/web` | Dashboard + server binary |
+| `stomatopod-cli` | `bin/stoma` | `stoma` query CLI |
+
 ## Deployment
 
-See [`DEPLOY.md`](./DEPLOY.md) for running Stomatopod in production, including the
-**data persistence** requirement (mount a volume at `/app/data`) and ready-to-use
+See [`DEPLOY.md`](./DEPLOY.md) for production, including the **data persistence**
+requirement (mount a volume at `/app/data`) and
 [`docker-compose.yml`](./docker-compose.yml). The [`Dockerfile`](./Dockerfile)
-installs `dx` and runs a single `dx build --platform web --release`, which
-produces both the wasm client bundle and the native server binary, so
-`docker build` needs no separate UI step.
+installs `dx` and runs a single `dx build --platform web --release`.
 
-## Notes
+## Contributing
 
-- `mise run dev` fails fast when auth config is missing.
-- The `dx` CLI (`cargo:dioxus-cli`) and the `wasm32-unknown-unknown` target are
-  required for the UI; `mise install` provisions `dx`, and `dx` installs the
-  wasm target on first run.
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`SECURITY.md`](./SECURITY.md).
+
+## License
+
+[MIT](./LICENSE) - Copyright (c) 2026 Kirill Kayer.

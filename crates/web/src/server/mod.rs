@@ -1,9 +1,8 @@
-//! Native server entry point and its supporting pieces: the CLI + config +
-//! storage bootstrap (formerly the `stomatopod` binary crate), server-rendered
-//! HTML for the non-SPA pages ([`html`]), and the fullstack wiring that merges
-//! the Dioxus SSR application onto the REST router ([`launch`]).
+//! Native server entry point: CLI, config, storage bootstrap, and the
+//! fullstack wiring that merges the Dioxus SSR application onto the REST
+//! router ([`launch`]). Login HTML lives in `stomatopod-api`.
 
-pub mod html;
 mod launch;
 
 pub use launch::{bootstrap_self_hosted, run};
+pub use stomatopod_api::html;

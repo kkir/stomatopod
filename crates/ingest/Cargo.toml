@@ -3,6 +3,9 @@ name = "stomatopod-ingest"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Event ingest pipeline for Stomatopod (beacon, batcher, geo, UA)"
 
 [dependencies]
 stomatopod-core = { path = "../core" }
@@ -21,7 +24,7 @@ dashmap = "6"
 
 [dev-dependencies]
 criterion = { workspace = true }
-stomatopod-store = { path = "../store", features = ["embedded"] }
+stomatopod-store = { path = "../store" }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 chrono = { workspace = true }

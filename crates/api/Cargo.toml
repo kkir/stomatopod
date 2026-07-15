@@ -1,0 +1,38 @@
+[package]
+name = "stomatopod-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "HTTP REST API for Stomatopod (no dashboard UI)"
+
+[dependencies]
+stomatopod-core = { path = "../core" }
+stomatopod-ingest = { path = "../ingest" }
+stomatopod-alerts = { path = "../alerts" }
+tokio = { workspace = true }
+axum = { version = "0.8", features = ["macros"] }
+axum-extra = { version = "0.10", features = ["cookie", "query"] }
+tower = { version = "0.5" }
+tower-http = { version = "0.6", features = ["compression-gzip", "cors", "trace"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+ulid = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+argon2 = { workspace = true }
+cookie = { workspace = true }
+blake3 = { workspace = true }
+hex = "0.4"
+getrandom = "0.2"
+dashmap = "6"
+reqwest = { workspace = true }
+utoipa = { version = "5", features = ["chrono", "ulid"] }
+pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = { workspace = true }

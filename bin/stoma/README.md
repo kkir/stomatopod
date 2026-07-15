@@ -23,9 +23,6 @@ cargo binstall --manifest-path bin/stoma --locked stomatopod-cli
 # or: cargo install --path bin/stoma
 ```
 
-Private GitHub repo: ensure `gh` is logged in, or set `GITHUB_TOKEN` /
-`GH_TOKEN` so binstall can clone and (later) fetch release assets.
-
 ## Configure
 
 ```bash

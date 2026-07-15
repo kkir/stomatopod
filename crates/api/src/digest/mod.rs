@@ -23,7 +23,7 @@ use stomatopod_core::{
 use tracing::{info, warn};
 use ulid::Ulid;
 
-use crate::alerts::sinks::{alert_http_client, deliver_text};
+use stomatopod_alerts::sinks::{alert_http_client, deliver_text};
 
 /// Auto-disable a subscription after this many consecutive delivery failures.
 pub const BOUNCE_DISABLE_THRESHOLD: u32 = 3;

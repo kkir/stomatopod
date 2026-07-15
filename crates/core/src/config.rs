@@ -5,7 +5,6 @@ use std::path::PathBuf;
 #[serde(default)]
 pub struct Config {
     pub listen: ListenConfig,
-    #[serde(default, deserialize_with = "deserialize_storage")]
     pub storage: StorageConfig,
     pub geo: GeoConfig,
     pub auth: AuthConfig,
@@ -45,48 +44,13 @@ impl Default for ListenConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "backend", rename_all = "snake_case")]
-pub enum StorageConfig {
-    Embedded(EmbeddedConfig),
-    Postgres(PostgresConfig),
-}
-
-impl Default for StorageConfig {
-    fn default() -> Self {
-        Self::Embedded(EmbeddedConfig::default())
-    }
-}
-
-/// Deserialize `storage`, defaulting the internally-tagged `backend`
-/// discriminator to `"embedded"` when it is absent but other `storage.*`
-/// keys are present.
+/// Embedded storage settings (SQLite metadata, WAL, Parquet under `data_dir`).
 ///
-/// Platforms like Coolify configure via individual env vars, so an operator
-/// who sets only `STOMATOPOD_STORAGE__DATA_DIR` (per DEPLOY.md) produces a
-/// `storage` table with no `backend` tag, which otherwise fails hard with
-/// `missing field \`backend\``. We buffer into a `serde_json::Value` (works
-/// over any self-describing deserializer, including the `config` crate's),
-/// inject `backend = "embedded"` only if missing, then deserialize the enum.
-/// This does not default any other required field, so e.g. `backend =
-/// "postgres"` without `url` still fails loudly. A fully-absent `storage`
-/// key never reaches this function; it uses the container-level
-/// `#[serde(default)]` fallback (`StorageConfig::default()`) instead.
-fn deserialize_storage<'de, D>(deserializer: D) -> Result<StorageConfig, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let mut value = serde_json::Value::deserialize(deserializer)?;
-    if let serde_json::Value::Object(map) = &mut value {
-        map.entry("backend")
-            .or_insert_with(|| serde_json::Value::String("embedded".to_string()));
-    }
-    serde_json::from_value(value).map_err(serde::de::Error::custom)
-}
-
+/// Unknown keys such as a legacy `backend = "embedded"` field are ignored so
+/// existing `stomatopod.toml` files keep working.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
-pub struct EmbeddedConfig {
+pub struct StorageConfig {
     pub data_dir: PathBuf,
     pub wal_fsync_interval_ms: u64,
     pub parquet_flush_rows: usize,
@@ -99,12 +63,11 @@ pub struct EmbeddedConfig {
     /// ephemeral test containers.
     pub allow_ephemeral: bool,
     /// Drop event data older than this many days. `0` (default) keeps forever.
-    /// Embedded backend deletes Hive `date=` Parquet partitions; Postgres
-    /// runs `DELETE FROM events WHERE timestamp < cutoff`.
+    /// Deletes Hive `date=` Parquet partitions older than the cutoff.
     pub retention_days: u64,
 }
 
-impl Default for EmbeddedConfig {
+impl Default for StorageConfig {
     fn default() -> Self {
         Self {
             data_dir: PathBuf::from("./data"),
@@ -117,19 +80,8 @@ impl Default for EmbeddedConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct PostgresConfig {
-    pub url: String,
-    #[serde(default = "default_pg_max_connections")]
-    pub max_connections: u32,
-    /// Drop event rows older than this many days. `0` (default) keeps forever.
-    #[serde(default)]
-    pub retention_days: u64,
-}
-
-fn default_pg_max_connections() -> u32 {
-    20
-}
+/// Alias kept for call sites that historically took `EmbeddedConfig`.
+pub type EmbeddedConfig = StorageConfig;
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(default)]
@@ -196,43 +148,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn storage_defaults_backend_to_embedded_when_only_other_keys_set() {
+    fn storage_reads_data_dir_when_backend_key_present() {
         let cfg: Config = serde_json::from_value(serde_json::json!({
-            "storage": { "data_dir": "/data" }
+            "storage": { "backend": "embedded", "data_dir": "/data" }
         }))
         .unwrap();
-        match cfg.storage {
-            StorageConfig::Embedded(e) => assert_eq!(e.data_dir, PathBuf::from("/data")),
-            other => panic!("expected Embedded, got {other:?}"),
-        }
+        assert_eq!(cfg.storage.data_dir, PathBuf::from("/data"));
     }
 
     #[test]
-    fn storage_defaults_to_embedded_when_fully_absent() {
+    fn storage_defaults_when_fully_absent() {
         let cfg: Config = serde_json::from_value(serde_json::json!({})).unwrap();
-        assert!(matches!(cfg.storage, StorageConfig::Embedded(_)));
+        assert_eq!(cfg.storage.data_dir, PathBuf::from("./data"));
     }
 
     #[test]
-    fn storage_passes_through_explicit_backend() {
+    fn storage_reads_partial_keys() {
         let cfg: Config = serde_json::from_value(serde_json::json!({
-            "storage": {
-                "backend": "postgres",
-                "url": "postgresql://localhost/db"
-            }
+            "storage": { "data_dir": "/data", "retention_days": 90 }
         }))
         .unwrap();
-        match cfg.storage {
-            StorageConfig::Postgres(p) => assert_eq!(p.url, "postgresql://localhost/db"),
-            other => panic!("expected Postgres, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn storage_postgres_without_url_still_fails() {
-        let result: Result<Config, _> = serde_json::from_value(serde_json::json!({
-            "storage": { "backend": "postgres" }
-        }));
-        assert!(result.is_err());
+        assert_eq!(cfg.storage.data_dir, PathBuf::from("/data"));
+        assert_eq!(cfg.storage.retention_days, 90);
     }
 }

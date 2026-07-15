@@ -30,7 +30,7 @@ pub trait StorageBackend: Send + Sync + 'static {
     // ---- Write path ----
 
     /// Enqueue a batch of events. Returns only after durability is guaranteed
-    /// (WAL flush for embedded; network ack for postgres).
+    /// (WAL flush for the embedded backend; ack for remote backends).
     async fn ingest_events(&self, events: Vec<Event>) -> Result<(), StoreError>;
 
     // ---- Analytics queries ----
@@ -113,7 +113,8 @@ pub trait StorageBackend: Send + Sync + 'static {
 
 /// Metadata CRUD: sites, orgs, users, funnels.
 ///
-/// Embedded: backed by SQLite. Postgres: backed by a connection pool.
+/// The self-hosted appliance backs this with SQLite. Other products may
+/// implement the trait against a remote store.
 #[async_trait]
 pub trait MetaStore: Send + Sync + 'static {
     // ---- Sites ----

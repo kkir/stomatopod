@@ -1,0 +1,21 @@
+[package]
+name = "stomatopod-alerts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Analytics alert evaluation and notification delivery for Stomatopod"
+
+[dependencies]
+stomatopod-core = { path = "../core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+ulid = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+reqwest = { workspace = true }
+blake3 = { workspace = true }
+tokio = { workspace = true }

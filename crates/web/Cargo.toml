@@ -3,6 +3,9 @@ name = "stomatopod-web"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Stomatopod dashboard UI and self-hosted server binary"
 
 [lib]
 name = "stomatopod_web"
@@ -25,6 +28,8 @@ web = ["dioxus/web"]
 server = [
     "dioxus/server",
     "dep:dioxus-server",
+    "dep:stomatopod-api",
+    "dep:stomatopod-alerts",
     "dep:stomatopod-ingest",
     "dep:stomatopod-store",
     "dep:tokio",
@@ -37,19 +42,12 @@ server = [
     "dep:anyhow",
     "dep:ulid",
     "dep:argon2",
-    "dep:cookie",
     "dep:blake3",
     "dep:hex",
     "dep:getrandom",
     "dep:dashmap",
-    "dep:pulldown-cmark",
-    "dep:tokio-stream",
-    "dep:futures-util",
-    "dep:reqwest",
-    "dep:async-trait",
     "dep:config",
     "dep:clap",
-    "dep:utoipa",
 ]
 
 [dependencies]
@@ -63,8 +61,10 @@ chrono = { workspace = true }
 # Server-only. Optional + gated behind the `server` feature so the wasm client
 # build never pulls axum/tokio/datafusion.
 dioxus-server = { version = "0.7.9", optional = true }
+stomatopod-api = { path = "../api", optional = true }
+stomatopod-alerts = { path = "../alerts", optional = true }
 stomatopod-ingest = { path = "../ingest", optional = true }
-stomatopod-store = { path = "../store", features = ["embedded", "postgres"], optional = true }
+stomatopod-store = { path = "../store", optional = true }
 tokio = { workspace = true, optional = true }
 axum = { version = "0.8", features = ["macros"], optional = true }
 axum-extra = { version = "0.10", features = ["cookie", "query"], optional = true }
@@ -75,19 +75,12 @@ tracing-subscriber = { workspace = true, optional = true }
 anyhow = { workspace = true, optional = true }
 ulid = { workspace = true, optional = true }
 argon2 = { workspace = true, optional = true }
-cookie = { workspace = true, optional = true }
 blake3 = { workspace = true, optional = true }
 hex = { version = "0.4", optional = true }
 getrandom = { version = "0.2", optional = true }
 dashmap = { version = "6", optional = true }
-pulldown-cmark = { version = "0.12", default-features = false, features = ["html"], optional = true }
-tokio-stream = { version = "0.1", features = ["sync"], optional = true }
-futures-util = { version = "0.3", optional = true }
-reqwest = { workspace = true, optional = true }
-async-trait = { workspace = true, optional = true }
 config = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
-utoipa = { version = "5", features = ["chrono", "ulid"], optional = true }
 
 # Browser-only crates. Target-gated so they compile only for the wasm client;
 # `src/ui/api.rs` uses them behind the same `cfg(target_arch = "wasm32")`.
@@ -135,3 +128,8 @@ bytes = { workspace = true }
 dashmap = "6"
 blake3 = { workspace = true }
 hex = "0.4"
+reqwest = { workspace = true }
+stomatopod-store = { path = "../store" }
+stomatopod-ingest = { path = "../ingest" }
+stomatopod-alerts = { path = "../alerts" }
+stomatopod-api = { path = "../api" }

@@ -14,11 +14,17 @@ use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use dashmap::DashMap;
+use stomatopod_api::{
+    digest::{self, DigestNotifier},
+    middleware::auth::require_auth,
+    router::build_router,
+    state::AppState,
+};
 use stomatopod_core::config::{Config, StorageConfig};
 use stomatopod_ingest::{batch::run_batcher, geo::GeoLookup};
-use stomatopod_store::{embedded::EmbeddedBackend, postgres::PostgresBackend};
+use stomatopod_store::EmbeddedBackend;
 
-use crate::{middleware::auth::require_auth, router::build_router, state::AppState};
+use crate::alerts;
 
 /// The Stomatopod server binary. Analytics querying lives in the separate
 /// `stoma` CLI; this binary only runs the server.
@@ -87,22 +93,9 @@ async fn serve(cfg: Config) -> Result<()> {
     let cfg = Arc::new(cfg);
 
     // Build storage backend.
-    let (backend, meta): (
-        Arc<dyn stomatopod_core::traits::StorageBackend>,
-        Arc<dyn stomatopod_core::traits::MetaStore>,
-    ) = match &cfg.storage {
-        StorageConfig::Embedded(emb_cfg) => {
-            let backend = EmbeddedBackend::open(emb_cfg).await?;
-            let backend = Arc::new(backend);
-            (backend.clone(), backend)
-        }
-        StorageConfig::Postgres(pg_cfg) => {
-            let backend = PostgresBackend::connect(pg_cfg).await?;
-            backend.bootstrap().await?;
-            let backend = Arc::new(backend);
-            (backend.clone(), backend)
-        }
-    };
+    let backend = Arc::new(EmbeddedBackend::open(&cfg.storage).await?);
+    let meta: Arc<dyn stomatopod_core::traits::MetaStore> = backend.clone();
+    let backend: Arc<dyn stomatopod_core::traits::StorageBackend> = backend;
 
     // Single-owner appliance: ensure a default org + owner user exist.
     bootstrap_self_hosted(&meta, &cfg).await?;
@@ -130,7 +123,7 @@ async fn serve(cfg: Config) -> Result<()> {
     let meta_for_eval = meta.clone();
     let backend_for_eval = backend.clone();
     tokio::spawn(async move {
-        crate::alerts::run_analytics_alert_evaluator(
+        alerts::run_analytics_alert_evaluator(
             meta_for_eval,
             backend_for_eval,
             std::time::Duration::from_secs(60),
@@ -140,15 +133,14 @@ async fn serve(cfg: Config) -> Result<()> {
 
     // Digest notifier + hourly scheduler. Digests post to each site's
     // configured Slack / Telegram / webhook channels.
-    let digest_notifier: Arc<dyn crate::digest::DigestNotifier> =
-        Arc::new(crate::digest::ChannelNotifier);
+    let digest_notifier: Arc<dyn DigestNotifier> = Arc::new(digest::ChannelNotifier);
     {
         let meta_for_digest = meta.clone();
         let backend_for_digest = backend.clone();
         let notifier_for_digest = digest_notifier.clone();
         let base_url = cfg.public_base_url().to_string();
         tokio::spawn(async move {
-            crate::digest::run_digest_scheduler(
+            digest::run_digest_scheduler(
                 meta_for_digest,
                 backend_for_digest,
                 notifier_for_digest,
@@ -230,11 +222,8 @@ fn load_config(path: &str) -> Result<Config> {
                 .prefix_separator("_")
                 .separator("__")
                 // Coerce env-var strings into their target scalar type
-                // (`true` -> bool, `200` -> int). Required for typed fields
-                // under the internally-tagged `storage` enum
-                // (e.g. STOMATOPOD_STORAGE__ALLOW_EPHEMERAL=true), which is
-                // buffered through serde's self-describing path and would
-                // otherwise reject the raw string with "invalid type: string".
+                // (`true` -> bool, `200` -> int), e.g.
+                // STOMATOPOD_STORAGE__ALLOW_EPHEMERAL=true.
                 // `list_separator` is intentionally left unset so string
                 // fields are not split into arrays.
                 .try_parsing(true),
@@ -333,12 +322,8 @@ fn hash_password(password: &str) -> Result<String> {
 
 /// `Some(days)` when retention is enabled (`days > 0`).
 fn retention_days(storage: &StorageConfig) -> Option<u64> {
-    let days = match storage {
-        StorageConfig::Embedded(c) => c.retention_days,
-        StorageConfig::Postgres(c) => c.retention_days,
-    };
-    if days > 0 {
-        Some(days)
+    if storage.retention_days > 0 {
+        Some(storage.retention_days)
     } else {
         None
     }

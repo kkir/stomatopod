@@ -9,8 +9,6 @@
 //!
 //! It only enforces when running inside a container; bare-metal installs and
 //! local development (where the operator owns the filesystem) are untouched.
-//! The postgres backend never calls this - its durability lives in
-//! the external database.
 
 use std::path::Path;
 
@@ -48,8 +46,7 @@ pub fn ensure_persistent(cfg: &EmbeddedConfig, data_dir: &Path) -> anyhow::Resul
          • docker run:    add  -v stomatopod_data:/app/data\n  \
          • docker compose: use the bundled docker-compose.yml (named volume)\n  \
          • PaaS / Kubernetes: mount a persistent disk at {dir} (or set \
-         STOMATOPOD_STORAGE__DATA_DIR to the mount path)\n  \
-         • or switch to a managed database with  backend = \"postgres\"\n\n\
+         STOMATOPOD_STORAGE__DATA_DIR to the mount path)\n\n\
          See DEPLOY.md for details. To intentionally run without persistence (demos, tests), \
          set  STOMATOPOD_STORAGE__ALLOW_EPHEMERAL=true",
         dir = data_dir.display(),

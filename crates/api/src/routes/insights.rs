@@ -16,14 +16,12 @@ use stomatopod_core::domain::{
     incident::{Incident, IncidentTrigger},
 };
 
-use crate::{
-    alerts::{
-        sinks::{alert_http_client, AlertSink, SlackSink, TelegramSink, WebhookSink},
-        validate_outbound_url,
-    },
-    middleware::auth::Principal,
-    state::AppState,
+use stomatopod_alerts::{
+    sinks::{alert_http_client, AlertSink, SlackSink, TelegramSink, WebhookSink},
+    validate_outbound_url,
 };
+
+use crate::{middleware::auth::Principal, state::AppState};
 
 /// Send a sample notification through a channel, used by the test-fire
 /// endpoint to let operators confirm a destination is wired up correctly.

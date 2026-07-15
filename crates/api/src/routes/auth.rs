@@ -14,8 +14,8 @@ use std::{
 
 use crate::{
     error::AppError,
+    html,
     middleware::auth::{sign_session_bound, verify_session, SESSION_COOKIE},
-    server::html,
     state::AppState,
 };
 

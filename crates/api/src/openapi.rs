@@ -32,7 +32,7 @@ use crate::routes::{
             **Auth:** Bearer ingest keys (`sk_live_…`) for `POST /api/v1/ingest`; \
             Bearer read keys (`rk_…`) or a dashboard session cookie for analytics.\n\n\
             **Narrative docs:** `/llms.txt` (Markdown). **This document:** machine-readable contract.",
-        license(name = "AGPL-3.0")
+        license(name = "MIT")
     ),
     paths(
         crate::routes::api::handle_ingest,
