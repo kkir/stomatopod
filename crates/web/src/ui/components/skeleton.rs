@@ -5,9 +5,18 @@ use dioxus::prelude::*;
 #[component]
 pub fn Skeleton(lines: usize) -> Element {
     rsx! {
-        div { class: "flex flex-col gap-2",
+        div {
+            class: "flex flex-col gap-2",
+            role: "status",
+            "aria-busy": "true",
+            "aria-live": "polite",
+            span { class: "sr-only", "Loading" }
             for i in 0..lines {
-                div { key: "{i}", class: "skeleton-bar h-5 motion-reduce:animate-none" }
+                div {
+                    key: "{i}",
+                    class: "skeleton-bar h-5 motion-reduce:animate-none",
+                    "aria-hidden": "true",
+                }
             }
         }
     }

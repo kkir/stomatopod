@@ -120,22 +120,41 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
     let plot_bottom = CHART_H;
     let y_scale = CHART_H - 12.0;
 
+    let total_pv: u64 = pageview_vals.iter().sum();
+    let total_sess: u64 = session_vals.iter().sum();
+    let chart_summary = format!(
+        "Traffic chart from {first_label} to {last_label}: {total_pv} pageviews, {total_sess} sessions"
+    );
+    let hover_live = hover_info.as_ref().map(|(_, p, prev)| {
+        let mut s = format!(
+            "{}, {} pageviews, {} sessions",
+            p.label, p.pageviews, p.sessions
+        );
+        if let Some((ppv, psess)) = prev {
+            s.push_str(&format!("; prior {ppv} pageviews, {psess} sessions"));
+        }
+        s
+    });
+
     rsx! {
-        div { class: "relative",
+        div {
+            class: "relative",
+            role: "img",
+            "aria-label": "{chart_summary}",
             // Legend
-            div { class: "flex items-center gap-5 mb-4 flex-wrap",
+            div {
+                class: "flex items-center gap-5 mb-4 flex-wrap",
+                "aria-hidden": "true",
                 span { class: "inline-flex items-center gap-2 text-[12px] font-semibold text-muted-1",
                     span {
                         class: "inline-block w-3.5 h-0.5 rounded-full",
                         style: "background: linear-gradient(90deg, #5eead4, #22d3ee)",
-                        "aria-hidden": "true",
                     }
                     "Pageviews"
                 }
                 span { class: "inline-flex items-center gap-2 text-[12px] font-semibold text-muted-1",
                     span {
                         class: "inline-block w-3.5 h-0.5 rounded-full bg-indigo-400",
-                        "aria-hidden": "true",
                     }
                     "Sessions"
                 }
@@ -143,16 +162,34 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
                     span { class: "inline-flex items-center gap-2 text-[12px] font-semibold text-muted-1",
                         span {
                             class: "inline-block w-3.5 border-t border-dashed border-teal-hi/70",
-                            "aria-hidden": "true",
                         }
                         "Prior pageviews"
                     }
                     span { class: "inline-flex items-center gap-2 text-[12px] font-semibold text-muted-1",
                         span {
                             class: "inline-block w-3.5 border-t border-dashed border-indigo-400/70",
-                            "aria-hidden": "true",
                         }
                         "Prior sessions"
+                    }
+                }
+            }
+            // Screen-reader data table (hidden visually; chart is decorative).
+            table { class: "sr-only",
+                caption { "Daily traffic" }
+                thead {
+                    tr {
+                        th { scope: "col", "Date" }
+                        th { scope: "col", "Pageviews" }
+                        th { scope: "col", "Sessions" }
+                    }
+                }
+                tbody {
+                    for p in points.iter() {
+                        tr {
+                            th { scope: "row", "{p.label}" }
+                            td { "{p.pageviews}" }
+                            td { "{p.sessions}" }
+                        }
                     }
                 }
             }
@@ -160,6 +197,7 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
                 view_box: "0 0 800 {plot_h}",
                 preserve_aspect_ratio: "none",
                 class: "w-full h-[180px]",
+                "aria-hidden": "true",
                 onmouseleave: move |_| hover.set(None),
                 defs {
                     linearGradient { id: "chart-line-pv", x1: "0", y1: "0", x2: "1", y2: "0",
@@ -296,6 +334,7 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
             if let Some((_, p, prev)) = &hover_info {
                 div {
                     class: "pointer-events-none absolute top-10 left-1/2 -translate-x-1/2 max-w-[calc(100%-0.5rem)] px-2.5 sm:px-3 py-2 rounded-lg bg-surface-2 border border-border-2 text-[11px] sm:text-[11.5px] font-semibold text-text-1 shadow-sm tabular-nums",
+                    "aria-hidden": "true",
                     div { class: "text-center text-muted-1 mb-1", "{p.label}" }
                     div { class: "flex flex-wrap gap-x-3 gap-y-0.5 justify-center",
                         span { class: "text-teal-hi", "{p.pageviews} pageviews" }
@@ -309,7 +348,19 @@ pub fn TimeseriesChart(points: Vec<ChartPoint>, previous: Option<Vec<ChartPoint>
                     }
                 }
             }
-            div { class: "flex justify-between mt-2.5 px-0.5",
+            // Live region mirrors the hover tooltip for keyboard/AT users that
+            // still interact via the pointer (tooltip is aria-hidden).
+            div {
+                class: "sr-only",
+                role: "status",
+                "aria-live": "polite",
+                if let Some(text) = hover_live {
+                    "{text}"
+                }
+            }
+            div {
+                class: "flex justify-between mt-2.5 px-0.5",
+                "aria-hidden": "true",
                 span { class: "text-muted-2 text-[11px] tabular-nums", "{first_label}" }
                 span { class: "text-muted-2 text-[11px] tabular-nums", "{last_label}" }
             }

@@ -42,6 +42,7 @@ pub fn SiteKeys(site_id: String) -> Element {
             }
             form {
                 class: "flex flex-wrap items-end gap-2",
+                "aria-label": "Create site API key",
                 onsubmit: {
                     let site_id = site_id.clone();
                     move |evt: FormEvent| {
@@ -70,19 +71,26 @@ pub fn SiteKeys(site_id: String) -> Element {
                         });
                     }
                 },
-                input {
-                    class: CTRL_INPUT,
-                    r#type: "text",
-                    value: "{name}",
-                    placeholder: "Key name",
-                    oninput: move |e| name.set(e.value()),
+                label { class: "flex flex-col gap-1",
+                    span { class: "sr-only", "Key name" }
+                    input {
+                        class: CTRL_INPUT,
+                        r#type: "text",
+                        value: "{name}",
+                        placeholder: "Key name",
+                        required: true,
+                        oninput: move |e| name.set(e.value()),
+                    }
                 }
-                select {
-                    class: CTRL_INPUT,
-                    value: "{scope}",
-                    onchange: move |e| scope.set(e.value()),
-                    option { value: "ingest", "Ingest (this site)" }
-                    option { value: "read", "Read (org-wide)" }
+                label { class: "flex flex-col gap-1",
+                    span { class: "sr-only", "Key scope" }
+                    select {
+                        class: CTRL_INPUT,
+                        value: "{scope}",
+                        onchange: move |e| scope.set(e.value()),
+                        option { value: "ingest", "Ingest (this site)" }
+                        option { value: "read", "Read (org-wide)" }
+                    }
                 }
                 button { r#type: "submit", class: BTN_PRIMARY, "Create key" }
             }

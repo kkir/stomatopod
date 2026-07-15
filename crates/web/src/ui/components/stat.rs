@@ -29,20 +29,42 @@ pub fn StatTile(
     rsx! {
         div { class: "min-w-0",
             div { class: "text-muted-1 text-[11px] uppercase tracking-[0.14em] font-semibold", "{label}" }
-            div { class: "text-grad-value font-display text-[28px] sm:text-[40px] font-bold tracking-tight tabular-nums mt-1.5 leading-none break-all", "{value}" }
+            // Transparent clip-text can drop the value for some ATTs; keep a
+            // plain value in an sr-only node and hide the decorative gradient.
+            span { class: "sr-only", "{value}" }
+            div {
+                class: "text-grad-value font-display text-[28px] sm:text-[40px] font-bold tracking-tight tabular-nums mt-1.5 leading-none break-all",
+                "aria-hidden": "true",
+                "{value}"
+            }
             if let Some(d) = delta {
-                div {
-                    class: match d.dir {
-                        DeltaDir::Up => "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-green",
-                        DeltaDir::Down => "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-red",
-                        DeltaDir::New | DeltaDir::Flat => "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-muted-2",
-                    },
-                    {match d.dir {
-                        DeltaDir::Up => rsx! { "▲ {d.pct:.1}%" },
-                        DeltaDir::Down => rsx! { "▼ {d.pct:.1}%" },
-                        DeltaDir::New => rsx! { "New" },
-                        DeltaDir::Flat => rsx! { "- {d.pct:.1}%" },
-                    }}
+                {
+                    let (visible, spoken) = match d.dir {
+                        DeltaDir::Up => (
+                            format!("▲ {:.1}%", d.pct),
+                            format!("up {:.1}% versus previous period", d.pct),
+                        ),
+                        DeltaDir::Down => (
+                            format!("▼ {:.1}%", d.pct),
+                            format!("down {:.1}% versus previous period", d.pct),
+                        ),
+                        DeltaDir::New => ("New".to_string(), "new versus previous period".to_string()),
+                        DeltaDir::Flat => (
+                            format!("- {:.1}%", d.pct),
+                            format!("unchanged ({:.1}%) versus previous period", d.pct),
+                        ),
+                    };
+                    rsx! {
+                        div {
+                            class: match d.dir {
+                                DeltaDir::Up => "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-green",
+                                DeltaDir::Down => "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-red",
+                                DeltaDir::New | DeltaDir::Flat => "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-muted-2",
+                            },
+                            span { class: "sr-only", "{spoken}" }
+                            span { "aria-hidden": "true", "{visible}" }
+                        }
+                    }
                 }
             }
             if let Some(p) = prev {

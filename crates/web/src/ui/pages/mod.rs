@@ -154,19 +154,24 @@ pub(crate) fn active_filters(route: &Route, q: &DashQuery) -> Element {
     let q = q.clone();
     rsx! {
         if !q.filters.is_empty() {
-            div { class: "flex flex-wrap gap-2 mb-4",
+            div {
+                class: "flex flex-wrap gap-2 mb-4",
+                role: "list",
+                "aria-label": "Active filters",
                 for filter in q.filters.clone() {
-                    FilterPill {
-                        key: "{filter}",
-                        label: humanize_filter(&filter),
-                        on_remove: {
-                            let route = route.clone();
-                            let q = q.clone();
-                            let filter = filter.clone();
-                            move |_| {
-                                navigator().push(route.with_query(q.without_filter(&filter)));
-                            }
-                        },
+                    div { role: "listitem",
+                        FilterPill {
+                            key: "{filter}",
+                            label: humanize_filter(&filter),
+                            on_remove: {
+                                let route = route.clone();
+                                let q = q.clone();
+                                let filter = filter.clone();
+                                move |_| {
+                                    navigator().push(route.with_query(q.without_filter(&filter)));
+                                }
+                            },
+                        }
                     }
                 }
             }

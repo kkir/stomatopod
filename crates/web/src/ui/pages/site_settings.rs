@@ -84,10 +84,15 @@ fn GeneralCard(site: SiteSummary) -> Element {
                 div { class: "flex items-center gap-3",
                     button { r#type: "submit", class: BTN_PRIMARY, "Save" }
                     if saved() {
-                        span { class: "text-green text-xs", "Saved" }
+                        span {
+                            class: "text-green text-xs",
+                            role: "status",
+                            "aria-live": "polite",
+                            "Saved"
+                        }
                     }
                     if let Some(err) = error() {
-                        span { class: "text-red-400 text-xs", "{err}" }
+                        span { class: "text-red-400 text-xs", role: "alert", "{err}" }
                     }
                 }
             }
@@ -156,13 +161,16 @@ fn DigestCard(site_id: String) -> Element {
                                 checked: enabled,
                                 onchange: move |on| put_toggle(freq_for_toggle.clone(), on),
                             }
-                            select {
-                                class: CTRL_INPUT,
-                                value: "{frequency}",
-                                onchange: move |e| put_freq(e.value(), enabled),
-                                option { value: "weekly", "Weekly" }
-                                option { value: "monthly", "Monthly" }
-                                option { value: "both", "Weekly + monthly" }
+                            label { class: "inline-flex items-center gap-2",
+                                span { class: "sr-only", "Digest frequency" }
+                                select {
+                                    class: CTRL_INPUT,
+                                    value: "{frequency}",
+                                    onchange: move |e| put_freq(e.value(), enabled),
+                                    option { value: "weekly", "Weekly" }
+                                    option { value: "monthly", "Monthly" }
+                                    option { value: "both", "Weekly + monthly" }
+                                }
                             }
                             if has_sub {
                                 button {
@@ -189,7 +197,12 @@ fn DigestCard(site_id: String) -> Element {
                             }
                         }
                         if !status.is_empty() {
-                            p { class: "text-muted-1 text-[12px] mt-2", "{status}" }
+                            p {
+                                class: "text-muted-1 text-[12px] mt-2",
+                                role: "status",
+                                "aria-live": "polite",
+                                "{status}"
+                            }
                         }
                     }
                 }
@@ -298,6 +311,7 @@ fn ChannelList(
                                         button {
                                             r#type: "button",
                                             class: BTN_GHOST,
+                                            "aria-label": "Test channel {ch.url}",
                                             onclick: {
                                                 let site_id = site_id.clone();
                                                 let id = ch.id.clone();
@@ -327,6 +341,7 @@ fn ChannelList(
                                         button {
                                             r#type: "button",
                                             class: BTN_GHOST,
+                                            "aria-label": "Delete channel {ch.url}",
                                             onclick: {
                                                 let site_id = site_id.clone();
                                                 let id = ch.id.clone();

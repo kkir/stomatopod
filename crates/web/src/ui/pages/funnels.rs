@@ -78,6 +78,7 @@ pub fn Funnels(site_id: String, q: DashQuery) -> Element {
                                             button {
                                                 r#type: "button",
                                                 class: BTN_GHOST,
+                                                "aria-label": "Delete funnel {f.name}",
                                                 onclick: {
                                                     let site_id = site_id.clone();
                                                     let funnel_id = f.id.clone();

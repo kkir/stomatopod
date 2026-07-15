@@ -28,20 +28,35 @@ pub fn RangeTabs(active: String) -> Element {
 
     rsx! {
         div { class: "inline-flex flex-wrap items-center gap-1.5 shrink-0",
-            div {
+            // Navigation links (not in-page tabs): use a labelled group +
+            // aria-current, not role=tablist.
+            nav {
                 class: "inline-flex items-center h-9 gap-0.5 p-[3px] rounded-[11px] bg-surface-2/80 border border-border-1 shadow-inner-hi shrink-0",
-                role: "tablist",
                 "aria-label": "Date range",
                 for range in RANGES {
-                    Link {
-                        key: "{range}",
-                        to: route.with_query(current.with_range(range)),
-                        class: if active_preset == range {
-                            "inline-flex items-center justify-center h-full min-w-[2.4rem] sm:min-w-[2.65rem] px-2.5 sm:px-3.5 rounded-[8px] text-[12px] sm:text-[12.5px] font-semibold bg-grad-btn text-[#032621] shadow-[inset_0_1px_0_rgba(255,255,255,.35),0_1px_6px_rgba(45,212,191,.45)] no-underline"
-                        } else {
-                            "inline-flex items-center justify-center h-full min-w-[2.4rem] sm:min-w-[2.65rem] px-2.5 sm:px-3.5 rounded-[8px] text-[12px] sm:text-[12.5px] font-semibold text-muted-1 hover:text-text-1 no-underline"
-                        },
-                        "{range}"
+                    {
+                        let is_active = active_preset == range;
+                        let range_label = match range {
+                            "7d" => "Last 7 days",
+                            "30d" => "Last 30 days",
+                            "90d" => "Last 90 days",
+                            "12m" => "Last 12 months",
+                            _ => range,
+                        };
+                        rsx! {
+                            Link {
+                                key: "{range}",
+                                to: route.with_query(current.with_range(range)),
+                                "aria-label": "{range_label}",
+                                "aria-current": if is_active { "true" },
+                                class: if is_active {
+                                    "inline-flex items-center justify-center h-full min-w-[2.4rem] sm:min-w-[2.65rem] px-2.5 sm:px-3.5 rounded-[8px] text-[12px] sm:text-[12.5px] font-semibold bg-grad-btn text-[#032621] shadow-[inset_0_1px_0_rgba(255,255,255,.35),0_1px_6px_rgba(45,212,191,.45)] no-underline"
+                                } else {
+                                    "inline-flex items-center justify-center h-full min-w-[2.4rem] sm:min-w-[2.65rem] px-2.5 sm:px-3.5 rounded-[8px] text-[12px] sm:text-[12.5px] font-semibold text-muted-1 hover:text-text-1 no-underline"
+                                },
+                                "{range}"
+                            }
+                        }
                     }
                 }
             }
@@ -81,6 +96,7 @@ pub fn RangeTabs(active: String) -> Element {
                     } else {
                         "h-9 inline-flex items-center px-3 rounded-[11px] text-[12px] font-semibold text-muted-1 hover:text-text-1 bg-surface-2/80 border border-border-1 shadow-inner-hi cursor-pointer shrink-0"
                     },
+                    "aria-label": "Apply custom date range",
                     "Go"
                 }
             }
@@ -193,6 +209,7 @@ pub fn SiteTabs(site_id: String, range: String, active: SiteTab, children: Eleme
                     Link {
                         key: "{label}",
                         to,
+                        "aria-current": if tab == active { "page" },
                         class: if tab == active {
                             "shrink-0 pb-[11px] text-[13px] sm:text-[13.5px] font-medium text-text-1 relative after:content-[''] after:absolute after:left-0 after:right-0 after:-bottom-px after:h-0.5 after:rounded-full after:bg-iri after:shadow-[0_0_10px_rgba(45,212,191,0.55)]"
                         } else {
@@ -211,21 +228,41 @@ pub fn SiteTabs(site_id: String, range: String, active: SiteTab, children: Eleme
 
 /// Segment control for switching dimensions inside a card (Pages / Entry / Exit,
 /// Countries / Regions, etc.). Parent owns the active index and content.
+///
+/// Uses the ARIA tabs pattern (`tablist` / `tab` / `aria-selected`). All tabs
+/// stay in the tab order (small sets of 2-3) so keyboard users can Tab between
+/// them without roving-tabindex focus management.
 #[component]
-pub fn DimensionTabs(tabs: Vec<String>, active: usize, on_select: EventHandler<usize>) -> Element {
+pub fn DimensionTabs(
+    tabs: Vec<String>,
+    active: usize,
+    on_select: EventHandler<usize>,
+    #[props(default)] aria_label: Option<String>,
+) -> Element {
+    let list_label = aria_label.unwrap_or_else(|| "Dimensions".to_string());
     rsx! {
-        div { class: "inline-flex flex-wrap gap-0.5 p-[3px] rounded-[11px] bg-surface-2/80 border border-border-1 shadow-inner-hi",
+        div {
+            class: "inline-flex flex-wrap gap-0.5 p-[3px] rounded-[11px] bg-surface-2/80 border border-border-1 shadow-inner-hi",
+            role: "tablist",
+            "aria-label": "{list_label}",
             for (i, label) in tabs.into_iter().enumerate() {
-                button {
-                    key: "{label}",
-                    r#type: "button",
-                    class: if i == active {
-                        "px-2.5 py-1 rounded-lg text-[11.5px] font-semibold bg-grad-btn text-[#032621] shadow-[inset_0_1px_0_rgba(255,255,255,.35),0_1px_6px_rgba(45,212,191,.45)] cursor-pointer border-0"
-                    } else {
-                        "px-2.5 py-1 rounded-lg text-[11.5px] font-semibold text-muted-1 hover:text-text-1 cursor-pointer bg-transparent border-0"
-                    },
-                    onclick: move |_| on_select.call(i),
-                    "{label}"
+                {
+                    let selected = i == active;
+                    rsx! {
+                        button {
+                            key: "{label}",
+                            r#type: "button",
+                            role: "tab",
+                            "aria-selected": if selected { "true" } else { "false" },
+                            class: if selected {
+                                "px-2.5 py-1 rounded-lg text-[11.5px] font-semibold bg-grad-btn text-[#032621] shadow-[inset_0_1px_0_rgba(255,255,255,.35),0_1px_6px_rgba(45,212,191,.45)] cursor-pointer border-0"
+                            } else {
+                                "px-2.5 py-1 rounded-lg text-[11.5px] font-semibold text-muted-1 hover:text-text-1 cursor-pointer bg-transparent border-0"
+                            },
+                            onclick: move |_| on_select.call(i),
+                            "{label}"
+                        }
+                    }
                 }
             }
         }
@@ -244,6 +281,8 @@ pub fn TabbedCard(
     csv_href: Option<String>,
     children: Element,
 ) -> Element {
+    let dim_label = format!("{title} dimensions");
+    let csv_label = format!("Export {title} CSV");
     rsx! {
         div { class: "relative bg-surface-1 border border-border-1 rounded-xl p-4 sm:p-6 shadow-sm shadow-inner-hi",
             div { class: "flex justify-between items-center mb-4 gap-3 flex-wrap",
@@ -259,17 +298,23 @@ pub fn TabbedCard(
                         tabs,
                         active,
                         on_select,
+                        aria_label: dim_label,
                     }
                     if let Some(href) = csv_href {
                         a {
                             class: "csv-btn inline-flex items-center px-[9px] py-0.5 rounded-md border border-border-2 text-[11px] font-semibold tracking-[0.04em] text-muted-1 no-underline hover:text-text-1 hover:border-border-3",
                             href: "{href}",
+                            "aria-label": "{csv_label}",
                             "CSV"
                         }
                     }
                 }
             }
-            {children}
+            div {
+                role: "tabpanel",
+                "aria-label": "{title}",
+                {children}
+            }
         }
     }
 }

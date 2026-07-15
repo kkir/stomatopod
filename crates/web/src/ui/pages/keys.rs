@@ -55,33 +55,47 @@ fn PasswordCard() -> Element {
                         }
                     });
                 },
-                input {
-                    class: CTRL_INPUT,
-                    r#type: "password",
-                    autocomplete: "current-password",
-                    placeholder: "Current password",
-                    value: "{current}",
-                    oninput: move |e| current.set(e.value()),
+                label { class: "flex flex-col gap-1.5",
+                    span { class: "text-[0.72rem] tracking-[0.06em] uppercase text-muted-1 font-semibold", "Current password" }
+                    input {
+                        class: CTRL_INPUT,
+                        r#type: "password",
+                        autocomplete: "current-password",
+                        placeholder: "Current password",
+                        value: "{current}",
+                        oninput: move |e| current.set(e.value()),
+                    }
                 }
-                input {
-                    class: CTRL_INPUT,
-                    r#type: "password",
-                    autocomplete: "new-password",
-                    placeholder: "New password",
-                    value: "{new_pw}",
-                    oninput: move |e| new_pw.set(e.value()),
+                label { class: "flex flex-col gap-1.5",
+                    span { class: "text-[0.72rem] tracking-[0.06em] uppercase text-muted-1 font-semibold", "New password" }
+                    input {
+                        class: CTRL_INPUT,
+                        r#type: "password",
+                        autocomplete: "new-password",
+                        placeholder: "New password",
+                        value: "{new_pw}",
+                        oninput: move |e| new_pw.set(e.value()),
+                    }
                 }
-                input {
-                    class: CTRL_INPUT,
-                    r#type: "password",
-                    autocomplete: "new-password",
-                    placeholder: "Confirm new password",
-                    value: "{confirm}",
-                    oninput: move |e| confirm.set(e.value()),
+                label { class: "flex flex-col gap-1.5",
+                    span { class: "text-[0.72rem] tracking-[0.06em] uppercase text-muted-1 font-semibold", "Confirm new password" }
+                    input {
+                        class: CTRL_INPUT,
+                        r#type: "password",
+                        autocomplete: "new-password",
+                        placeholder: "Confirm new password",
+                        value: "{confirm}",
+                        oninput: move |e| confirm.set(e.value()),
+                    }
                 }
                 button { r#type: "submit", class: BTN_PRIMARY, "Update password" }
                 if !status().is_empty() {
-                    p { class: "text-muted-1 text-[12px]", "{status}" }
+                    p {
+                        class: "text-muted-1 text-[12px]",
+                        role: "status",
+                        "aria-live": "polite",
+                        "{status}"
+                    }
                 }
             }
         }
@@ -92,7 +106,10 @@ fn PasswordCard() -> Element {
 #[component]
 pub fn SecretBanner(created: CreatedApiKey) -> Element {
     rsx! {
-        div { class: "bg-teal-soft border border-teal/50 rounded-lg p-3 mb-4",
+        div {
+            class: "bg-teal-soft border border-teal/50 rounded-lg p-3 mb-4",
+            role: "status",
+            "aria-live": "polite",
             div { class: "text-teal-hi text-[13px] font-semibold mb-1",
                 "Key \"{created.name}\" created - copy it now, it won't be shown again:"
             }
@@ -119,6 +136,7 @@ pub fn KeyRow(api_key: ApiKey, delete_path: String, on_delete: EventHandler<()>)
             button {
                 r#type: "button",
                 class: BTN_GHOST,
+                "aria-label": "Revoke key {api_key.name}",
                 onclick: move |_| {
                     let delete_path = delete_path.clone();
                     spawn(async move {
@@ -165,6 +183,7 @@ pub fn Keys() -> Element {
             }
             form {
                 class: "flex flex-wrap items-end gap-2",
+                "aria-label": "Create API key",
                 onsubmit: move |evt: FormEvent| {
                     evt.prevent_default();
                     let n = name().trim().to_string();
@@ -187,18 +206,25 @@ pub fn Keys() -> Element {
                         }
                     });
                 },
-                input {
-                    class: CTRL_INPUT,
-                    r#type: "text",
-                    value: "{name}",
-                    placeholder: "Key name",
-                    oninput: move |e| name.set(e.value()),
+                label { class: "flex flex-col gap-1",
+                    span { class: "sr-only", "Key name" }
+                    input {
+                        class: CTRL_INPUT,
+                        r#type: "text",
+                        value: "{name}",
+                        placeholder: "Key name",
+                        required: true,
+                        oninput: move |e| name.set(e.value()),
+                    }
                 }
-                select {
-                    class: CTRL_INPUT,
-                    value: "{scope}",
-                    onchange: move |e| scope.set(e.value()),
-                    option { value: "read", "Read (org-wide)" }
+                label { class: "flex flex-col gap-1",
+                    span { class: "sr-only", "Key scope" }
+                    select {
+                        class: CTRL_INPUT,
+                        value: "{scope}",
+                        onchange: move |e| scope.set(e.value()),
+                        option { value: "read", "Read (org-wide)" }
+                    }
                 }
                 button { r#type: "submit", class: BTN_PRIMARY, "Create key" }
             }

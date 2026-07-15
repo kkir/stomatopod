@@ -312,6 +312,7 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
             RangeTabs { active: range.clone() }
             Link {
                 to: compare_route,
+                "aria-label": if comparing { "Disable period comparison" } else { "Compare to previous period" },
                 class: if comparing {
                     "h-9 inline-flex items-center px-4 rounded-[11px] text-[12.5px] font-semibold bg-teal-soft text-teal-hi border border-teal/35 no-underline shrink-0"
                 } else {
@@ -325,6 +326,8 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
             button {
                 r#type: "button",
                 class: if show_filter() { BTN_TAB_ACTION_ON } else { BTN_TAB_ACTION },
+                "aria-expanded": if show_filter() { "true" } else { "false" },
+                "aria-controls": "overview-filter-panel",
                 onclick: move |_| {
                     let next = !show_filter();
                     show_filter.set(next);
@@ -337,6 +340,8 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
             button {
                 r#type: "button",
                 class: if show_export() { BTN_TAB_ACTION_ON } else { BTN_TAB_ACTION },
+                "aria-expanded": if show_export() { "true" } else { "false" },
+                "aria-controls": "overview-export-panel",
                 onclick: move |_| {
                     let next = !show_export();
                     show_export.set(next);
@@ -352,7 +357,9 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
 
         if show_filter() {
             form {
+                id: "overview-filter-panel",
                 class: "flex flex-wrap items-end gap-2.5 mb-6 p-3.5 rounded-xl border border-border-1 bg-surface-1 shadow-inner-hi",
+                "aria-label": "Add filter",
                 onsubmit: {
                     let route = route.clone();
                     let q = q.clone();
@@ -368,45 +375,58 @@ pub fn SiteOverview(site_id: String, q: DashQuery) -> Element {
                         }
                     }
                 },
-                select {
-                    class: CTRL_INPUT,
-                    value: "{f_field}",
-                    onchange: move |e| f_field.set(e.value()),
-                    option { value: "url", "Page" }
-                    option { value: "referrer", "Referrer" }
-                    option { value: "country", "Country" }
-                    option { value: "region", "Region" }
-                    option { value: "browser", "Browser" }
-                    option { value: "os", "OS" }
-                    option { value: "device_type", "Device" }
-                    option { value: "utm_source", "UTM source" }
-                    option { value: "utm_medium", "UTM medium" }
-                    option { value: "utm_campaign", "UTM campaign" }
-                    option { value: "utm_term", "UTM term" }
-                    option { value: "utm_content", "UTM content" }
+                label { class: "flex flex-col gap-1",
+                    span { class: "sr-only", "Filter field" }
+                    select {
+                        class: CTRL_INPUT,
+                        value: "{f_field}",
+                        onchange: move |e| f_field.set(e.value()),
+                        option { value: "url", "Page" }
+                        option { value: "referrer", "Referrer" }
+                        option { value: "country", "Country" }
+                        option { value: "region", "Region" }
+                        option { value: "browser", "Browser" }
+                        option { value: "os", "OS" }
+                        option { value: "device_type", "Device" }
+                        option { value: "utm_source", "UTM source" }
+                        option { value: "utm_medium", "UTM medium" }
+                        option { value: "utm_campaign", "UTM campaign" }
+                        option { value: "utm_term", "UTM term" }
+                        option { value: "utm_content", "UTM content" }
+                    }
                 }
-                select {
-                    class: CTRL_INPUT,
-                    value: "{f_op}",
-                    onchange: move |e| f_op.set(e.value()),
-                    option { value: "eq", "is" }
-                    option { value: "not_eq", "is not" }
-                    option { value: "contains", "contains" }
-                    option { value: "starts_with", "starts with" }
+                label { class: "flex flex-col gap-1",
+                    span { class: "sr-only", "Filter operator" }
+                    select {
+                        class: CTRL_INPUT,
+                        value: "{f_op}",
+                        onchange: move |e| f_op.set(e.value()),
+                        option { value: "eq", "is" }
+                        option { value: "not_eq", "is not" }
+                        option { value: "contains", "contains" }
+                        option { value: "starts_with", "starts with" }
+                    }
                 }
-                input {
-                    class: "{CTRL_INPUT} min-w-[10rem] flex-1",
-                    r#type: "text",
-                    value: "{f_value}",
-                    placeholder: "filter value",
-                    oninput: move |e| f_value.set(e.value()),
+                label { class: "flex flex-col gap-1 min-w-[10rem] flex-1",
+                    span { class: "sr-only", "Filter value" }
+                    input {
+                        class: "{CTRL_INPUT} w-full",
+                        r#type: "text",
+                        value: "{f_value}",
+                        placeholder: "filter value",
+                        oninput: move |e| f_value.set(e.value()),
+                    }
                 }
                 button { r#type: "submit", class: BTN_PRIMARY, "Apply" }
             }
         }
 
         if show_export() {
-            div { class: "flex flex-wrap items-center gap-2 mb-6 p-3.5 rounded-xl border border-border-1 bg-surface-1 shadow-inner-hi",
+            div {
+                id: "overview-export-panel",
+                class: "flex flex-wrap items-center gap-2 mb-6 p-3.5 rounded-xl border border-border-1 bg-surface-1 shadow-inner-hi",
+                role: "region",
+                "aria-label": "Export data",
                 span { class: "text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-2 mr-1", "Download" }
                 a { class: BTN_GHOST, href: "{events_csv}", "Events CSV" }
                 a { class: BTN_GHOST, href: "{sessions_csv}", "Sessions CSV" }

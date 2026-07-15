@@ -107,13 +107,15 @@ test("funnel detail shows conversion steps after seeded traffic", async ({
   await waitForSpa(page);
   await expect(page).toHaveURL(new RegExp(`/sites/${site.id}/funnels/`));
 
-  // Bars render step labels + session counts (3 then 2).
-  await expect(page.getByText("Landing", { exact: true })).toBeVisible({
+  // Bars + accessible data table both expose step labels; assert via the table
+  // (role=img summary) so we do not strict-mode-duplicate with visible bars.
+  const funnelChart = page.getByRole("img", { name: "Funnel conversion by step" });
+  await expect(funnelChart.getByRole("rowheader", { name: "Landing" })).toBeVisible({
     timeout: 15_000,
   });
-  await expect(page.getByText("Signed up", { exact: true })).toBeVisible();
-  await expect(page.getByText("3", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("2", { exact: true }).first()).toBeVisible();
+  await expect(funnelChart.getByRole("rowheader", { name: "Signed up" })).toBeVisible();
+  await expect(funnelChart.getByRole("row", { name: /Landing 3/ })).toBeVisible();
+  await expect(funnelChart.getByRole("row", { name: /Signed up 2/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Delete funnel" })).toBeVisible();
   await expect(page.getByRole("link", { name: /All funnels/ })).toBeVisible();
 });
@@ -233,7 +235,7 @@ test("digest subscription can be enabled from site settings", async ({
   // Digest delivery needs a channel; add a public webhook first.
   await page.goto(`${UI}/sites/${site.id}/settings`);
   await waitForSpa(page);
-  await page.getByRole("button", { name: "Webhook", exact: true }).click();
+  await page.getByRole("tab", { name: "Webhook", exact: true }).click();
   const hookUrl = `https://example.com/hooks/digest-${Date.now().toString(36)}`;
   await fillNoAutofill(page, "https://example.com/hooks/stomatopod", hookUrl);
   await page.getByRole("button", { name: "Add webhook" }).click();
@@ -241,11 +243,11 @@ test("digest subscription can be enabled from site settings", async ({
     timeout: 10_000,
   });
 
-  // Enable digest via the switch label.
+  // Enable digest via the switch control.
   await expect(
     page.getByRole("heading", { name: "Analytics digest" }),
   ).toBeVisible();
-  await page.getByText("Send me a digest", { exact: true }).click();
+  await page.getByRole("switch", { name: "Send me a digest" }).click();
 
   // Frequency select becomes meaningful; Send test appears once subscribed.
   await expect(page.getByRole("button", { name: "Send test" })).toBeVisible({
@@ -302,7 +304,7 @@ test("notification destination test button reports a result", async ({
 
   await page.goto(`${UI}/sites/${site.id}/settings`);
   await waitForSpa(page);
-  await page.getByRole("button", { name: "Webhook", exact: true }).click();
+  await page.getByRole("tab", { name: "Webhook", exact: true }).click();
   const hookUrl = `https://example.com/hooks/tf-${Date.now().toString(36)}`;
   await fillNoAutofill(page, "https://example.com/hooks/stomatopod", hookUrl);
   await page.getByRole("button", { name: "Add webhook" }).click();
@@ -311,8 +313,8 @@ test("notification destination test button reports a result", async ({
   });
 
   // Test-fire: example.com may return non-2xx → "Test failed"; either way the UI path runs.
-  const row = page.locator("div").filter({ hasText: hookUrl }).first();
-  await row.getByRole("button", { name: "Test", exact: true }).click();
+  // Accessible name is "Test channel {url}" (aria-label); match by prefix.
+  await page.getByRole("button", { name: new RegExp(`^Test channel ${hookUrl}`) }).click();
   await expect(
     page.getByText(/Test (delivered|failed:|error:)/i).first(),
   ).toBeVisible({ timeout: 15_000 });
@@ -342,14 +344,19 @@ test("overview range, compare, and filter update the URL and UI", async ({
   await page.goto(`${UI}/sites/${site.id}`);
   await waitForSpa(page);
 
-  // Range pill → URL.
-  await page.getByRole("tablist", { name: "Date range" }).getByText("7d").click();
+  // Range pills are a labelled nav of links (accessible names are expanded,
+  // e.g. "Last 7 days"), not a tablist.
+  await page.getByRole("navigation", { name: "Date range" })
+    .getByRole("link", { name: "Last 7 days" })
+    .click();
   await expect(page).toHaveURL(/range=7d/);
 
-  // Compare toggle.
-  await page.getByRole("link", { name: "Compare", exact: true }).click();
+  // Compare toggle (aria-label describes enable/disable).
+  await page.getByRole("link", { name: "Compare to previous period" }).click();
   await expect(page).toHaveURL(/compare=/);
-  await expect(page.getByRole("link", { name: "Comparing", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Disable period comparison" }),
+  ).toBeVisible();
 
   // Filter form.
   await page.getByRole("button", { name: "Filter", exact: true }).click();
