@@ -26,6 +26,34 @@ pub fn StatTile(
     delta: Option<DeltaInfo>,
     prev: Option<String>,
 ) -> Element {
+    // Build delta strings outside `rsx!` so we never nest an intermediate
+    // Element builder (can re-borrow the runtime during hydrate).
+    let delta_view = delta.as_ref().map(|d| {
+        let (visible, spoken, class) = match d.dir {
+            DeltaDir::Up => (
+                format!("▲ {:.1}%", d.pct),
+                format!("up {:.1}% versus previous period", d.pct),
+                "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-green",
+            ),
+            DeltaDir::Down => (
+                format!("▼ {:.1}%", d.pct),
+                format!("down {:.1}% versus previous period", d.pct),
+                "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-red",
+            ),
+            DeltaDir::New => (
+                "New".to_string(),
+                "new versus previous period".to_string(),
+                "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-muted-2",
+            ),
+            DeltaDir::Flat => (
+                format!("- {:.1}%", d.pct),
+                format!("unchanged ({:.1}%) versus previous period", d.pct),
+                "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-muted-2",
+            ),
+        };
+        (visible, spoken, class)
+    });
+
     rsx! {
         div { class: "min-w-0",
             div { class: "text-muted-1 text-[11px] uppercase tracking-[0.14em] font-semibold", "{label}" }
@@ -37,34 +65,10 @@ pub fn StatTile(
                 "aria-hidden": "true",
                 "{value}"
             }
-            if let Some(d) = delta {
-                {
-                    let (visible, spoken) = match d.dir {
-                        DeltaDir::Up => (
-                            format!("▲ {:.1}%", d.pct),
-                            format!("up {:.1}% versus previous period", d.pct),
-                        ),
-                        DeltaDir::Down => (
-                            format!("▼ {:.1}%", d.pct),
-                            format!("down {:.1}% versus previous period", d.pct),
-                        ),
-                        DeltaDir::New => ("New".to_string(), "new versus previous period".to_string()),
-                        DeltaDir::Flat => (
-                            format!("- {:.1}%", d.pct),
-                            format!("unchanged ({:.1}%) versus previous period", d.pct),
-                        ),
-                    };
-                    rsx! {
-                        div {
-                            class: match d.dir {
-                                DeltaDir::Up => "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-green",
-                                DeltaDir::Down => "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-red",
-                                DeltaDir::New | DeltaDir::Flat => "inline-flex items-center gap-1 mt-2.5 text-[12.5px] font-semibold text-muted-2",
-                            },
-                            span { class: "sr-only", "{spoken}" }
-                            span { "aria-hidden": "true", "{visible}" }
-                        }
-                    }
+            if let Some((visible, spoken, class)) = delta_view {
+                div { class: "{class}",
+                    span { class: "sr-only", "{spoken}" }
+                    span { "aria-hidden": "true", "{visible}" }
                 }
             }
             if let Some(p) = prev {
