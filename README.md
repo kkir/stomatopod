@@ -15,6 +15,7 @@ Licensed under **MIT**.
 - Dashboard (Dioxus fullstack) with pageviews, funnels, alerts, digests
 - REST API + OpenAPI (`/openapi.json`) and `stoma` CLI
 - Embedded storage: SQLite metadata, WAL, Parquet partitions (no external DB)
+- Lightweight process footprint (sample: ~40 MiB RSS idle; see [`BENCHMARKS.md`](./BENCHMARKS.md))
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the crate map and how library
 crates can plug into a separate multi-tenant product. Production SaaS storage
@@ -48,6 +49,7 @@ export STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)"
 ```bash
 mise run dev          # build the wasm client + run the server (SSR dashboard at /, JSON at /api/v1)
 mise run seed         # post demo traffic into a running dev server (bin/seed)
+mise run bench:memory # release RSS + ingest RPS ladder (idle / ~10 / ~100 / ~1000)
 mise run check        # fmt + clippy + tests
 mise run test         # Rust tests only
 mise run e2e          # Playwright end-to-end tests

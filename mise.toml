@@ -112,3 +112,7 @@ description = "Run Playwright end-to-end tests"
 # (playwright.config.ts points DIOXUS_PUBLIC_PATH at it).
 depends = ["e2e:install", "ui:build"]
 run = "npm --prefix tests/e2e test"
+
+[tasks."bench:memory"]
+description = "Release-mode RSS + ingest RPS ladder (idle, warm, ~10/100/1000 RPS)"
+run = "bash scripts/bench-memory.sh"
