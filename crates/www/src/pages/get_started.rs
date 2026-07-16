@@ -16,7 +16,7 @@ pub fn GetStarted() -> Element {
                 "Get started"
             }
             p { class: "mt-4 text-text-2 text-[15px] leading-relaxed max-w-2xl",
-                "Run Stomatopod with Docker or build from source. You need a long auth secret and a strong first-boot admin password."
+                "Local development setup. You need a long auth secret and a strong first-boot admin password."
             }
 
             div { class: "mt-10 space-y-4",
@@ -32,25 +32,33 @@ pub fn GetStarted() -> Element {
                                 rel: "noopener noreferrer",
                                 "mise"
                             }
-                            " (or use Docker only)."
+                            "."
                         }
-                        li { "A machine with a persistent volume for analytics data." }
                     }
                 }
 
                 Card {
-                    title: "2. Configure".to_string(),
+                    title: "2. Clone the repo".to_string(),
+                    pre { class: "bg-black/40 rounded-lg p-3 sm:p-4 overflow-x-auto text-[12.5px] font-mono text-text-2 leading-relaxed",
+                        {format!("git clone {GITHUB_URL}.git\ncd stomatopod")}
+                    }
+                }
+
+                Card {
+                    title: "3. Configure".to_string(),
                     pre { class: "bg-black/40 rounded-lg p-3 sm:p-4 overflow-x-auto text-[12.5px] font-mono text-text-2 leading-relaxed",
                         "mise install\n\
                          mise run config:init\n\
                          # Set auth.secret_key in stomatopod.toml, or:\n\
                          export STOMATOPOD_AUTH__SECRET_KEY=\"$(openssl rand -hex 32)\"\n\
-                         export STOMATOPOD_ADMIN_PASSWORD=\"$(openssl rand -base64 24)\""
+                         export STOMATOPOD_ADMIN_PASSWORD=\"$(openssl rand -base64 24)\"\n\
+                         # optional:\n\
+                         export STOMATOPOD_ADMIN_EMAIL=\"you@example.com\""
                     }
                 }
 
                 Card {
-                    title: "3. Run (dev)".to_string(),
+                    title: "4. Run".to_string(),
                     pre { class: "bg-black/40 rounded-lg p-3 sm:p-4 overflow-x-auto text-[12.5px] font-mono text-text-2 leading-relaxed",
                         "mise run dev\n\
                          # Dashboard SSR at http://localhost:8080\n\
@@ -64,7 +72,7 @@ pub fn GetStarted() -> Element {
                 }
 
                 Card {
-                    title: "4. Production".to_string(),
+                    title: "5. Production".to_string(),
                     p { class: "text-[13px] text-text-2 leading-relaxed mb-3",
                         "Use Docker Compose or the published image. Mount a volume at "
                         code { class: "bg-black/40 rounded px-1 py-0.5 font-mono text-[12px]", "/app/data" }

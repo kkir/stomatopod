@@ -25,3 +25,17 @@ server = ["dioxus/server"]
 [dependencies]
 dioxus = { version = "0.7.9", features = ["fullstack", "router"] }
 stomatopod-ui = { path = "../ui" }
+
+# Browser-only: hero mascot scroll parallax. Target-gated so the SSG/native
+# build never pulls wasm crates.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "CssStyleDeclaration",
+    "EventTarget",
+    "MediaQueryList",
+] }

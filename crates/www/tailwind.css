@@ -3,3 +3,35 @@
 
 @source "./src/**/*.rs";
 @source "../ui/src/**/*.rs";
+
+/* Idle float for the hero mascot (scroll parallax is applied on the parent). */
+@keyframes mascot-bob {
+    0%,
+    100% {
+        transform: translate3d(0, 0, 0) rotate(-1.2deg);
+    }
+    50% {
+        transform: translate3d(0, -10px, 0) rotate(1.6deg);
+    }
+}
+
+.mascot-bob {
+    animation: mascot-bob 3.6s ease-in-out infinite;
+    transform-origin: 50% 60%;
+}
+
+.mascot-parallax {
+    transform-origin: 50% 60%;
+    /* Soften discrete wheel ticks so the swim feels continuous. */
+    transition: transform 0.12s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mascot-bob {
+        animation: none;
+    }
+
+    .mascot-parallax {
+        transition: none;
+    }
+}

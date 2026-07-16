@@ -5152,6 +5152,8 @@ version = "0.1.0"
 dependencies = [
  "dioxus",
  "stomatopod-ui",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

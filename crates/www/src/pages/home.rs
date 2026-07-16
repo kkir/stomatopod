@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use stomatopod_ui::card::Card;
 
 use crate::components::benchmarks::BenchmarkStrip;
+use crate::components::mascot::HeroMascot;
 use crate::routes::Route;
 
 const GITHUB_URL: &str = "https://github.com/kkir/stomatopod";
@@ -57,14 +58,7 @@ pub fn Home() -> Element {
                 }
                 div {
                     class: "flex justify-center lg:justify-end order-first lg:order-none",
-                    img {
-                        src: asset!("/assets/mascot.png"),
-                        alt: "Stomatopod mascot - a teal and purple mantis shrimp",
-                        width: "320",
-                        height: "320",
-                        class: "w-44 sm:w-56 lg:w-72 h-auto drop-shadow-[0_18px_40px_rgba(45,212,191,0.22)] select-none",
-                        decoding: "async",
-                    }
+                    HeroMascot {}
                 }
             }
         }
