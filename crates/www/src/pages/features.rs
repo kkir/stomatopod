@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 
+use crate::components::benchmarks::{BenchmarkStrip, BENCHMARKS_URL};
 use crate::components::feature_previews::{FeaturePreview, FeaturePreviewPane};
 use crate::routes::Route;
 
@@ -33,13 +34,18 @@ const LEFT: &[Feature] = &[
         body: "SQLite metadata, WAL, and Parquet partitions on a local volume. No Postgres or managed DB required.",
         preview: None,
     },
+    Feature {
+        title: "Lightweight footprint",
+        body: "Sample ~40 MiB RSS idle and ~80-100 MiB under moderate load, with headroom around ~1000 pageview RPS in the same process. Co-host with your app or run on a small VPS.",
+        preview: None,
+    },
 ];
 
 /// Right column (remaining mocks + short card so columns balance).
 const RIGHT: &[Feature] = &[
     Feature {
         title: "Dashboard",
-        body: "Dioxus fullstack UI for pageviews, funnels, campaigns, alerts, and digests - same design system as this site.",
+        body: "Dashboard UI for pageviews, funnels, campaigns, alerts, and digests - same design system as this site.",
         preview: Some(FeaturePreview::Dashboard),
     },
     Feature {
@@ -62,7 +68,8 @@ const RIGHT: &[Feature] = &[
 #[component]
 pub fn Features() -> Element {
     rsx! {
-        div { class: "mx-auto max-w-6xl px-3 sm:px-5 py-10 sm:py-14",
+        // Intro
+        div { class: "mx-auto max-w-6xl px-3 sm:px-5 py-10 sm:py-14 pb-8 sm:pb-10",
             p { class: "text-teal-hi text-[12px] font-semibold uppercase tracking-[0.16em] mb-3",
                 "Product"
             }
@@ -70,14 +77,40 @@ pub fn Features() -> Element {
                 "Everything you need to understand traffic"
             }
             p { class: "mt-3 text-text-2 text-[15px] leading-relaxed max-w-2xl",
-                "Stomatopod is a privacy-friendly analytics appliance: cookieless collection, self-hosted storage, and tools for both dashboards and agents."
+                "Stomatopod is a privacy-friendly analytics appliance: cookieless collection, self-hosted storage, a small process footprint, and tools for both dashboards and agents."
             }
+        }
 
+        // Resource benchmarks - full-bleed strip
+        BenchmarkStrip {}
+
+        div { class: "mx-auto max-w-6xl px-3 sm:px-5 py-10 sm:py-14",
             // Two independent stacks side by side = reliable masonry-style
             // packing (CSS multi-column / grid-masonry were not applying).
-            div { class: "mt-8 grid grid-cols-1 md:grid-cols-2 gap-5 items-start",
+            div { class: "grid grid-cols-1 md:grid-cols-2 gap-5 items-start",
                 FeatureColumn { features: LEFT }
                 FeatureColumn { features: RIGHT }
+            }
+
+            // Methodology callout
+            aside {
+                class: "mt-8 rounded-xl border border-border-1 bg-surface-1 px-4 py-4 sm:px-5 sm:py-5 shadow-sm shadow-inner-hi",
+                h2 { class: "text-text-1 text-[15px] font-semibold tracking-tight",
+                    "Resource numbers are measured, not guessed"
+                }
+                p { class: "mt-2 text-muted-1 text-[13.5px] leading-relaxed max-w-3xl",
+                    "We run a release binary through an idle / warm / ~10 / ~100 / ~1000 pageview-RPS ladder and sample process RSS. Reproduce with "
+                    code { class: "text-text-2 text-[12px] font-mono", "mise run bench:memory" }
+                    " or read "
+                    a {
+                        class: "text-teal-hi hover:underline",
+                        href: "{BENCHMARKS_URL}",
+                        target: "_blank",
+                        rel: "noopener noreferrer",
+                        "BENCHMARKS.md"
+                    }
+                    " for the sample table and methodology."
+                }
             }
 
             div { class: "mt-10 flex flex-wrap gap-3",

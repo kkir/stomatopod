@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use stomatopod_ui::card::Card;
 
+use crate::components::benchmarks::BenchmarkStrip;
 use crate::routes::Route;
 
 const GITHUB_URL: &str = "https://github.com/kkir/stomatopod";
@@ -32,7 +33,7 @@ pub fn Home() -> Element {
                         "Privacy-friendly web analytics you run yourself"
                     }
                     p { class: "mt-5 text-text-2 text-base sm:text-lg leading-relaxed max-w-xl",
-                        "Cookieless tracking, a Dioxus dashboard, REST API, and CLI - one binary with embedded storage on your own volume. MIT licensed."
+                        "Cookieless tracking, a dashboard, REST API, and CLI - one light binary with embedded storage. Co-host on a small VPS or the same machine as your product. MIT licensed."
                     }
                     div { class: "mt-8 flex flex-wrap items-center gap-3",
                         Link {
@@ -68,6 +69,9 @@ pub fn Home() -> Element {
             }
         }
 
+        // Resource benchmarks (idle / load / RPS)
+        BenchmarkStrip {}
+
         // Value props
         section {
             class: "mx-auto max-w-5xl px-4 sm:px-6 py-14 sm:py-16",
@@ -77,10 +81,14 @@ pub fn Home() -> Element {
             p { class: "text-muted-1 text-[14px] mb-8 max-w-2xl",
                 "A single-owner appliance: one org, one admin, many sites. No external database required."
             }
-            div { class: "grid gap-4 sm:grid-cols-2 lg:grid-cols-3",
+            div { class: "grid gap-4 sm:grid-cols-2 lg:grid-cols-4",
                 ValueCard {
                     title: "Cookieless by design".to_string(),
                     body: "Browser tracker and server-side ingest without tracking cookies. Respect visitor privacy out of the box.".to_string(),
+                }
+                ValueCard {
+                    title: "Lightweight".to_string(),
+                    body: "Sample ~40 MiB RSS idle and ~80-100 MiB under moderate load - sized for a small box, not a dedicated analytics fleet.".to_string(),
                 }
                 ValueCard {
                     title: "One binary".to_string(),
@@ -101,7 +109,7 @@ pub fn Home() -> Element {
                     "Run it on your own hardware"
                 }
                 p { class: "mt-3 text-muted-1 text-[14px] max-w-lg mx-auto",
-                    "Docker Compose or a release binary. Your data stays on your disk."
+                    "Docker Compose or a release binary. Your data stays on your disk - without a heavy analytics stack."
                 }
                 div { class: "mt-6 flex flex-wrap justify-center gap-3",
                     Link {
