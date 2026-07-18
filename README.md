@@ -15,6 +15,7 @@ Licensed under **MIT**.
 - Dashboard (Dioxus fullstack) with pageviews, funnels, alerts, digests
 - REST API + OpenAPI (`/openapi.json`) and `stoma` CLI
 - Embedded storage: SQLite metadata, WAL, Parquet partitions (no external DB)
+- Lightweight process footprint (sample: ~40 MiB RSS idle; see [`BENCHMARKS.md`](./BENCHMARKS.md))
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the crate map and how library
 crates can plug into a separate multi-tenant product. Production SaaS storage
@@ -48,6 +49,7 @@ export STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)"
 ```bash
 mise run dev          # build the wasm client + run the server (SSR dashboard at /, JSON at /api/v1)
 mise run seed         # post demo traffic into a running dev server (bin/seed)
+mise run bench:memory # release RSS + ingest RPS ladder (idle / ~10 / ~100 / ~1000)
 mise run check        # fmt + clippy + tests
 mise run test         # Rust tests only
 mise run e2e          # Playwright end-to-end tests
@@ -93,6 +95,22 @@ at it with `DIOXUS_PUBLIC_PATH`. For production/CI, `mise run ui:bundle`
 containing the `server` binary next to its `public/` bundle; the Docker build
 copies both.
 
+## Marketing site (Dioxus SSG)
+
+The public marketing site lives in [`crates/www`](./crates/www) and shares brand
+tokens and presentational components with the dashboard via
+[`crates/ui`](./crates/ui) (`stomatopod-ui`). It is pre-rendered with Dioxus SSG
+and deployed to **GitHub Pages** (site root / custom-domain ready).
+
+```bash
+mise run www:serve     # local dev with hot reload
+mise run www:bundle    # release SSG (dx build --ssg) → target/dx/stomatopod-www/release/web/public
+```
+
+CI deploys on push to `main` when `crates/www` or `crates/ui` change
+(`.github/workflows/pages.yml`). Enable Pages with **Source: GitHub Actions**
+in the repository settings.
+
 ## Workspace crates
 
 | Crate | Path | Role |
@@ -102,7 +120,9 @@ copies both.
 | `stomatopod-ingest` | `crates/ingest` | Event ingest pipeline |
 | `stomatopod-alerts` | `crates/alerts` | Alert evaluation and delivery |
 | `stomatopod-api` | `crates/api` | REST API (no UI) |
+| `stomatopod-ui` | `crates/ui` | Shared design system (components + theme CSS) |
 | `stomatopod-web` | `crates/web` | Dashboard + server binary |
+| `stomatopod-www` | `crates/www` | Marketing site (SSG / GitHub Pages) |
 | `stomatopod-cli` | `bin/stoma` | `stoma` query CLI |
 
 ## Deployment

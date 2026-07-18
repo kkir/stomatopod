@@ -1,0 +1,78 @@
+name: Deploy marketing site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/www/**"
+      - "crates/ui/**"
+      - ".github/workflows/pages.yml"
+      - "Cargo.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build SSG
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo + build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install dioxus-cli
+        run: cargo install dioxus-cli --version 0.7.9 --locked
+
+      - name: Build marketing site (SSG)
+        # dx bundle in 0.7.9 does not run pre-render (TODO in CLI); use dx build --ssg.
+        # force-sequential: client public/ assets before SSG writes HTML.
+        run: cd crates/www && dx build --platform web --ssg --release --force-sequential
+        env:
+          CI: true
+
+      - name: Prepare Pages artifact
+        run: |
+          PUBLIC="target/dx/stomatopod-www/release/web/public"
+          # SPA fallback for client-side routes and unknown paths.
+          if [ -f "$PUBLIC/index.html" ]; then
+            cp "$PUBLIC/index.html" "$PUBLIC/404.html"
+          fi
+          # Persist custom domain across Actions deploys (apex canonical).
+          echo stoma.top > "$PUBLIC/CNAME"
+          # Sanity: expected pre-rendered routes exist (or index at least).
+          ls -la "$PUBLIC"
+          test -f "$PUBLIC/index.html"
+          test -f "$PUBLIC/CNAME"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/dx/stomatopod-www/release/web/public
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

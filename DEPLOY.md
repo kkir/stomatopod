@@ -40,6 +40,19 @@ Optional. Set `storage.retention_days` (or `STOMATOPOD_STORAGE__RETENTION_DAYS`)
 to drop events older than N days. `0` (default) keeps forever. The server prunes
 once at boot and then daily.
 
+## Resource usage
+
+Stomatopod is a single process with embedded storage (no Postgres or Redis). On a
+recent sample run (Apple Silicon laptop, release binary):
+
+- **~40 MiB RSS idle** after boot
+- **~80-100 MiB RSS** with ~25k events of history and light dashboard queries
+- **~1000 pageview ingest RPS** sustained in that run, with peak RSS around **~120 MiB**
+
+That is the co-host profile: small VPS, or the same machine as the product you
+are measuring. Re-run on your hardware with `mise run bench:memory`. Full
+methodology and the sample table live in [`BENCHMARKS.md`](./BENCHMARKS.md).
+
 ## docker compose (recommended for self-hosting)
 
 A ready-to-use [`docker-compose.yml`](./docker-compose.yml) ships in the repo with a

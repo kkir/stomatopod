@@ -89,6 +89,15 @@ run = "cd crates/web && dx build --platform web"
 description = "Release build of the fullstack app into target/dx/stomatopod/release/web ({server, public/})"
 run = "cd crates/web && dx build --platform web --release"
 
+[tasks."www:serve"]
+description = "Dev-serve the marketing site (Dioxus fullstack + hot reload)"
+run = "cd crates/www && dx serve --platform web"
+
+[tasks."www:bundle"]
+description = "SSG release build of the marketing site into target/dx/stomatopod-www/release/web/public (uses dx build: bundle skips SSG in CLI 0.7.9)"
+# --force-sequential: client assets land in public/ before SSG writes HTML (avoids race).
+run = "cd crates/www && dx build --platform web --ssg --release --force-sequential"
+
 [tasks."e2e:install"]
 description = "Install Playwright dependencies and Chromium browser"
 run = """
@@ -103,3 +112,7 @@ description = "Run Playwright end-to-end tests"
 # (playwright.config.ts points DIOXUS_PUBLIC_PATH at it).
 depends = ["e2e:install", "ui:build"]
 run = "npm --prefix tests/e2e test"
+
+[tasks."bench:memory"]
+description = "Release-mode RSS + ingest RPS ladder (idle, warm, ~10/100/1000 RPS)"
+run = "bash scripts/bench-memory.sh"

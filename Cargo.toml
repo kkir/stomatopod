@@ -5,7 +5,9 @@ members = [
     "crates/ingest",
     "crates/alerts",
     "crates/api",
+    "crates/ui",
     "crates/web",
+    "crates/www",
     "bin/stoma",
     "bin/seed",
 ]

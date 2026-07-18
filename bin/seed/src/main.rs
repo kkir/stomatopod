@@ -1,17 +1,22 @@
 //! Seed a local Stomatopod instance with demo analytics traffic.
 //!
-//! Requires a running dev server (`mise run dev`). Creates a demo site if
-//! needed, then posts pageviews and custom events over a past window so the
-//! overview chart, breakdowns, and Events page have something to show.
+//! Requires a running server (`mise run dev` or a release binary). Creates a
+//! demo site if needed, then posts pageviews and custom events over a past
+//! window so the overview chart, breakdowns, and Events page have something
+//! to show.
+//!
+//! Sustained load mode (`--rps` + `--duration`) posts live pageviews at a
+//! target rate for resource benchmarks.
 //!
 //! ```text
 //! mise run seed
 //! STOMATOPOD_PUBLIC_KEY=pk_… cargo run -p stomatopod-seed -- --no-custom
+//! cargo run -p stomatopod-seed -- --public-key pk_… --rps 100 --duration 60 --no-custom
 //! ```
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration as StdDuration, Instant};
 
 use anyhow::{bail, Context, Result};
 use chrono::{Datelike, Duration, Timelike, Utc};
@@ -22,8 +27,9 @@ use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
 use reqwest::{Client, StatusCode, Url};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex, Semaphore};
 use tokio::task::JoinSet;
+use tokio::time::{interval, MissedTickBehavior};
 
 // ---------------------------------------------------------------------------
 // Catalog
@@ -196,6 +202,19 @@ struct Args {
     /// Skip custom events (no ingest key).
     #[arg(long)]
     no_custom: bool,
+
+    /// Target pageview ingest rate (requests/sec). When set, runs sustained
+    /// load for `--duration` instead of historical seed (ignores `--events`).
+    #[arg(long, env = "SEED_RPS")]
+    rps: Option<u32>,
+
+    /// How long to hold `--rps` (seconds). Default 60. Ignored without `--rps`.
+    #[arg(long, default_value_t = 60, env = "SEED_DURATION")]
+    duration: u64,
+
+    /// Print a single machine-readable SEED_STATS line at the end (for benches).
+    #[arg(long, env = "SEED_STATS")]
+    stats: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -533,7 +552,13 @@ async fn mint_ingest_key(client: &Client, base: &Url, site_id: &str) -> Result<O
 // Posting
 // ---------------------------------------------------------------------------
 
-async fn post_pageview(client: &Client, base: &Url, public_key: &str, ev: &PlannedEvent) -> bool {
+/// Returns `(ok, latency_ms)` for a single pageview POST.
+async fn post_pageview(
+    client: &Client,
+    base: &Url,
+    public_key: &str,
+    ev: &PlannedEvent,
+) -> (bool, f64) {
     let mut body = json!({
         "k": public_key,
         "n": "pageview",
@@ -555,18 +580,19 @@ async fn post_pageview(client: &Client, base: &Url, public_key: &str, ev: &Plann
         headers.insert("X-Forwarded-For", v);
     }
 
-    match client
-        .post(match base.join("/api/v1/event") {
-            Ok(u) => u,
-            Err(_) => return false,
-        })
-        .headers(headers)
-        .json(&body)
-        .send()
-        .await
-    {
-        Ok(resp) => resp.status().is_success() || resp.status() == StatusCode::NO_CONTENT,
-        Err(_) => false,
+    let url = match base.join("/api/v1/event") {
+        Ok(u) => u,
+        Err(_) => return (false, 0.0),
+    };
+
+    let t0 = Instant::now();
+    match client.post(url).headers(headers).json(&body).send().await {
+        Ok(resp) => {
+            let ms = t0.elapsed().as_secs_f64() * 1000.0;
+            let ok = resp.status().is_success() || resp.status() == StatusCode::NO_CONTENT;
+            (ok, ms)
+        }
+        Err(_) => (false, t0.elapsed().as_secs_f64() * 1000.0),
     }
 }
 
@@ -600,6 +626,104 @@ async fn post_custom(client: &Client, base: &Url, ingest_key: &str, ev: &Planned
     }
 }
 
+struct PostStats {
+    pv_ok: usize,
+    pv_fail: usize,
+    cu_ok: usize,
+    cu_fail: usize,
+    /// Successful pageview latencies in milliseconds (for percentiles).
+    latencies_ms: Vec<f64>,
+    elapsed_s: f64,
+}
+
+impl PostStats {
+    fn achieved_rps(&self) -> f64 {
+        if self.elapsed_s <= 0.0 {
+            return 0.0;
+        }
+        (self.pv_ok + self.pv_fail) as f64 / self.elapsed_s
+    }
+
+    fn percentile(&self, p: f64) -> f64 {
+        if self.latencies_ms.is_empty() {
+            return 0.0;
+        }
+        let mut sorted = self.latencies_ms.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let idx = ((p / 100.0) * (sorted.len() as f64 - 1.0)).round() as usize;
+        sorted[idx.min(sorted.len() - 1)]
+    }
+
+    fn print_human(&self, custom: bool) {
+        let elapsed = self.elapsed_s;
+        println!();
+        println!("Done in {elapsed:.1}s");
+        println!("  pageviews: {} ok, {} failed", self.pv_ok, self.pv_fail);
+        if custom {
+            println!("  custom:    {} ok, {} failed", self.cu_ok, self.cu_fail);
+        }
+        if !self.latencies_ms.is_empty() {
+            println!(
+                "  latency:   p50={:.1}ms p99={:.1}ms (pageviews)",
+                self.percentile(50.0),
+                self.percentile(99.0)
+            );
+            println!("  achieved:  {:.1} pageview req/s", self.achieved_rps());
+        }
+    }
+
+    fn print_stats_line(&self, target_rps: Option<u32>, duration_s: Option<u64>) {
+        let target = target_rps
+            .map(|r| r.to_string())
+            .unwrap_or_else(|| "-".into());
+        let dur = duration_s
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| "-".into());
+        println!(
+            "SEED_STATS target_rps={target} duration_s={dur} ok={} fail={} achieved_rps={:.2} p50_ms={:.2} p99_ms={:.2} elapsed_s={:.2}",
+            self.pv_ok,
+            self.pv_fail,
+            self.achieved_rps(),
+            self.percentile(50.0),
+            self.percentile(99.0),
+            self.elapsed_s
+        );
+    }
+}
+
+fn plan_live_pageview(rng: &mut impl Rng) -> PlannedEvent {
+    let ua = weighted_pick(USER_AGENTS, rng).to_string();
+    let (width, height) = screen_for_ua(&ua, rng);
+    let path = *weighted_pick(PAGES, rng);
+    let mut url = format!("https://demo.localhost{path}");
+    if rng.gen::<f64>() < 0.12 {
+        let (src, med, camp) = UTM_CAMPAIGNS[rng.gen_range(0..UTM_CAMPAIGNS.len())];
+        url = format!("{url}?utm_source={src}&utm_medium={med}&utm_campaign={camp}");
+    }
+    let referrer = weighted_pick(REFERRERS, rng).map(|s| s.to_string());
+    let n = rng.gen::<u32>();
+    PlannedEvent {
+        kind: EventKind::Pageview,
+        name: "pageview".into(),
+        url,
+        referrer,
+        ts_ms: Utc::now().timestamp_millis(),
+        ua,
+        ip: format!(
+            "{}.{}.{}.{}",
+            10 + (n % 200),
+            (n >> 8) % 256,
+            (n >> 16) % 256,
+            1 + (n % 250)
+        ),
+        session_tag: format!("load-{}", n),
+        width,
+        height,
+        language: LANGUAGES[rng.gen_range(0..LANGUAGES.len())].to_string(),
+        properties: None,
+    }
+}
+
 async fn post_all(
     client: Arc<Client>,
     base: Url,
@@ -607,12 +731,13 @@ async fn post_all(
     public_key: Arc<str>,
     ingest_key: Option<Arc<str>>,
     workers: usize,
-) -> (usize, usize, usize, usize) {
+) -> PostStats {
     let sem = Arc::new(Semaphore::new(workers.max(1)));
     let pv_ok = Arc::new(AtomicUsize::new(0));
     let pv_fail = Arc::new(AtomicUsize::new(0));
     let cu_ok = Arc::new(AtomicUsize::new(0));
     let cu_fail = Arc::new(AtomicUsize::new(0));
+    let latencies = Arc::new(Mutex::new(Vec::with_capacity(events.len().min(100_000))));
 
     let total_pv = events
         .iter()
@@ -620,6 +745,7 @@ async fn post_all(
         .count();
     let mut set = JoinSet::new();
     let mut submitted_pv = 0usize;
+    let t0 = Instant::now();
 
     for ev in events {
         let is_pageview = ev.kind == EventKind::Pageview;
@@ -632,13 +758,16 @@ async fn post_all(
         let pv_fail = pv_fail.clone();
         let cu_ok = cu_ok.clone();
         let cu_fail = cu_fail.clone();
+        let latencies = latencies.clone();
 
         set.spawn(async move {
             let _permit = permit;
             match ev.kind {
                 EventKind::Pageview => {
-                    if post_pageview(&client, &base, &public_key, &ev).await {
+                    let (ok, ms) = post_pageview(&client, &base, &public_key, &ev).await;
+                    if ok {
                         pv_ok.fetch_add(1, Ordering::Relaxed);
+                        latencies.lock().await.push(ms);
                     } else {
                         pv_fail.fetch_add(1, Ordering::Relaxed);
                     }
@@ -665,12 +794,122 @@ async fn post_all(
 
     while set.join_next().await.is_some() {}
 
-    (
-        pv_ok.load(Ordering::Relaxed),
-        pv_fail.load(Ordering::Relaxed),
-        cu_ok.load(Ordering::Relaxed),
-        cu_fail.load(Ordering::Relaxed),
-    )
+    PostStats {
+        pv_ok: pv_ok.load(Ordering::Relaxed),
+        pv_fail: pv_fail.load(Ordering::Relaxed),
+        cu_ok: cu_ok.load(Ordering::Relaxed),
+        cu_fail: cu_fail.load(Ordering::Relaxed),
+        latencies_ms: Arc::try_unwrap(latencies)
+            .map(|m| m.into_inner())
+            .unwrap_or_default(),
+        elapsed_s: t0.elapsed().as_secs_f64(),
+    }
+}
+
+/// Sustained pageview load at a target RPS for a fixed duration.
+async fn post_rps(
+    client: Arc<Client>,
+    base: Url,
+    public_key: Arc<str>,
+    rps: u32,
+    duration_s: u64,
+    workers: usize,
+) -> PostStats {
+    let rps = rps.max(1);
+    let workers = workers.max(1);
+    let sem = Arc::new(Semaphore::new(workers));
+    let pv_ok = Arc::new(AtomicUsize::new(0));
+    let pv_fail = Arc::new(AtomicUsize::new(0));
+    // Cap stored samples so 1000 RPS * long runs stay bounded.
+    let max_latency_samples = 50_000usize;
+    let latencies = Arc::new(Mutex::new(Vec::with_capacity(
+        (rps as usize * duration_s as usize).min(max_latency_samples),
+    )));
+
+    let tick = StdDuration::from_secs_f64(1.0 / f64::from(rps));
+    let mut ticker = interval(tick);
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    let deadline = Instant::now() + StdDuration::from_secs(duration_s);
+    let t0 = Instant::now();
+    let mut set = JoinSet::new();
+    let mut submitted = 0u64;
+    let mut rng = rand::thread_rng();
+
+    println!("  sustained load: target {rps} req/s for {duration_s}s ({workers} workers)…");
+
+    // First tick completes immediately; skip it so we start on the first interval.
+    ticker.tick().await;
+
+    while Instant::now() < deadline {
+        ticker.tick().await;
+        if Instant::now() >= deadline {
+            break;
+        }
+
+        let ev = plan_live_pageview(&mut rng);
+        let permit = match sem.clone().try_acquire_owned() {
+            Ok(p) => p,
+            Err(_) => {
+                // All workers busy: wait so we do not unbounded-queue tasks.
+                match tokio::time::timeout(StdDuration::from_secs(5), sem.clone().acquire_owned())
+                    .await
+                {
+                    Ok(Ok(p)) => p,
+                    _ => {
+                        pv_fail.fetch_add(1, Ordering::Relaxed);
+                        continue;
+                    }
+                }
+            }
+        };
+
+        let client = client.clone();
+        let base = base.clone();
+        let public_key = public_key.clone();
+        let task_pv_ok = pv_ok.clone();
+        let task_pv_fail = pv_fail.clone();
+        let latencies = latencies.clone();
+
+        set.spawn(async move {
+            let _permit = permit;
+            let (ok, ms) = post_pageview(&client, &base, &public_key, &ev).await;
+            if ok {
+                task_pv_ok.fetch_add(1, Ordering::Relaxed);
+                let mut guard = latencies.lock().await;
+                if guard.len() < max_latency_samples {
+                    guard.push(ms);
+                }
+            } else {
+                task_pv_fail.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+
+        submitted += 1;
+        if submitted.is_multiple_of(u64::from(rps).max(1) * 5) {
+            let elapsed = t0.elapsed().as_secs_f64().max(0.001);
+            let ok = pv_ok.load(Ordering::Relaxed);
+            let fail = pv_fail.load(Ordering::Relaxed);
+            println!(
+                "    t={elapsed:.0}s submitted={submitted} done={} ({:.0} req/s so far)…",
+                ok + fail,
+                (ok + fail) as f64 / elapsed
+            );
+        }
+    }
+
+    while set.join_next().await.is_some() {}
+
+    PostStats {
+        pv_ok: pv_ok.load(Ordering::Relaxed),
+        pv_fail: pv_fail.load(Ordering::Relaxed),
+        cu_ok: 0,
+        cu_fail: 0,
+        latencies_ms: Arc::try_unwrap(latencies)
+            .map(|m| m.into_inner())
+            .unwrap_or_default(),
+        elapsed_s: t0.elapsed().as_secs_f64(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -680,14 +919,36 @@ async fn post_all(
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    if args.days == 0 || args.events == 0 {
+    let rps_mode = args.rps.is_some();
+    if !rps_mode && (args.days == 0 || args.events == 0) {
         bail!("--days and --events must be >= 1");
     }
+    if let Some(rps) = args.rps {
+        if rps == 0 {
+            bail!("--rps must be >= 1");
+        }
+        if args.duration == 0 {
+            bail!("--duration must be >= 1 when using --rps");
+        }
+    }
+
+    let rps_workers = args.rps.map(|rps| {
+        // Default workers (16) is low for high RPS; auto-scale unless overridden.
+        if args.workers == 16 {
+            ((rps as usize) / 2).clamp(16, 256)
+        } else {
+            args.workers
+        }
+    });
+    let pool_size = rps_workers.unwrap_or(args.workers).max(16);
 
     let base = Url::parse(&args.server).context("invalid --server URL")?;
     let client = Client::builder()
         .cookie_store(true)
         .redirect(reqwest::redirect::Policy::limited(10))
+        // High RPS needs a larger pool than the default 10.
+        .pool_max_idle_per_host(pool_size)
+        .timeout(StdDuration::from_secs(30))
         .build()?;
 
     println!("Seeding {}", args.server);
@@ -718,56 +979,76 @@ async fn main() -> Result<()> {
         .await?
     };
 
-    let ingest_key = if !args.no_custom {
-        if let Some(id) = site_id.as_deref() {
-            mint_ingest_key(&client, &base, id).await?
+    let client = Arc::new(client);
+    let public_key: Arc<str> = Arc::from(public_key);
+
+    let stats = if let Some(rps) = args.rps {
+        // Sustained load: pageviews only (ignore historical plan / custom events).
+        post_rps(
+            client,
+            base,
+            public_key,
+            rps,
+            args.duration,
+            rps_workers.unwrap_or(args.workers),
+        )
+        .await
+    } else {
+        let ingest_key = if !args.no_custom {
+            if let Some(id) = site_id.as_deref() {
+                mint_ingest_key(&client, &base, id).await?
+            } else {
+                None
+            }
         } else {
             None
-        }
-    } else {
-        None
+        };
+
+        println!(
+            "  planning ~{} pageviews across {} days…",
+            args.events, args.days
+        );
+        let mut rng = rand::thread_rng();
+        let planned = plan_events(args.days, args.events, &mut rng);
+        let pv_n = planned
+            .iter()
+            .filter(|e| e.kind == EventKind::Pageview)
+            .count();
+        let cu_n = planned
+            .iter()
+            .filter(|e| e.kind == EventKind::Custom)
+            .count();
+        println!("  {pv_n} pageviews, {cu_n} custom events");
+        println!("  posting…");
+        post_all(
+            client,
+            base,
+            planned,
+            public_key,
+            ingest_key.map(Arc::from),
+            args.workers,
+        )
+        .await
     };
 
-    println!(
-        "  planning ~{} pageviews across {} days…",
-        args.events, args.days
-    );
-    let mut rng = rand::thread_rng();
-    let planned = plan_events(args.days, args.events, &mut rng);
-    let pv_n = planned
-        .iter()
-        .filter(|e| e.kind == EventKind::Pageview)
-        .count();
-    let cu_n = planned
-        .iter()
-        .filter(|e| e.kind == EventKind::Custom)
-        .count();
-    println!("  {pv_n} pageviews, {cu_n} custom events");
-
-    let t0 = Instant::now();
-    println!("  posting…");
-    let (pv_ok, pv_fail, cu_ok, cu_fail) = post_all(
-        Arc::new(client),
-        base,
-        planned,
-        Arc::from(public_key),
-        ingest_key.map(Arc::from),
-        args.workers,
-    )
-    .await;
-
-    let elapsed = t0.elapsed().as_secs_f64();
-    println!();
-    println!("Done in {elapsed:.1}s");
-    println!("  pageviews: {pv_ok} ok, {pv_fail} failed");
-    if !args.no_custom {
-        println!("  custom:    {cu_ok} ok, {cu_fail} failed");
+    stats.print_human(!args.no_custom && !rps_mode);
+    if args.stats || rps_mode {
+        stats.print_stats_line(args.rps, rps_mode.then_some(args.duration));
     }
-    println!();
-    println!("Open the dashboard Overview — data may take a second or two to flush");
-    println!("from the WAL. Range tip: use 30d if you seeded the default window.");
 
-    if pv_fail > 0 || cu_fail > 0 {
+    if !rps_mode {
+        println!();
+        println!("Open the dashboard Overview - data may take a second or two to flush");
+        println!("from the WAL. Range tip: use 30d if you seeded the default window.");
+    }
+
+    let total_fail = stats.pv_fail + stats.cu_fail;
+    let total_ok = stats.pv_ok + stats.cu_ok;
+    if total_fail > 0 && total_ok == 0 {
+        std::process::exit(1);
+    }
+    // Historical seed: any failure is unexpected. RPS mode may see transient fails.
+    if !rps_mode && total_fail > 0 {
         std::process::exit(1);
     }
     Ok(())
