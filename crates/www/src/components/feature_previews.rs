@@ -299,4 +299,3 @@ fn CliPreview() -> Element {
         }
     }
 }
-

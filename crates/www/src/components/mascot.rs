@@ -72,9 +72,10 @@ struct MascotParallax {
 impl Drop for MascotParallax {
     fn drop(&mut self) {
         use wasm_bindgen::JsCast;
-        let _ = self
-            .window
-            .remove_event_listener_with_callback("scroll", self._on_scroll.as_ref().unchecked_ref());
+        let _ = self.window.remove_event_listener_with_callback(
+            "scroll",
+            self._on_scroll.as_ref().unchecked_ref(),
+        );
         // Leave transform at rest so a remount starts clean.
         if let Some(document) = self.window.document() {
             if let Some(el) = document.get_element_by_id(MASCOT_ID) {
@@ -87,9 +88,7 @@ impl Drop for MascotParallax {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn install_mascot_parallax(
-    mounted: std::rc::Rc<std::cell::Cell<bool>>,
-) -> Option<MascotParallax> {
+fn install_mascot_parallax(mounted: std::rc::Rc<std::cell::Cell<bool>>) -> Option<MascotParallax> {
     use wasm_bindgen::closure::Closure;
     use wasm_bindgen::JsCast;
 
@@ -152,8 +151,6 @@ fn apply_parallax(window: &web_sys::Window, el: &web_sys::HtmlElement) {
     let scale = 1.0 - e * 0.05;
     let _ = el.style().set_property(
         "transform",
-        &format!(
-            "translate3d({tx:.2}px, {ty:.2}px, 0) rotate({rot:.2}deg) scale({scale:.4})"
-        ),
+        &format!("translate3d({tx:.2}px, {ty:.2}px, 0) rotate({rot:.2}deg) scale({scale:.4})"),
     );
 }

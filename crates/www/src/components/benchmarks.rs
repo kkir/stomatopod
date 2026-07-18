@@ -4,8 +4,7 @@
 use dioxus::prelude::*;
 
 /// Methodology and full table in the open-source repo.
-pub const BENCHMARKS_URL: &str =
-    "https://github.com/kkir/stomatopod/blob/main/BENCHMARKS.md";
+pub const BENCHMARKS_URL: &str = "https://github.com/kkir/stomatopod/blob/main/BENCHMARKS.md";
 
 #[derive(Clone, Copy)]
 struct Stat {
