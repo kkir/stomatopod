@@ -53,8 +53,12 @@ jobs:
           if [ -f "$PUBLIC/index.html" ]; then
             cp "$PUBLIC/index.html" "$PUBLIC/404.html"
           fi
+          # Persist custom domain across Actions deploys (apex canonical).
+          echo stoma.top > "$PUBLIC/CNAME"
           # Sanity: expected pre-rendered routes exist (or index at least).
           ls -la "$PUBLIC"
+          test -f "$PUBLIC/index.html"
+          test -f "$PUBLIC/CNAME"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
