@@ -15,7 +15,7 @@ built for a small VPS or the same machine as the product you measure.
 
 **One org, many sites, you own the box.** MIT licensed.
 
-[Website](https://stoma.top) · [Deploy guide](./DEPLOY.md) · [Benchmarks](./BENCHMARKS.md)
+[Website](https://stoma.top) · [Compare](https://stoma.top/compare) · [Deploy guide](./DEPLOY.md) · [Benchmarks](./BENCHMARKS.md)
 
 <p align="center">
   <img src="docs/images/dashboard-overview.png" alt="Stomatopod dashboard overview with pageviews, top pages, and referrers" width="900" />
@@ -78,6 +78,9 @@ and feature sets move - verify current docs for peers.
 
 Stomatopod sits in the **Plausible/Umami-class** category with an **appliance**
 ops shape: one process, mount a volume, co-host on a small box.
+
+Longer operator notes (same table, first-boot env, when it fits):
+[stoma.top/compare](https://stoma.top/compare).
 
 ## Binary (no Docker)
 

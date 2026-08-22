@@ -95,6 +95,29 @@ pub fn Home() -> Element {
             }
         }
 
+        // Operator orientation
+        section {
+            class: "border-t border-border-1 bg-bg-2/20",
+            div { class: "mx-auto max-w-5xl px-4 sm:px-6 py-14 sm:py-16",
+                p { class: "text-teal-hi text-[12px] font-semibold uppercase tracking-[0.16em] mb-3",
+                    "Compare"
+                }
+                h2 { class: "font-display font-bold text-xl sm:text-2xl tracking-tight text-text-1",
+                    "Plausible-class analytics, appliance ops"
+                }
+                p { class: "mt-3 text-text-2 text-[15px] leading-relaxed max-w-2xl",
+                    "Short orientation for self-hosters weighing privacy analytics tools. Stomatopod is a single binary with embedded storage: one process, mount a volume, co-host on a small box."
+                }
+                div { class: "mt-6",
+                    Link {
+                        class: "inline-flex items-center px-[18px] py-2.5 rounded-[10px] text-[14px] font-semibold border border-border-2 text-text-1 no-underline hover:border-border-3 hover:bg-surface-1 transition-colors",
+                        to: Route::Compare {},
+                        "How it compares →"
+                    }
+                }
+            }
+        }
+
         // Bottom CTA
         section {
             class: "border-t border-border-1 bg-bg-2/30",

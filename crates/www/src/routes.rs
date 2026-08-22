@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::components::layout::MarketingShell;
-use crate::pages::{Features, GetStarted, Home, NotFound};
+use crate::pages::{Compare, Features, GetStarted, Home, NotFound};
 
 /// Marketing site routes. All static segments are pre-rendered by SSG.
 #[derive(Routable, Clone, PartialEq)]
@@ -16,6 +16,9 @@ pub enum Route {
 
     #[route("/get-started")]
     GetStarted {},
+
+    #[route("/compare")]
+    Compare {},
 
     #[route("/:..segments")]
     NotFound { segments: Vec<String> },
