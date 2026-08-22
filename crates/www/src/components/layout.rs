@@ -35,10 +35,12 @@ fn SiteNav() -> Element {
     // blocks inside the loop, which can re-enter the runtime during hydrate).
     let home_active = path == "/";
     let features_active = path == "/features" || path.starts_with("/features/");
+    let compare_active = path == "/compare" || path.starts_with("/compare/");
     let get_started_active = path == "/get-started" || path.starts_with("/get-started/");
 
     let home_class = nav_class(home_active);
     let features_class = nav_class(features_active);
+    let compare_class = nav_class(compare_active);
     let get_started_class = nav_class(get_started_active);
 
     rsx! {
@@ -70,6 +72,12 @@ fn SiteNav() -> Element {
                         to: Route::Features {},
                         "aria-current": if features_active { "page" },
                         "Features"
+                    }
+                    Link {
+                        class: "{compare_class}",
+                        to: Route::Compare {},
+                        "aria-current": if compare_active { "page" },
+                        "Compare"
                     }
                     Link {
                         class: "{get_started_class}",
@@ -113,6 +121,11 @@ fn SiteFooter() -> Element {
                         class: "text-muted-1 hover:text-teal-hi no-underline",
                         to: Route::Features {},
                         "Features"
+                    }
+                    Link {
+                        class: "text-muted-1 hover:text-teal-hi no-underline",
+                        to: Route::Compare {},
+                        "Compare"
                     }
                     Link {
                         class: "text-muted-1 hover:text-teal-hi no-underline",
