@@ -16,7 +16,7 @@ pub fn GetStarted() -> Element {
                 "Get started"
             }
             p { class: "mt-4 text-text-2 text-[15px] leading-relaxed max-w-2xl",
-                "Local development setup. You need a long auth secret and a strong first-boot admin password."
+                "Local development setup. You need a long auth secret, a strong first-boot admin password, and an admin email."
             }
 
             div { class: "mt-10 space-y-4",
@@ -52,7 +52,6 @@ pub fn GetStarted() -> Element {
                          # Set auth.secret_key in stomatopod.toml, or:\n\
                          export STOMATOPOD_AUTH__SECRET_KEY=\"$(openssl rand -hex 32)\"\n\
                          export STOMATOPOD_ADMIN_PASSWORD=\"$(openssl rand -base64 24)\"\n\
-                         # optional:\n\
                          export STOMATOPOD_ADMIN_EMAIL=\"you@example.com\""
                     }
                 }

@@ -12,8 +12,15 @@ mise install
 mise run config:init
 ```
 
-Set `auth.secret_key` in `stomatopod.toml` (or `STOMATOPOD_AUTH__SECRET_KEY`)
-and a strong first-boot `STOMATOPOD_ADMIN_PASSWORD` (min 12 characters).
+Set `auth.secret_key` in `stomatopod.toml` (or `STOMATOPOD_AUTH__SECRET_KEY`),
+a strong first-boot `STOMATOPOD_ADMIN_PASSWORD` (min 12 characters), and
+`STOMATOPOD_ADMIN_EMAIL`:
+
+```bash
+export STOMATOPOD_AUTH__SECRET_KEY="$(openssl rand -hex 32)"
+export STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)"
+export STOMATOPOD_ADMIN_EMAIL=you@example.com
+```
 
 ## Daily commands
 
