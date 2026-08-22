@@ -66,6 +66,7 @@ fn forbidden() -> Response {
 
 /// Resolve an optional `site_id` body field to a validated binding: `None`
 /// (org-wide), or `Some(id)` once confirmed to belong to `org_id`.
+#[allow(clippy::result_large_err)]
 async fn resolve_site_binding(
     state: &AppState,
     org_id: Ulid,
