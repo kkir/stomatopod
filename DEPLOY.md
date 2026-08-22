@@ -61,7 +61,7 @@ named volume:
 ```bash
 export STOMATOPOD_AUTH__SECRET_KEY="$(openssl rand -hex 32)"
 export STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)"
-# optional: STOMATOPOD_ADMIN_EMAIL=you@example.com
+export STOMATOPOD_ADMIN_EMAIL=you@example.com
 docker compose up -d
 ```
 
@@ -86,6 +86,7 @@ docker run -d \
   -p 8080:8080 \
   -e STOMATOPOD_AUTH__SECRET_KEY="$(openssl rand -hex 32)" \
   -e STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)" \
+  -e STOMATOPOD_ADMIN_EMAIL=you@example.com \
   -v stomatopod_data:/app/data \
   ghcr.io/kkir/stomatopod:latest
 ```
@@ -136,8 +137,9 @@ for provisioning correct ownership on that path.
 - `STOMATOPOD_AUTH__SECRET_KEY` — required; a long random string used to sign
   sessions. The server refuses to start without it.
 - `STOMATOPOD_ADMIN_PASSWORD` — required on **first boot** (empty data dir);
-  min 12 characters. Creates the single owner account. Optional
-  `STOMATOPOD_ADMIN_EMAIL` (default `admin@localhost`).
+  min 12 characters. Creates the single owner account.
+- `STOMATOPOD_ADMIN_EMAIL` - owner email created on first boot (default
+  `admin@localhost` if unset).
 - `STOMATOPOD_BASE_URL` — public URL for dashboard links in digests
   (e.g. `https://analytics.example.com`). Set this to an `https://` URL so the
   session cookie is marked `Secure`, or set `STOMATOPOD_AUTH__COOKIE_SECURE=true`.

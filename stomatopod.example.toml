@@ -16,7 +16,8 @@ port = 8080
 
 # Authentication.  secret_key is required and has no default.
 # Single-owner appliance: one org + one admin user (many sites OK).
-# First boot also requires STOMATOPOD_ADMIN_PASSWORD (min 12 chars).
+# First boot also requires STOMATOPOD_ADMIN_PASSWORD (min 12 chars)
+# and STOMATOPOD_ADMIN_EMAIL (default admin@localhost).
 [auth]
 secret_key = ""          # REQUIRED — set a long random string
 session_ttl_s = 2592000 # 30 days (embedded in the signed session token)

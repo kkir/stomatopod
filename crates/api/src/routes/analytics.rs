@@ -86,6 +86,7 @@ fn forbidden() -> Response {
 /// Resolve `{site}` and enforce that `principal` may read it. Read API keys
 /// are confined to their org (and, if site-bound, that single site); session
 /// and user principals are unrestricted (matching pre-existing behavior).
+#[allow(clippy::result_large_err)]
 async fn resolve_authorized_site(
     state: &AppState,
     principal: &Principal,

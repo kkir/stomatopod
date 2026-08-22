@@ -32,7 +32,7 @@ built for a small VPS or the same machine as the product you measure.
 ```bash
 export STOMATOPOD_AUTH__SECRET_KEY="$(openssl rand -hex 32)"
 export STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)"
-# optional: STOMATOPOD_ADMIN_EMAIL=you@example.com
+export STOMATOPOD_ADMIN_EMAIL=you@example.com
 
 docker compose up -d
 ```
@@ -89,6 +89,7 @@ directory and the same env vars:
 ```bash
 export STOMATOPOD_AUTH__SECRET_KEY="$(openssl rand -hex 32)"
 export STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)"
+export STOMATOPOD_ADMIN_EMAIL=you@example.com
 # point storage at a durable path
 export STOMATOPOD_STORAGE__DATA_DIR=/var/lib/stomatopod
 ./stomatopod serve
@@ -113,7 +114,7 @@ stoma --base-url https://analytics.example.com --token rk_… pageviews --site e
 ## Production checklist
 
 1. Mount a **named volume or bind mount** at `/app/data` (or set `STOMATOPOD_STORAGE__DATA_DIR`).
-2. Set a long random `STOMATOPOD_AUTH__SECRET_KEY` and a strong first-boot admin password.
+2. Set a long random `STOMATOPOD_AUTH__SECRET_KEY`, a strong first-boot admin password, and `STOMATOPOD_ADMIN_EMAIL`.
 3. Set `STOMATOPOD_BASE_URL` to your public URL when using share links or email digests.
 4. Probe `GET /health` (liveness) and `GET /ready` (readiness).
 
@@ -143,6 +144,7 @@ Then set `auth.secret_key` in `stomatopod.toml`, or export:
 ```bash
 export STOMATOPOD_AUTH__SECRET_KEY="replace-with-a-long-random-secret"
 export STOMATOPOD_ADMIN_PASSWORD="$(openssl rand -base64 24)"
+export STOMATOPOD_ADMIN_EMAIL=you@example.com
 ```
 
 ### Daily commands

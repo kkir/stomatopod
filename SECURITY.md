@@ -22,7 +22,8 @@ maintainer availability.
 
 ## Scope notes
 
-- Self-hosted deployments must set a strong `auth.secret_key` and admin
-  password; do not expose an unconfigured instance to the public internet.
+- Self-hosted deployments must set a strong `auth.secret_key`, admin
+  password, and `STOMATOPOD_ADMIN_EMAIL`; do not expose an unconfigured
+  instance to the public internet.
 - Optional MaxMind GeoLite databases are supplied by the operator; their
   license terms are separate from this project.
