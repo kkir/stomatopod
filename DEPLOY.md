@@ -91,6 +91,10 @@ docker run -d \
   ghcr.io/kkir/stomatopod:latest
 ```
 
+To pin a release instead of the rolling tag, swap the image for
+`ghcr.io/kkir/stomatopod:v0.1.0` (or another `:vX.Y.Z`). `:latest` moves when a
+new image is published; a version tag does not.
+
 Host bind mount instead of a named volume:
 
 ```bash
