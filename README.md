@@ -47,10 +47,12 @@ a site, and paste the tracker snippet into your pages:
 Data lives in the `stomatopod_data` Docker volume (`/app/data` in the container).
 Always keep that volume mounted - see [`DEPLOY.md`](./DEPLOY.md).
 
-Image: `ghcr.io/kkir/stomatopod:latest`
+Image: `ghcr.io/kkir/stomatopod:latest` (rolling) or pin a release with `ghcr.io/kkir/stomatopod:v0.1.0`.
+`:latest` moves with new publishes; a version tag such as `:v0.1.0` does not.
 
 ```bash
 docker compose pull && docker compose up -d   # redeploy without losing data
+# pin: image: ghcr.io/kkir/stomatopod:v0.1.0
 ```
 
 ## Features

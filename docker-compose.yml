@@ -1,6 +1,7 @@
 services:
   stomatopod:
     # Use the published image, or build locally with `docker compose build`.
+    # :latest moves with new publishes; pin with ghcr.io/kkir/stomatopod:v0.1.0
     image: ghcr.io/kkir/stomatopod:latest
     build: .
     ports:
