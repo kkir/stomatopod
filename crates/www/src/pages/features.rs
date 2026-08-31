@@ -2,7 +2,9 @@ use dioxus::prelude::*;
 
 use crate::components::benchmarks::{BenchmarkStrip, BENCHMARKS_URL};
 use crate::components::feature_previews::{FeaturePreview, FeaturePreviewPane};
+use crate::components::page_head::PageHead;
 use crate::routes::Route;
+use crate::seo;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Feature {
@@ -68,6 +70,8 @@ const RIGHT: &[Feature] = &[
 #[component]
 pub fn Features() -> Element {
     rsx! {
+        PageHead { meta: seo::FEATURES }
+
         // Intro
         div { class: "mx-auto max-w-6xl px-3 sm:px-5 py-10 sm:py-14 pb-8 sm:pb-10",
             p { class: "text-teal-hi text-[12px] font-semibold uppercase tracking-[0.16em] mb-3",

@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::components::layout::MarketingShell;
-use crate::pages::{Compare, Features, GetStarted, Home, NotFound};
+use crate::pages::{Compare, Features, GetStarted, Home, NotFound, NotFoundPage};
 
 /// Marketing site routes. All static segments are pre-rendered by SSG.
 #[derive(Routable, Clone, PartialEq)]
@@ -19,6 +19,11 @@ pub enum Route {
 
     #[route("/compare")]
     Compare {},
+
+    /// Pre-rendered so the Pages artifact can ship a real `404.html`
+    /// instead of copying the homepage.
+    #[route("/404")]
+    NotFoundPage {},
 
     #[route("/:..segments")]
     NotFound { segments: Vec<String> },

@@ -101,7 +101,7 @@ fn DashboardPreview() -> Element {
             main { class: "min-w-0 p-3 overflow-hidden",
                 // PageHead + RangeTabs
                 div { class: "flex justify-between items-center gap-3 mb-3",
-                    h1 { class: "text-[18px] font-bold tracking-tight text-text-1 leading-tight", "example.com" }
+                    p { class: "text-[18px] font-bold tracking-tight text-text-1 leading-tight", "example.com" }
                     nav {
                         class: "inline-flex items-center h-8 gap-0.5 p-[3px] rounded-[11px] bg-surface-2/80 border border-border-1 shadow-inner-hi",
                         span { class: "inline-flex items-center justify-center h-full px-2.5 rounded-[8px] text-[11px] font-semibold text-muted-1", "7d" }
@@ -168,7 +168,7 @@ fn FunnelsPreview() -> Element {
     rsx! {
         div { class: "p-3 bg-bg h-full",
             div { class: "flex justify-between items-center mb-3",
-                h1 { class: "text-[18px] font-bold tracking-tight text-text-1", "Funnel" }
+                p { class: "text-[18px] font-bold tracking-tight text-text-1", "Funnel" }
                 nav {
                     class: "inline-flex items-center h-8 gap-0.5 p-[3px] rounded-[11px] bg-surface-2/80 border border-border-1 shadow-inner-hi",
                     span { class: "inline-flex items-center justify-center h-full px-2.5 rounded-[8px] text-[11px] font-semibold bg-grad-btn text-[#032621]", "30d" }
@@ -202,7 +202,7 @@ fn AlertsPreview() -> Element {
     rsx! {
         div { class: "p-3 bg-bg h-full",
             div { class: "flex justify-between items-center mb-3",
-                h1 { class: "text-[18px] font-bold tracking-tight text-text-1", "Alerts" }
+                p { class: "text-[18px] font-bold tracking-tight text-text-1", "Alerts" }
                 span { class: "{BTN_PRIMARY}", "+ New alert" }
             }
             Card {

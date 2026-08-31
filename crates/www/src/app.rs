@@ -5,11 +5,9 @@ use crate::routes::Route;
 #[component]
 pub fn App() -> Element {
     rsx! {
-        document::Title { "Stomatopod - Privacy-friendly web analytics" }
-        document::Meta {
-            name: "description",
-            content: "Self-hosted, cookieless web analytics. One binary, embedded storage, dashboard, API, and CLI.",
-        }
+        // Per-page title, description, canonical, and OG tags live on each
+        // route (see `PageHead`). A sitewide pair here would duplicate on
+        // /compare/ and collapse the four URLs in the index.
         document::Meta { name: "theme-color", content: "#04080b" }
         document::Meta { name: "color-scheme", content: "dark" }
         document::Link { rel: "preconnect", href: "https://fonts.googleapis.com" }

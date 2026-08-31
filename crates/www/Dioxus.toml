@@ -3,6 +3,8 @@
 # stomatopod-ui) into the asset that `App` links via `asset!("/assets/tailwind.css")`.
 tailwind_input = "tailwind.css"
 tailwind_output = "assets/tailwind.css"
+# Copied verbatim next to index.html (robots.txt, sitemap.xml).
+public_dir = "public"
 
 [web.app]
 title = "Stomatopod"
