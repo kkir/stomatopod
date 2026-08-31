@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Finish a stomatopod-www SSG output for GitHub Pages.
+# Usage: scripts/prepare-www-artifact.sh [public-dir]
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PUBLIC="${1:-$ROOT/target/dx/stomatopod-www/release/web/public}"
+
+if [ ! -d "$PUBLIC" ]; then
+  echo "error: SSG public dir missing: $PUBLIC" >&2
+  exit 1
+fi
+
+cp "$ROOT/crates/www/public/robots.txt" "$PUBLIC/robots.txt"
+cp "$ROOT/crates/www/public/sitemap.xml" "$PUBLIC/sitemap.xml"
+
+# Real 404 document. Do not copy index.html (that is the current live bug:
+# unknown paths return homepage HTML with a 404 status).
+if [ -f "$PUBLIC/404/index.html" ]; then
+  cp "$PUBLIC/404/index.html" "$PUBLIC/404.html"
+elif [ ! -f "$PUBLIC/404.html" ]; then
+  echo "error: SSG did not emit 404/index.html or 404.html" >&2
+  exit 1
+fi
+
+if cmp -s "$PUBLIC/index.html" "$PUBLIC/404.html"; then
+  echo "error: 404.html must not be a copy of index.html" >&2
+  exit 1
+fi
+
+# Persist custom domain across Actions deploys (apex canonical).
+echo stoma.top > "$PUBLIC/CNAME"
+
+page_html() {
+  local name="$1"
+  if [ "$name" = "index" ]; then
+    echo "$PUBLIC/index.html"
+  elif [ -f "$PUBLIC/$name/index.html" ]; then
+    echo "$PUBLIC/$name/index.html"
+  elif [ -f "$PUBLIC/$name.html" ]; then
+    echo "$PUBLIC/$name.html"
+  else
+    echo "error: missing pre-rendered page $name" >&2
+    exit 1
+  fi
+}
+
+home="$(page_html index)"
+features="$(page_html features)"
+compare="$(page_html compare)"
+get_started="$(page_html get-started)"
+
+for f in "$home" "$features" "$compare" "$get_started"; do
+  test -f "$f"
+  grep -q '<link rel="canonical"' "$f"
+  grep -q 'property="og:title"' "$f" || grep -q "property='og:title'" "$f"
+done
+
+# Unique titles (Dioxus Title lands in <title>).
+home_title="$(grep -o '<title>[^<]*</title>' "$home" | head -1)"
+features_title="$(grep -o '<title>[^<]*</title>' "$features" | head -1)"
+compare_title="$(grep -o '<title>[^<]*</title>' "$compare" | head -1)"
+get_started_title="$(grep -o '<title>[^<]*</title>' "$get_started" | head -1)"
+test -n "$home_title"
+test "$home_title" != "$features_title"
+test "$home_title" != "$compare_title"
+test "$home_title" != "$get_started_title"
+test "$features_title" != "$compare_title"
+test "$features_title" != "$get_started_title"
+test "$compare_title" != "$get_started_title"
+echo "$compare_title" | grep -q "Plausible-class analytics on a small VPS"
+
+# Apex canonicals, slash-canonical paths.
+grep -q 'https://stoma.top/' "$home"
+grep -q 'https://stoma.top/features/' "$features"
+grep -q 'https://stoma.top/compare/' "$compare"
+grep -q 'https://stoma.top/get-started/' "$get_started"
+
+# Home JSON-LD.
+grep -q 'application/ld+json' "$home"
+grep -q 'SoftwareApplication' "$home"
+
+# Features: one H1 (demo chrome must not leak Funnel / example.com / Alerts).
+features_h1_count="$(grep -o '<h1' "$features" | wc -l | tr -d ' ')"
+test "$features_h1_count" = "1"
+! grep -q '<h1[^>]*>Funnel</h1>' "$features"
+! grep -q '<h1[^>]*>example.com</h1>' "$features"
+! grep -q '<h1[^>]*>Alerts</h1>' "$features"
+
+# Crawl files.
+grep -q "Sitemap: https://stoma.top/sitemap.xml" "$PUBLIC/robots.txt"
+grep -q "https://stoma.top/features/" "$PUBLIC/sitemap.xml"
+grep -q "https://stoma.top/compare/" "$PUBLIC/sitemap.xml"
+grep -q "https://stoma.top/get-started/" "$PUBLIC/sitemap.xml"
+
+# 404 document is the not-found page, not the homepage hero.
+grep -q "Page not found" "$PUBLIC/404.html"
+! grep -q "Privacy-friendly web analytics you run yourself" "$PUBLIC/404.html"
+
+ls -la "$PUBLIC"
+test -f "$PUBLIC/index.html"
+test -f "$PUBLIC/CNAME"
+test -f "$PUBLIC/robots.txt"
+test -f "$PUBLIC/sitemap.xml"
+test -f "$PUBLIC/404.html"
+
+echo "www artifact OK: $PUBLIC"

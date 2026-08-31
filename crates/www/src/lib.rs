@@ -6,6 +6,8 @@ mod app;
 mod components;
 mod pages;
 mod routes;
+mod seo;
 
 pub use app::App;
 pub use routes::Route;
+pub use seo::{robots_txt, sitemap_xml, PageMeta, PUBLIC_PAGES, SITE_ORIGIN};

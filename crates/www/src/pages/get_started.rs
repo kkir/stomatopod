@@ -1,6 +1,9 @@
 use dioxus::prelude::*;
 use stomatopod_ui::card::Card;
 
+use crate::components::page_head::PageHead;
+use crate::seo;
+
 const GITHUB_URL: &str = "https://github.com/kkir/stomatopod";
 const DEPLOY_URL: &str = "https://github.com/kkir/stomatopod/blob/main/DEPLOY.md";
 const README_URL: &str = "https://github.com/kkir/stomatopod#readme";
@@ -8,6 +11,8 @@ const README_URL: &str = "https://github.com/kkir/stomatopod#readme";
 #[component]
 pub fn GetStarted() -> Element {
     rsx! {
+        PageHead { meta: seo::GET_STARTED }
+
         div { class: "mx-auto max-w-5xl px-4 sm:px-6 py-12 sm:py-16",
             p { class: "text-teal-hi text-[12px] font-semibold uppercase tracking-[0.16em] mb-3",
                 "Install"

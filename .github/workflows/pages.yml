@@ -47,18 +47,10 @@ jobs:
           CI: true
 
       - name: Prepare Pages artifact
-        run: |
-          PUBLIC="target/dx/stomatopod-www/release/web/public"
-          # SPA fallback for client-side routes and unknown paths.
-          if [ -f "$PUBLIC/index.html" ]; then
-            cp "$PUBLIC/index.html" "$PUBLIC/404.html"
-          fi
-          # Persist custom domain across Actions deploys (apex canonical).
-          echo stoma.top > "$PUBLIC/CNAME"
-          # Sanity: expected pre-rendered routes exist (or index at least).
-          ls -la "$PUBLIC"
-          test -f "$PUBLIC/index.html"
-          test -f "$PUBLIC/CNAME"
+        run: bash scripts/prepare-www-artifact.sh
+        # Writes robots.txt, sitemap.xml, a real 404.html (not index.html),
+        # and CNAME (stoma.top). www TLS is a GitHub Pages + DNS cert step,
+        # not something this workflow can mint.
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

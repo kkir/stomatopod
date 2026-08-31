@@ -3,13 +3,17 @@ use stomatopod_ui::card::Card;
 
 use crate::components::benchmarks::BenchmarkStrip;
 use crate::components::mascot::HeroMascot;
+use crate::components::page_head::PageHead;
 use crate::routes::Route;
+use crate::seo;
 
 const GITHUB_URL: &str = "https://github.com/kkir/stomatopod";
 
 #[component]
 pub fn Home() -> Element {
     rsx! {
+        PageHead { meta: seo::HOME, json_ld: true }
+
         // Hero
         section {
             class: "relative overflow-hidden border-b border-border-1",

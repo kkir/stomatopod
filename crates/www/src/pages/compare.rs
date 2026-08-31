@@ -2,7 +2,9 @@ use dioxus::prelude::*;
 use stomatopod_ui::card::Card;
 
 use crate::components::benchmarks::BENCHMARKS_URL;
+use crate::components::page_head::PageHead;
 use crate::routes::Route;
+use crate::seo;
 
 const GITHUB_URL: &str = "https://github.com/kkir/stomatopod";
 const DEPLOY_URL: &str = "https://github.com/kkir/stomatopod/blob/main/DEPLOY.md";
@@ -71,11 +73,7 @@ const ROWS: &[CompareRow] = &[
 #[component]
 pub fn Compare() -> Element {
     rsx! {
-        document::Title { "Plausible-class analytics on a small VPS - Stomatopod" }
-        document::Meta {
-            name: "description",
-            content: "Operator notes for self-hosters: how Stomatopod compares to Plausible CE, Umami, and GoatCounter. Cookieless, single binary, embedded storage, MIT.",
-        }
+        PageHead { meta: seo::COMPARE }
 
         div { class: "mx-auto max-w-5xl px-4 sm:px-6 py-12 sm:py-16",
             p { class: "text-teal-hi text-[12px] font-semibold uppercase tracking-[0.16em] mb-3",
