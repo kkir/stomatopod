@@ -80,10 +80,18 @@ pub fn Compare() -> Element {
                 "Compare"
             }
             h1 { class: "font-display font-bold text-3xl sm:text-4xl tracking-tight text-text-1 max-w-3xl leading-[1.15]",
-                "Plausible-class analytics on a small VPS"
+                "Open source Plausible/Umami alternative on a small VPS"
             }
             p { class: "mt-4 text-text-2 text-[15px] leading-relaxed max-w-2xl",
-                "Short orientation for self-hosters evaluating privacy analytics tools. The goal is to decide whether Stomatopod fits your box, not to rank products."
+                "Stomatopod is MIT open source self-hosted analytics. "
+                a {
+                    class: "text-teal-hi hover:underline",
+                    href: "{GITHUB_URL}",
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    "Source on GitHub"
+                }
+                ". Short orientation for self-hosters evaluating privacy analytics tools. The goal is to decide whether Stomatopod fits your box, not to rank products."
             }
 
             // Positioning

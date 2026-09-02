@@ -14,6 +14,10 @@ fi
 cp "$ROOT/crates/www/public/robots.txt" "$PUBLIC/robots.txt"
 cp "$ROOT/crates/www/public/sitemap.xml" "$PUBLIC/sitemap.xml"
 
+# Stable share-card image (not a Dioxus-hashed asset).
+mkdir -p "$PUBLIC/assets"
+cp "$ROOT/crates/www/public/assets/og.png" "$PUBLIC/assets/og.png"
+
 # Real 404 document. Do not copy index.html (that is the current live bug:
 # unknown paths return homepage HTML with a 404 status).
 if [ -f "$PUBLIC/404/index.html" ]; then
@@ -54,6 +58,11 @@ for f in "$home" "$features" "$compare" "$get_started"; do
   test -f "$f"
   grep -q '<link rel="canonical"' "$f"
   grep -q 'property="og:title"' "$f" || grep -q "property='og:title'" "$f"
+  grep -q 'https://stoma.top/assets/og.png' "$f"
+  grep -q 'property="og:image"' "$f" || grep -q "property='og:image'" "$f"
+  grep -q 'summary_large_image' "$f"
+  grep -q 'twitter:card' "$f"
+  grep -q 'twitter:image' "$f"
 done
 
 # Unique titles (Dioxus Title lands in <title>).
@@ -68,7 +77,8 @@ test "$home_title" != "$get_started_title"
 test "$features_title" != "$compare_title"
 test "$features_title" != "$get_started_title"
 test "$compare_title" != "$get_started_title"
-echo "$compare_title" | grep -q "Plausible-class analytics on a small VPS"
+echo "$compare_title" | grep -qi "open source"
+echo "$compare_title" | grep -q "Plausible/Umami"
 
 # Apex canonicals, slash-canonical paths.
 grep -q 'https://stoma.top/' "$home"
@@ -103,5 +113,8 @@ test -f "$PUBLIC/CNAME"
 test -f "$PUBLIC/robots.txt"
 test -f "$PUBLIC/sitemap.xml"
 test -f "$PUBLIC/404.html"
+test -f "$PUBLIC/assets/og.png"
+# PNG signature so the Pages artifact ships a real image/*, not a placeholder.
+test "$(head -c 8 "$PUBLIC/assets/og.png" | od -An -tx1 | tr -d ' \n')" = "89504e470d0a1a0a"
 
 echo "www artifact OK: $PUBLIC"
