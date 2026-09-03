@@ -1205,7 +1205,7 @@ async fn expired_session_bearer_is_rejected() {
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
-fn header_str(resp: &axum::response::Response, name: &str) -> Option<&str> {
+fn header_str<'a>(resp: &'a axum::response::Response, name: &str) -> Option<&'a str> {
     resp.headers().get(name).and_then(|v| v.to_str().ok())
 }
 
