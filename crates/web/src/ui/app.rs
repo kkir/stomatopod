@@ -6,6 +6,7 @@ use crate::ui::routes::Route;
 pub fn App() -> Element {
     rsx! {
         document::Title { "Stomatopod" }
+        document::Meta { name: "robots", content: "noindex, nofollow" }
         document::Meta { name: "theme-color", content: "#04080b" }
         // Hint color scheme for browser UI (scrollbars, form controls).
         document::Meta { name: "color-scheme", content: "dark" }

@@ -32,9 +32,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     // compiled Tailwind bundle the Dioxus SPA uses. The dashboard root `/`
     // is served by the Dioxus SSR fallback (behind `require_auth`).
     // `/health` and `/ready` are unauthenticated probes for orchestrators.
+    // `/robots.txt` and `/sitemap.xml` must be real public responses — if they
+    // fall through to `require_auth` crawlers receive a login HTML bounce.
     let public_assets = Router::new()
         .route("/app.css", get(api::dashboard_css))
         .route("/llms.txt", get(api::llms_txt))
+        .route("/robots.txt", get(api::robots_txt))
+        .route("/sitemap.xml", get(api::sitemap_xml))
         .route("/openapi.json", get(openapi::openapi_json))
         .route("/health", get(api::health))
         .route("/ready", get(api::ready));

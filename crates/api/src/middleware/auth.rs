@@ -12,7 +12,10 @@ use ulid::Ulid;
 
 use stomatopod_core::domain::api_key::{ApiKey, ApiKeyScope};
 
-use crate::{routes::api::resolve_api_key, state::AppState};
+use crate::{
+    middleware::security_headers::apply_security_headers, routes::api::resolve_api_key,
+    state::AppState,
+};
 
 pub const SESSION_COOKIE: &str = "sp_session";
 
@@ -180,6 +183,15 @@ async fn session_still_valid(state: &AppState, claims: &SessionClaims) -> bool {
     }
 }
 
+/// 303 to `/login` with the same appliance security + noindex headers as
+/// `security_headers`. Applied here so auth redirects are covered even when
+/// this middleware sits outside `build_router`'s layer (Dioxus fallback).
+fn login_redirect() -> Response {
+    let mut resp = Redirect::to("/login").into_response();
+    apply_security_headers(resp.headers_mut());
+    resp
+}
+
 /// Dashboard middleware: redirects to /login if unauthenticated.
 pub async fn require_auth(
     State(state): State<Arc<AppState>>,
@@ -191,10 +203,10 @@ pub async fn require_auth(
         .get(SESSION_COOKIE)
         .and_then(|c| verify_session_claims(secret, c.value()))
     else {
-        return Redirect::to("/login").into_response();
+        return login_redirect();
     };
     if !session_still_valid(&state, &claims).await {
-        return Redirect::to("/login").into_response();
+        return login_redirect();
     }
     next.run(req).await
 }

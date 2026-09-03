@@ -29,6 +29,7 @@ fn head(title: &str) -> String {
         r##"<meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
+    <meta name="robots" content="noindex, nofollow" />
     <meta name="theme-color" content="#04080b" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -73,4 +74,23 @@ pub fn login_page(error: Option<&str>) -> String {
 </html>"#,
         head = head("Login - Stomatopod"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn login_page_includes_robots_meta() {
+        let html = login_page(None);
+        assert!(
+            html.contains(r#"<meta name="robots" content="noindex, nofollow""#),
+            "login head should noindex: {html}"
+        );
+        let error_html = login_page(Some("Invalid credentials"));
+        assert!(
+            error_html.contains(r#"<meta name="robots" content="noindex, nofollow""#),
+            "error re-render should still noindex"
+        );
+    }
 }

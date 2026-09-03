@@ -1205,6 +1205,36 @@ async fn expired_session_bearer_is_rejected() {
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
+fn header_str(resp: &axum::response::Response, name: &str) -> Option<&str> {
+    resp.headers().get(name).and_then(|v| v.to_str().ok())
+}
+
+/// Appliance security headers that must survive adding `X-Robots-Tag`.
+fn assert_security_headers(resp: &axum::response::Response) {
+    assert_eq!(header_str(resp, "x-content-type-options"), Some("nosniff"));
+    assert_eq!(header_str(resp, "x-frame-options"), Some("DENY"));
+    assert!(
+        resp.headers().get("content-security-policy").is_some(),
+        "CSP header missing"
+    );
+    assert_eq!(
+        header_str(resp, "referrer-policy"),
+        Some("strict-origin-when-cross-origin")
+    );
+    assert_eq!(
+        header_str(resp, "permissions-policy"),
+        Some("camera=(), microphone=(), geolocation=()")
+    );
+}
+
+fn assert_noindex(resp: &axum::response::Response) {
+    assert_eq!(
+        header_str(resp, "x-robots-tag"),
+        Some("noindex, nofollow"),
+        "expected X-Robots-Tag: noindex, nofollow"
+    );
+}
+
 #[tokio::test]
 async fn responses_include_security_headers() {
     let ctx = setup().await;
@@ -1214,19 +1244,188 @@ async fn responses_include_security_headers() {
         .unwrap();
     let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(
-        resp.headers()
-            .get("x-content-type-options")
-            .and_then(|v| v.to_str().ok()),
-        Some("nosniff")
+    assert_security_headers(&resp);
+    assert_noindex(&resp);
+}
+
+// ---- Appliance crawler controls (private dashboard host) ----
+
+#[tokio::test]
+async fn robots_txt_is_public_and_disallows_all() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/robots.txt")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(
+        header_str(&resp, "content-type")
+            .unwrap_or("")
+            .starts_with("text/plain"),
+        "robots.txt must be text/plain, got {:?}",
+        header_str(&resp, "content-type")
     );
-    assert_eq!(
-        resp.headers()
-            .get("x-frame-options")
-            .and_then(|v| v.to_str().ok()),
-        Some("DENY")
+    assert!(
+        resp.headers().get("location").is_none(),
+        "robots.txt must not redirect (got Location: {:?})",
+        header_str(&resp, "location")
     );
-    assert!(resp.headers().get("content-security-policy").is_some());
+    let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    assert_eq!(body, "User-agent: *\nDisallow: /\n");
+    assert!(
+        !body.to_ascii_lowercase().contains("sitemap"),
+        "appliance robots.txt must not name a sitemap: {body:?}"
+    );
+}
+
+#[tokio::test]
+async fn sitemap_xml_is_not_found_and_does_not_redirect() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/sitemap.xml")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert!(
+        resp.status() == StatusCode::NOT_FOUND || resp.status() == StatusCode::GONE,
+        "sitemap.xml must be 404 or 410, got {}",
+        resp.status()
+    );
+    assert_ne!(
+        header_str(&resp, "location"),
+        Some("/login"),
+        "sitemap.xml must not bounce to /login"
+    );
+}
+
+#[tokio::test]
+async fn login_page_is_noindex_and_keeps_security_headers() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .uri("/login")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(
+        header_str(&resp, "content-type")
+            .unwrap_or("")
+            .contains("text/html"),
+        "login must be text/html, got {:?}",
+        header_str(&resp, "content-type")
+    );
+    assert_noindex(&resp);
+    assert_security_headers(&resp);
+
+    let html = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    assert!(
+        html.contains(r#"<meta name="robots" content="noindex, nofollow""#),
+        "login HTML should include robots meta"
+    );
+}
+
+#[tokio::test]
+async fn login_error_rerender_is_noindex() {
+    let ctx = setup().await;
+    let body = "email=ghost%40example.com&password=anything";
+    let req = Request::builder()
+        .method("POST")
+        .uri("/login")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(body))
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_noindex(&resp);
+    assert_security_headers(&resp);
+}
+
+#[tokio::test]
+async fn logout_redirect_is_noindex() {
+    let ctx = setup().await;
+    let req = Request::builder()
+        .method("POST")
+        .uri("/logout")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    assert_eq!(header_str(&resp, "location"), Some("/login"));
+    assert_noindex(&resp);
+    assert_security_headers(&resp);
+}
+
+/// REST router plus an auth-gated fallback, matching `launch.rs` (Dioxus
+/// behind `require_auth` + `security_headers`).
+fn make_app_with_spa_guard(
+    state: Arc<AppState>,
+) -> impl tower::Service<
+    Request<Body>,
+    Response = axum::response::Response,
+    Error = std::convert::Infallible,
+> {
+    let rest = build_router(state.clone());
+    let guarded = axum::Router::new()
+        .fallback(|| async { StatusCode::OK })
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            stomatopod_web::middleware::auth::require_auth,
+        ))
+        .layer(axum::middleware::from_fn(
+            stomatopod_web::middleware::security_headers::security_headers,
+        ));
+    rest.merge(guarded)
+        .layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 1234))))
+}
+
+#[tokio::test]
+async fn unauthenticated_app_path_redirects_with_robots_tag() {
+    let ctx = setup().await;
+    let req = Request::builder().uri("/").body(Body::empty()).unwrap();
+    let resp = make_app_with_spa_guard(ctx.state.clone())
+        .oneshot(req)
+        .await
+        .unwrap();
+    assert!(
+        resp.status() == StatusCode::SEE_OTHER || resp.status() == StatusCode::FOUND,
+        "unauthenticated / must redirect, got {}",
+        resp.status()
+    );
+    assert_eq!(header_str(&resp, "location"), Some("/login"));
+    assert_noindex(&resp);
+    assert_security_headers(&resp);
+}
+
+#[tokio::test]
+async fn crawler_files_stay_public_when_merged_with_spa_guard() {
+    // Production is `build_router` merged with the auth-gated Dioxus app.
+    // `/robots.txt` and `/sitemap.xml` must still be real public responses.
+    let ctx = setup().await;
+
+    let req = Request::builder()
+        .uri("/robots.txt")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app_with_spa_guard(ctx.state.clone())
+        .oneshot(req)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(resp.headers().get("location").is_none());
+    let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    assert_eq!(body, "User-agent: *\nDisallow: /\n");
+
+    let req = Request::builder()
+        .uri("/sitemap.xml")
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app_with_spa_guard(ctx.state.clone())
+        .oneshot(req)
+        .await
+        .unwrap();
+    assert!(resp.status() == StatusCode::NOT_FOUND || resp.status() == StatusCode::GONE);
+    assert_ne!(header_str(&resp, "location"), Some("/login"));
 }
 
 // ---- Docs / OpenAPI ----
