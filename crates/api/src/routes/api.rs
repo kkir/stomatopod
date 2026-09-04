@@ -463,6 +463,30 @@ pub async fn llms_txt() -> impl IntoResponse {
     )
 }
 
+/// Exact `robots.txt` body for the private appliance host. Disallow everything;
+/// no `Sitemap:` line — marketing crawl controls live on stoma.top (`crates/www`).
+pub const APPLIANCE_ROBOTS_TXT: &str = "User-agent: *\nDisallow: /\n";
+
+/// `GET /robots.txt` — public crawler hint for the dashboard host. Must sit
+/// on `public_assets` (before `require_auth`) so it is never a login bounce.
+pub async fn robots_txt() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        APPLIANCE_ROBOTS_TXT,
+    )
+}
+
+/// `GET /sitemap.xml` — the appliance does not publish a sitemap. A real 404
+/// (not a 303 to `/login`) so crawlers do not treat login HTML as a sitemap.
+pub async fn sitemap_xml() -> impl IntoResponse {
+    (
+        StatusCode::NOT_FOUND,
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        "Not Found\n",
+    )
+}
+
 /// One entry in the docs table of contents (right-side anchor nav).
 #[derive(serde::Serialize)]
 struct TocItem {

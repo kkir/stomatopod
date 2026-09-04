@@ -5,7 +5,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Result;
-use axum::middleware::from_fn_with_state;
+use axum::middleware::{from_fn, from_fn_with_state};
 use clap::Parser;
 use config::{Config as ConfigBuilder, Environment, File};
 use dioxus_server::{DioxusRouterExt, ServeConfig};
@@ -16,7 +16,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 use dashmap::DashMap;
 use stomatopod_api::{
     digest::{self, DigestNotifier},
-    middleware::auth::require_auth,
+    middleware::{auth::require_auth, security_headers::security_headers},
     router::build_router,
     state::AppState,
 };
@@ -184,9 +184,13 @@ async fn serve(cfg: Config) -> Result<()> {
     // dashboard session middleware, which redirects unauthenticated requests
     // to `/login` before any SSR HTML or wasm is served.
     let serve_cfg = ServeConfig::new().context(state.clone());
+    // `require_auth` 303s and SSR HTML never pass `build_router`'s
+    // `security_headers` layer, so apply the same headers here: clickjacking
+    // protections plus `X-Robots-Tag: noindex, nofollow`.
     let dioxus_app = axum::Router::new()
         .serve_dioxus_application(serve_cfg, crate::ui::App)
-        .layer(from_fn_with_state(state.clone(), require_auth));
+        .layer(from_fn_with_state(state.clone(), require_auth))
+        .layer(from_fn(security_headers));
 
     let app = rest.merge(dioxus_app);
 
