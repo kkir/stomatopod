@@ -21,7 +21,8 @@ pub enum Route {
     Compare {},
 
     /// Pre-rendered so the Pages artifact can ship a real `404.html`
-    /// instead of copying the homepage.
+    /// instead of copying the homepage. The artifact step then removes
+    /// `404/` — leaving that directory would make `/404/` a 200 page.
     #[route("/404")]
     NotFoundPage {},
 

@@ -3,6 +3,10 @@ use dioxus::prelude::*;
 use crate::seo::{self, PageMeta};
 
 /// Unique title, description, apex canonical, and Open Graph tags for one page.
+///
+/// Error documents (`PageMeta::indexable() == false`) emit
+/// `noindex, follow` and omit `rel=canonical` / `og:url` so they cannot
+/// claim a marketing URL.
 #[component]
 pub fn PageHead(meta: PageMeta, #[props(default = false)] json_ld: bool) -> Element {
     let canonical = meta.canonical();
@@ -12,6 +16,8 @@ pub fn PageHead(meta: PageMeta, #[props(default = false)] json_ld: bool) -> Elem
     let og_type = seo::OG_IMAGE_TYPE;
     let og_alt = seo::OG_IMAGE_ALT;
     let twitter_card = seo::TWITTER_CARD;
+    let robots = seo::NOT_FOUND_ROBOTS;
+    let indexable = meta.indexable();
     let json_ld_body = if json_ld {
         Some(seo::home_json_ld())
     } else {
@@ -21,10 +27,16 @@ pub fn PageHead(meta: PageMeta, #[props(default = false)] json_ld: bool) -> Elem
     rsx! {
         document::Title { "{meta.title}" }
         document::Meta { name: "description", content: "{meta.description}" }
-        document::Link { rel: "canonical", href: "{canonical}" }
+        if indexable {
+            document::Link { rel: "canonical", href: "{canonical}" }
+        } else {
+            document::Meta { name: "robots", content: "{robots}" }
+        }
         document::Meta { property: "og:title", content: "{meta.title}" }
         document::Meta { property: "og:description", content: "{meta.description}" }
-        document::Meta { property: "og:url", content: "{canonical}" }
+        if indexable {
+            document::Meta { property: "og:url", content: "{canonical}" }
+        }
         document::Meta { property: "og:type", content: "website" }
         document::Meta { property: "og:image", content: "{og_image}" }
         document::Meta { property: "og:image:type", content: "{og_type}" }

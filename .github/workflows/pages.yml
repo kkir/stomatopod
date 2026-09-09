@@ -49,8 +49,9 @@ jobs:
       - name: Prepare Pages artifact
         run: bash scripts/prepare-www-artifact.sh
         # Writes robots.txt, sitemap.xml, a real 404.html (not index.html),
-        # and CNAME (stoma.top). www TLS is a GitHub Pages + DNS cert step,
-        # not something this workflow can mint.
+        # strips the 404/ directory so /404/ is not a 200 URL, and CNAME
+        # (stoma.top). www TLS is a GitHub Pages + DNS cert step, not
+        # something this workflow can mint.
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

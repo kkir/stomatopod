@@ -5,8 +5,9 @@ use crate::routes::Route;
 use crate::seo;
 
 /// Static `/404` route. SSG pre-renders this into `404/index.html`, which the
-/// Pages artifact step copies to root `404.html` so unknown paths are a real
-/// 404 document (not homepage HTML).
+/// Pages artifact step copies to root `404.html` and then deletes `404/` so
+/// `/404/` is not a 200 URL. GitHub Pages serves root `404.html` as the
+/// error document for unknown paths (HTTP 404).
 #[component]
 pub fn NotFoundPage() -> Element {
     rsx! { NotFoundView { path: None } }

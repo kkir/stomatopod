@@ -32,6 +32,11 @@ if cmp -s "$PUBLIC/index.html" "$PUBLIC/404.html"; then
   exit 1
 fi
 
+# GitHub Pages serves an existing 404/ directory as HTTP 200 at /404/.
+# Keep one error document (root 404.html) so /404/ is a missing path and
+# Pages returns HTTP 404 with this same body.
+rm -rf "$PUBLIC/404"
+
 # Persist custom domain across Actions deploys (apex canonical).
 echo stoma.top > "$PUBLIC/CNAME"
 
@@ -63,6 +68,8 @@ for f in "$home" "$features" "$compare" "$get_started"; do
   grep -q 'summary_large_image' "$f"
   grep -q 'twitter:card' "$f"
   grep -q 'twitter:image' "$f"
+  # Money pages stay indexable; noindex is only on the 404 template.
+  ! grep -q 'noindex' "$f"
 done
 
 # Unique titles (Dioxus Title lands in <title>).
@@ -106,6 +113,18 @@ grep -q "https://stoma.top/get-started/" "$PUBLIC/sitemap.xml"
 # 404 document is the not-found page, not the homepage hero.
 grep -q "Page not found" "$PUBLIC/404.html"
 ! grep -q "Privacy-friendly web analytics you run yourself" "$PUBLIC/404.html"
+
+# Error document is not indexable and does not claim /404/ as a canonical URL.
+grep -q 'noindex' "$PUBLIC/404.html"
+grep -q 'robots' "$PUBLIC/404.html"
+! grep -q 'https://stoma.top/404/' "$PUBLIC/404.html"
+! grep -q '/404' "$PUBLIC/sitemap.xml"
+
+# One error document: no 404/ directory that Pages would serve as HTTP 200.
+if [ -e "$PUBLIC/404" ]; then
+  echo "error: 404/ must not ship; it would be a 200 URL at /404/" >&2
+  exit 1
+fi
 
 ls -la "$PUBLIC"
 test -f "$PUBLIC/index.html"
