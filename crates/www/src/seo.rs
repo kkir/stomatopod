@@ -5,6 +5,9 @@
 //! Pages may serve `www.stoma.top` only after a platform cert/DNS step; every
 //! canonical still points at `https://stoma.top/…` so crawlers consolidate
 //! on the apex even before that 301 exists.
+//!
+//! The 404 template is an error document, not a marketing URL: it is omitted
+//! from the sitemap, emits `noindex, follow`, and does not claim a canonical.
 
 /// Apex origin. Canonicals, the sitemap, and og:image always use this host.
 pub const SITE_ORIGIN: &str = "https://stoma.top";
@@ -38,6 +41,11 @@ impl PageMeta {
     pub fn og_image(&self) -> String {
         format!("{SITE_ORIGIN}{OG_IMAGE_PATH}")
     }
+
+    /// Money pages are indexable. The 404 template is an error document.
+    pub fn indexable(&self) -> bool {
+        self.path != "/404/"
+    }
 }
 
 /// Home: repeat self-hosted / cookieless / Docker / one binary so the Pages
@@ -68,11 +76,18 @@ pub const GET_STARTED: PageMeta = PageMeta {
     description: "Install Stomatopod locally or with Docker Compose. One binary, cookieless privacy analytics, persistent volume, first-boot admin.",
 };
 
+/// Pre-rendered into root `404.html` (the Pages error document). Not a
+/// public URL: `indexable()` is false, and the artifact step deletes `404/`
+/// so `/404/` is not a 200 directory listing of the same body.
 pub const NOT_FOUND: PageMeta = PageMeta {
     path: "/404/",
     title: "Page not found - Stomatopod",
     description: "That URL is not a page on stoma.top.",
 };
+
+/// Robots token for the error document. `follow` keeps link equity on
+/// "Back home"; `noindex` stops the soft-404 from entering the index.
+pub const NOT_FOUND_ROBOTS: &str = "noindex, follow";
 
 /// SoftwareApplication JSON-LD for the homepage only.
 pub fn home_json_ld() -> String {
@@ -242,6 +257,26 @@ mod tests {
         assert!(body.contains("Allow: /"));
         assert!(body.contains("Sitemap: https://stoma.top/sitemap.xml"));
         assert_eq!(body, public_file("robots.txt"));
+    }
+
+    #[test]
+    fn not_found_is_not_indexable_and_not_in_sitemap() {
+        assert!(!NOT_FOUND.indexable(), "404 template must not be indexed");
+        assert_eq!(NOT_FOUND_ROBOTS, "noindex, follow");
+        for page in PUBLIC_PAGES {
+            assert!(page.indexable(), "{} must stay indexable", page.path);
+            assert!(
+                !page.path.contains("404"),
+                "public page path must not be a 404 URL: {}",
+                page.path
+            );
+        }
+        let sitemap = sitemap_xml();
+        assert!(
+            !sitemap.contains("/404"),
+            "sitemap must not list /404/: {sitemap}"
+        );
+        assert_eq!(sitemap, public_file("sitemap.xml"));
     }
 
     #[test]
