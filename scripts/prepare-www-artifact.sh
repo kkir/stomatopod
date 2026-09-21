@@ -32,10 +32,29 @@ if cmp -s "$PUBLIC/index.html" "$PUBLIC/404.html"; then
   exit 1
 fi
 
-# GitHub Pages serves an existing 404/ directory as HTTP 200 at /404/.
-# Keep one error document (root 404.html) so /404/ is a missing path and
-# Pages returns HTTP 404 with this same body.
+# GitHub Pages URL resolution (verified live 2026-09-21 on stoma.top,
+# jekyllrb.com, and simonw.github.io/playing-with-github-pages):
+#
+#   1. exact file
+#   2. same path + ".html"          (clean URL; ".html" beats a directory)
+#   3. directory index / slash redirect
+#   4. root 404.html with HTTP 404
+#
+# So while root 404.html exists (required custom error document):
+#   /missing, /404/     -> HTTP 404  (no file, no 404/index.html)
+#   /404.html, /404     -> HTTP 200  (the error file itself, or clean-URL map)
+#
+# True HTTP 404 for GET /404 or GET /404.html is not available on Pages
+# without deleting 404.html, which would drop the branded unknown-path
+# body. A 404/ directory or extensionless "404" file would only add more
+# 200s (or a 301 then 404), not remove the clean-URL 200.
+# Mitigation: one error document, no 404/ directory, noindex, no sitemap
+# URL. See https://github.com/kkir/stomatopod/issues/60
 rm -rf "$PUBLIC/404"
+if [ -e "$PUBLIC/404" ]; then
+  echo "error: 404 must not remain as a file or directory" >&2
+  exit 1
+fi
 
 # Persist custom domain across Actions deploys (apex canonical).
 echo stoma.top > "$PUBLIC/CNAME"
@@ -120,9 +139,11 @@ grep -q 'robots' "$PUBLIC/404.html"
 ! grep -q 'https://stoma.top/404/' "$PUBLIC/404.html"
 ! grep -q '/404' "$PUBLIC/sitemap.xml"
 
-# One error document: no 404/ directory that Pages would serve as HTTP 200.
+# One error document: no 404 file or 404/ directory besides root 404.html.
+# A leftover 404/ is HTTP 200 at /404/. An extensionless 404 file is HTTP 200
+# at /404 and does not turn the clean-URL map into a 404.
 if [ -e "$PUBLIC/404" ]; then
-  echo "error: 404/ must not ship; it would be a 200 URL at /404/" >&2
+  echo "error: 404 must not ship as a file or directory; only 404.html" >&2
   exit 1
 fi
 

@@ -8,6 +8,10 @@
 //!
 //! The 404 template is an error document, not a marketing URL: it is omitted
 //! from the sitemap, emits `noindex, follow`, and does not claim a canonical.
+//!
+//! GitHub Pages cannot return HTTP 404 for a direct request to `404.html`
+//! (or clean-URL `/404`) while that file is the custom error document.
+//! `/404/` and unknown paths are the URLs that get a real 404 status.
 
 /// Apex origin. Canonicals, the sitemap, and og:image always use this host.
 pub const SITE_ORIGIN: &str = "https://stoma.top";
@@ -78,7 +82,8 @@ pub const GET_STARTED: PageMeta = PageMeta {
 
 /// Pre-rendered into root `404.html` (the Pages error document). Not a
 /// public URL: `indexable()` is false, and the artifact step deletes `404/`
-/// so `/404/` is not a 200 directory listing of the same body.
+/// so `/404/` is a missing path (HTTP 404). `/404` and `/404.html` remain
+/// host-level 200s of this same noindex body; see issue #60.
 pub const NOT_FOUND: PageMeta = PageMeta {
     path: "/404/",
     title: "Page not found - Stomatopod",
@@ -263,6 +268,8 @@ mod tests {
     fn not_found_is_not_indexable_and_not_in_sitemap() {
         assert!(!NOT_FOUND.indexable(), "404 template must not be indexed");
         assert_eq!(NOT_FOUND_ROBOTS, "noindex, follow");
+        // Host 200s at /404 and /404.html (Pages clean-URL + the error file)
+        // must not be advertised as public URLs.
         for page in PUBLIC_PAGES {
             assert!(page.indexable(), "{} must stay indexable", page.path);
             assert!(
@@ -272,10 +279,12 @@ mod tests {
             );
         }
         let sitemap = sitemap_xml();
-        assert!(
-            !sitemap.contains("/404"),
-            "sitemap must not list /404/: {sitemap}"
-        );
+        for needle in ["/404", "404.html", "404/"] {
+            assert!(
+                !sitemap.contains(needle),
+                "sitemap must not list {needle}: {sitemap}"
+            );
+        }
         assert_eq!(sitemap, public_file("sitemap.xml"));
     }
 
