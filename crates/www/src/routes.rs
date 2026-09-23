@@ -22,7 +22,10 @@ pub enum Route {
 
     /// Pre-rendered so the Pages artifact can ship a real `404.html`
     /// instead of copying the homepage. The artifact step then removes
-    /// `404/` — leaving that directory would make `/404/` a 200 page.
+    /// `404/` so `/404/` is a missing path (HTTP 404). GitHub Pages still
+    /// serves the remaining `404.html` as HTTP 200 at `/404.html` and,
+    /// via its clean-URL map, at `/404`. That 200 is a host limitation,
+    /// not a second published page; see `scripts/prepare-www-artifact.sh`.
     #[route("/404")]
     NotFoundPage {},
 

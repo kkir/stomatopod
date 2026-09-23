@@ -4,10 +4,14 @@ use crate::components::page_head::PageHead;
 use crate::routes::Route;
 use crate::seo;
 
-/// Static `/404` route. SSG pre-renders this into `404/index.html`, which the
-/// Pages artifact step copies to root `404.html` and then deletes `404/` so
-/// `/404/` is not a 200 URL. GitHub Pages serves root `404.html` as the
-/// error document for unknown paths (HTTP 404).
+/// Static `/404` route used only as the SSG source for the error document.
+///
+/// `dx build --ssg` writes `404/index.html`. The Pages artifact step copies
+/// that file to root `404.html` (the only custom-error filename Pages
+/// honors) and deletes `404/`. Unknown paths and `/404/` then return HTTP
+/// 404 with this body. Direct `GET /404.html` and clean-URL `GET /404`
+/// stay HTTP 200 on GitHub Pages because the error file exists; the body
+/// is still `noindex, follow` and is not in the sitemap.
 #[component]
 pub fn NotFoundPage() -> Element {
     rsx! { NotFoundView { path: None } }

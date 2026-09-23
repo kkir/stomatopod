@@ -6,6 +6,7 @@ on:
     paths:
       - "crates/www/**"
       - "crates/ui/**"
+      - "scripts/prepare-www-artifact.sh"
       - ".github/workflows/pages.yml"
       - "Cargo.lock"
   workflow_dispatch:
@@ -50,8 +51,10 @@ jobs:
         run: bash scripts/prepare-www-artifact.sh
         # Writes robots.txt, sitemap.xml, a real 404.html (not index.html),
         # strips the 404/ directory so /404/ is not a 200 URL, and CNAME
-        # (stoma.top). www TLS is a GitHub Pages + DNS cert step, not
-        # something this workflow can mint.
+        # (stoma.top). Pages still serves 404.html as HTTP 200 at /404.html
+        # and /404 (clean-URL map); that is a host limit, not a second page.
+        # www TLS is a GitHub Pages + DNS cert step, not something this
+        # workflow can mint.
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
