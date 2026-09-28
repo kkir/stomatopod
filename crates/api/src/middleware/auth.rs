@@ -170,7 +170,7 @@ fn bearer_token(req: &Request) -> Option<&str> {
 }
 
 /// Load the user and confirm a password-bound session still matches.
-async fn session_still_valid(state: &AppState, claims: &SessionClaims) -> bool {
+pub(crate) async fn session_still_valid(state: &AppState, claims: &SessionClaims) -> bool {
     if claims.pwd_v == "0" {
         return true;
     }

@@ -15,7 +15,9 @@ use std::{
 use crate::{
     error::AppError,
     html,
-    middleware::auth::{sign_session_bound, verify_session, SESSION_COOKIE},
+    middleware::auth::{
+        session_still_valid, sign_session_bound, verify_session_claims, SESSION_COOKIE,
+    },
     state::AppState,
 };
 
@@ -39,12 +41,17 @@ pub async fn login_page(
     State(state): State<Arc<AppState>>,
     jar: CookieJar,
 ) -> Result<impl IntoResponse, AppError> {
-    if jar
+    // Same liveness check as `require_auth`: MAC + expiry is not enough.
+    // After a password change the old cookie is still well-formed, but
+    // dashboard routes reject it. Redirecting here would bounce
+    // `/login` → `/` → `/login` until the operator cleared cookies.
+    if let Some(claims) = jar
         .get(SESSION_COOKIE)
-        .and_then(|c| verify_session(&state.config.auth.secret_key, c.value()))
-        .is_some()
+        .and_then(|c| verify_session_claims(&state.config.auth.secret_key, c.value()))
     {
-        return Ok(Redirect::to("/").into_response());
+        if session_still_valid(&state, &claims).await {
+            return Ok(Redirect::to("/").into_response());
+        }
     }
     Ok(Html(html::login_page(None)).into_response())
 }

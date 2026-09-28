@@ -1540,6 +1540,69 @@ async fn change_password_requires_session_and_correct_current() {
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
+/// Repro: password rotation invalidates dashboard cookies (`require_auth`),
+/// but `/login` used to treat a still-MAC-valid cookie as logged in and
+/// 303 to `/`. The next hop 303s back to `/login` — lockout until the
+/// operator clears the cookie by hand.
+#[tokio::test]
+async fn login_page_shows_form_when_session_password_no_longer_matches() {
+    use stomatopod_web::middleware::auth::{sign_session_bound, SESSION_COOKIE};
+
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let password = "correcthorsebatterystaple";
+    let hash = hash_password(password);
+    let user = User {
+        id: Ulid::new(),
+        org_id: org.id,
+        email: "stale-session@example.com".into(),
+        password_hash: hash.clone(),
+        role: UserRole::Owner,
+        created_at: Utc::now(),
+    };
+    ctx.backend.meta.create_user(&user).await.unwrap();
+    let token = sign_session_bound(&ctx.secret, &user.id.to_string(), 3600, &hash);
+
+    // A live bound cookie still skips the login form.
+    let req = Request::builder()
+        .uri("/login")
+        .header("cookie", format!("{SESSION_COOKIE}={token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        resp.headers().get("location").and_then(|v| v.to_str().ok()),
+        Some("/")
+    );
+
+    // Rotate the stored hash the same way POST /api/v1/me/password does.
+    let new_hash = hash_password("brandnewpassword99");
+    ctx.backend
+        .meta
+        .update_user_password(user.id, &new_hash)
+        .await
+        .unwrap();
+
+    let req = Request::builder()
+        .uri("/login")
+        .header("cookie", format!("{SESSION_COOKIE}={token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = make_app(ctx.state.clone()).oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "stale password-bound cookie must not redirect away from /login"
+    );
+    let html = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+    assert!(
+        html.contains("Sign in") && html.contains(r#"name="password""#),
+        "expected login form after password rotation, got: {html}"
+    );
+}
+
 #[tokio::test]
 async fn openapi_json_is_public_and_lists_core_paths() {
     let ctx = setup().await;
