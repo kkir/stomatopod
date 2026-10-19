@@ -1144,6 +1144,69 @@ async fn read_key_cross_org_is_forbidden() {
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
+/// Site-bound read keys must not run another site's funnel — even when the
+/// path `{site}` is one they are allowed to query. `GET .../funnels/:id`
+/// used to load the funnel by id alone and return its step names.
+#[tokio::test]
+async fn funnel_result_rejects_funnel_from_another_site() {
+    let ctx = setup().await;
+    let org = make_org();
+    ctx.backend.meta.create_org(&org).await.unwrap();
+    let site_a = make_site_with_domain(org.id, "a.example.com");
+    let site_b = make_site_with_domain(org.id, "b.example.com");
+    ctx.backend.meta.create_site(&site_a).await.unwrap();
+    ctx.backend.meta.create_site(&site_b).await.unwrap();
+
+    let session = sign_session(&ctx.secret, &Ulid::new().to_string(), 3600);
+    let create_body = serde_json::json!({
+        "name": "Secret B funnel",
+        "steps": [
+            {"name": "Checkout secret", "event_name": "pageview", "filters": []},
+            {"name": "Paid secret", "event_name": "purchase", "filters": []}
+        ]
+    });
+    let (status, created) = send_json(
+        ctx.state.clone(),
+        "POST",
+        &format!("/api/v1/sites/{}/funnels", site_b.id),
+        &session,
+        Some(create_body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let funnel_id = created["id"].as_str().expect("funnel id");
+
+    let (key, plaintext) = stomatopod_core::domain::api_key::ApiKey::new_read(
+        org.id,
+        Some(site_a.id),
+        "site-a-only".into(),
+    );
+    ctx.backend.meta.create_api_key(&key).await.unwrap();
+
+    // Path is the in-scope site; funnel id belongs to the sibling site.
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/funnels/{funnel_id}", site_a.id),
+        &plaintext,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "got {json}");
+    let body = json.to_string();
+    assert!(
+        !body.contains("Checkout secret") && !body.contains("Paid secret"),
+        "must not leak the other site's funnel step names: {json}"
+    );
+
+    // Direct access to the sibling site is forbidden for a site-bound key.
+    let (status, json) = get_json(
+        ctx.state.clone(),
+        &format!("/api/v1/sites/{}/funnels/{funnel_id}", site_b.id),
+        &plaintext,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "got {json}");
+}
+
 #[tokio::test]
 async fn read_key_rejects_unknown_key() {
     let ctx = setup().await;

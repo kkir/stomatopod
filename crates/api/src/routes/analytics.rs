@@ -934,9 +934,11 @@ pub async fn funnel_result(
                 .into_response()
         }
     };
+    // Same site binding as `delete_funnel`: a funnel id from another site
+    // must not run (or leak step names) under a path the caller can access.
     let funnel_def = match state.meta.get_funnel(funnel_ulid).await {
-        Ok(Some(f)) => f,
-        Ok(None) => {
+        Ok(Some(f)) if f.site_id == site_id => f,
+        Ok(None) | Ok(Some(_)) => {
             return (
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "funnel not found"})),
