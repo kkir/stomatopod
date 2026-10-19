@@ -42,7 +42,8 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: cargo clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        # rustc 1.99: async_trait boxes already-must_use Result futures.
+        run: cargo clippy --all-targets --all-features -- -D warnings -A clippy::double_must_use
 
   test:
     name: Test
