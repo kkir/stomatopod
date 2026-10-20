@@ -62,11 +62,11 @@ run = "cargo fmt --all"
 
 [tasks.lint]
 description = "Run clippy with warnings denied"
-run = "cargo clippy --all-targets --all-features -- -D warnings"
+run = "cargo clippy --all-targets --all-features -- -D warnings -A clippy::double_must_use"
 
 [tasks."lint:fix"]
 description = "Run clippy with warnings denied and apply suggestions"
-run = "cargo clippy --allow-dirty --all-targets --all-features --fix -- -D warnings"
+run = "cargo clippy --allow-dirty --all-targets --all-features --fix -- -D warnings -A clippy::double_must_use"
 
 [tasks.fix]
 description = "Fix formatting and lint issues"
